@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
-import '../../sales/data/app_database.dart';
+
+import '../../../core/storage/app_database.dart';
 import '../domain/payment.dart';
 
 class LocalPaymentRepository {
@@ -18,11 +19,10 @@ class LocalPaymentRepository {
     final database = await _database;
 
     final status = method == PaymentMethod.cash
-        ? PaymentStatus.confirmed
+        ? PaymentStatus.paid
         : PaymentStatus.pending;
 
-    final now =
-        DateTime.now().toUtc().toIso8601String();
+    final now = DateTime.now().toUtc().toIso8601String();
 
     return database.insert(
       'payments',
@@ -33,29 +33,22 @@ class LocalPaymentRepository {
         'method': method.name,
         'status': status.name,
         'created_at': now,
-        'confirmed_at':
-            status == PaymentStatus.confirmed
-                ? now
-                : null,
+        'confirmed_at': status == PaymentStatus.paid ? now : null,
         'reference': reference,
         'note': note,
       },
     );
   }
 
-  Future<void> confirmTransfer(
-    int paymentId,
-  ) async {
+  Future<void> confirmTransfer(int paymentId) async {
     final database = await _database;
 
-    final now =
-        DateTime.now().toUtc().toIso8601String();
+    final now = DateTime.now().toUtc().toIso8601String();
 
     await database.update(
       'payments',
       {
-        'status':
-            PaymentStatus.confirmed.name,
+        'status': PaymentStatus.paid.name,
         'confirmed_at': now,
       },
       where: 'id = ? AND method = ? AND status = ?',
@@ -80,9 +73,7 @@ class LocalPaymentRepository {
       orderBy: 'created_at ASC',
     );
 
-    return rows
-        .map(Payment.fromMap)
-        .toList(growable: false);
+    return rows.map(Payment.fromMap).toList(growable: false);
   }
 
   Future<List<Payment>> getConfirmedPaymentsForCustomer(
@@ -95,14 +86,12 @@ class LocalPaymentRepository {
       where: 'customer_id = ? AND status = ?',
       whereArgs: [
         customerId,
-        PaymentStatus.confirmed.name,
+        PaymentStatus.paid.name,
       ],
       orderBy: 'created_at DESC',
     );
 
-    return rows
-        .map(Payment.fromMap)
-        .toList(growable: false);
+    return rows.map(Payment.fromMap).toList(growable: false);
   }
 
   Future<double> getConfirmedPaymentsTotal(
@@ -119,12 +108,11 @@ class LocalPaymentRepository {
       ''',
       [
         customerId,
-        PaymentStatus.confirmed.name,
+        PaymentStatus.paid.name,
       ],
     );
 
-    return (result.first['total'] as num)
-        .toDouble();
+    return (result.first['total'] as num).toDouble();
   }
 
   Future<double> getPendingTransfersTotal(
@@ -147,8 +135,7 @@ class LocalPaymentRepository {
       ],
     );
 
-    return (result.first['total'] as num)
-        .toDouble();
+    return (result.first['total'] as num).toDouble();
   }
 
   Future<double> getConfirmedCashTotal(
@@ -167,12 +154,11 @@ class LocalPaymentRepository {
       [
         customerId,
         PaymentMethod.cash.name,
-        PaymentStatus.confirmed.name,
+        PaymentStatus.paid.name,
       ],
     );
 
-    return (result.first['total'] as num)
-        .toDouble();
+    return (result.first['total'] as num).toDouble();
   }
 
   Future<double> getConfirmedTransferTotal(
@@ -191,11 +177,11 @@ class LocalPaymentRepository {
       [
         customerId,
         PaymentMethod.transfer.name,
-        PaymentStatus.confirmed.name,
+        PaymentStatus.paid.name,
       ],
     );
 
-    return (result.first['total'] as num)
-        .toDouble();
+    return (result.first['total'] as num).toDouble();
   }
 }
+

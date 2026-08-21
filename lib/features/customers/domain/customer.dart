@@ -1,5 +1,3 @@
-import '../../sales/domain/customer_coupon.dart';
-
 enum CustomerPaymentType {
   cash,
   bankTransfer,
@@ -10,7 +8,6 @@ class Customer {
   final String name;
   final String phone;
   final String address;
-
   final CustomerPaymentType paymentType;
 
   const Customer({

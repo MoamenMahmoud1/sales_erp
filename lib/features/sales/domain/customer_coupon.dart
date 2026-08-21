@@ -1,4 +1,4 @@
-import 'coupon.dart';
+import '../../coupons/domain/coupon.dart';
 
 class CustomerCoupon {
   final int id;
@@ -15,27 +15,18 @@ class CustomerCoupon {
     required this.createdAt,
   });
 
-  /// Total monetary value of all coupon pieces.
   double get totalValue {
     return coupon.valueForQuantity(quantity);
   }
 
-  /// Displays the quantity as cartons + remaining coupons.
-  ///
-  /// Examples:
-  /// 10 pieces with 10 pieces/carton -> 1 Carton
-  /// 25 pieces with 10 pieces/carton -> 2 Cartons + 5 Coupons
-  /// 5 pieces with 10 pieces/carton -> 5 Coupons
   String get displayQuantity {
     return coupon.formatQuantity(quantity);
   }
 
-  /// Number of complete cartons.
   int get cartons {
     return coupon.cartonsForQuantity(quantity);
   }
 
-  /// Number of remaining coupons after complete cartons.
   int get remainder {
     return coupon.remainderForQuantity(quantity);
   }

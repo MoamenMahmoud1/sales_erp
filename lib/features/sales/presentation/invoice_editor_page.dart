@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../customers/domain/customer.dart';
+import '../../customers/domain/payment_method.dart';
 import '../../products/data/local_product_repository.dart';
 import '../../products/domain/product.dart';
 import '../data/local_sale_repository.dart';
@@ -18,19 +19,14 @@ class InvoiceEditorPage extends StatefulWidget {
   bool get isEditing => invoiceId != null;
 
   @override
-  State<InvoiceEditorPage> createState() =>
-      _InvoiceEditorPageState();
+  State<InvoiceEditorPage> createState() => _InvoiceEditorPageState();
 }
 
-class _InvoiceEditorPageState
-    extends State<InvoiceEditorPage> {
-  final _productRepository =
-      LocalProductRepository();
-
+class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
+  final _productRepository = LocalProductRepository();
   final _saleRepository = LocalSaleRepository();
 
   List<Product> _products = [];
-
   final Map<int, int> _quantities = {};
 
   bool _isLoading = true;
@@ -43,12 +39,10 @@ class _InvoiceEditorPageState
   }
 
   Future<void> _load() async {
-    final products =
-        await _productRepository.getProducts();
+    final products = await _productRepository.getProducts();
 
     if (widget.invoiceId != null) {
-      final invoice =
-          await _saleRepository.getInvoice(
+      final invoice = await _saleRepository.getInvoice(
         widget.invoiceId!,
       );
 
@@ -71,24 +65,29 @@ class _InvoiceEditorPageState
     Product product,
     int change,
   ) {
-    final currentQuantity =
-        _quantities[product.id] ?? 0;
-
-    final newQuantity =
-        currentQuantity + change;
+    final currentQuantity = _quantities[product.id] ?? 0;
+    final newQuantity = currentQuantity + change;
 
     setState(() {
       if (newQuantity <= 0) {
         _quantities.remove(product.id);
       } else {
-        _quantities[product.id] =
-            newQuantity;
+        _quantities[product.id] = newQuantity;
       }
     });
   }
 
+  PaymentMethod _getPaymentMethod() {
+    switch (widget.customer.paymentType) {
+      case CustomerPaymentType.cash:
+        return PaymentMethod.cash;
+      case CustomerPaymentType.bankTransfer:
+        return PaymentMethod.transfer;
+    }
+  }
+
   Future<void> _save() async {
-    if (_quantities.isEmpty) {
+    if (_quantities.isEmpty || _isSaving) {
       return;
     }
 
@@ -97,8 +96,7 @@ class _InvoiceEditorPageState
     });
 
     try {
-      final products =
-          Map<int, int>.from(_quantities);
+      final products = Map<int, int>.from(_quantities);
 
       if (widget.isEditing) {
         await _saleRepository.updateInvoice(
@@ -109,6 +107,7 @@ class _InvoiceEditorPageState
         await _saleRepository.createInvoice(
           customerId: widget.customer.id,
           products: products,
+          paymentMethod: _getPaymentMethod(),
         );
       }
 
@@ -147,14 +146,9 @@ class _InvoiceEditorPageState
       body: ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: _products.length,
-        itemBuilder: (
-          context,
-          index,
-        ) {
+        itemBuilder: (context, index) {
           final product = _products[index];
-
-          final quantity =
-              _quantities[product.id] ?? 0;
+          final quantity = _quantities[product.id] ?? 0;
 
           return Card(
             margin: const EdgeInsets.only(
@@ -185,8 +179,7 @@ class _InvoiceEditorPageState
                     width: 32,
                     child: Text(
                       '$quantity',
-                      textAlign:
-                          TextAlign.center,
+                      textAlign: TextAlign.center,
                     ),
                   ),
                   IconButton(
@@ -209,14 +202,12 @@ class _InvoiceEditorPageState
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.all(16),
         child: FilledButton(
-          onPressed:
-              _isSaving ? null : _save,
+          onPressed: _isSaving ? null : _save,
           child: _isSaving
               ? const SizedBox(
                   width: 20,
                   height: 20,
-                  child:
-                      CircularProgressIndicator(),
+                  child: CircularProgressIndicator(),
                 )
               : Text(
                   widget.isEditing

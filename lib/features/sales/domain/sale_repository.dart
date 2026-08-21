@@ -2,6 +2,7 @@ import 'invoice.dart';
 import 'invoice_change.dart';
 import 'payment_record.dart';
 import 'customer_financial_summary.dart';
+import 'daily_sales_summary.dart';
 import '../../customers/domain/payment_method.dart';
 
 abstract interface class SaleRepository {
@@ -46,4 +47,10 @@ abstract interface class SaleRepository {
       getCustomerFinancialSummary(
     int customerId,
   );
+
+  Future<DailySalesSummary>
+      getDailySalesSummary(
+    DateTime date,
+  );
 }
+
