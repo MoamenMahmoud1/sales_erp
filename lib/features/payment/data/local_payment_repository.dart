@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../../core/storage/app_database.dart';
 import '../domain/payment.dart';
+import '../../customers/domain/payment_method.dart';
 
 class LocalPaymentRepository {
   Future<Database> get _database async {
@@ -14,15 +15,21 @@ class LocalPaymentRepository {
     required double amount,
     required PaymentMethod method,
     String? reference,
-    String? note,
   }) async {
+    if (amount <= 0) {
+      throw ArgumentError(
+        'Payment amount must be greater than zero.',
+      );
+    }
+
     final database = await _database;
 
     final status = method == PaymentMethod.cash
         ? PaymentStatus.paid
         : PaymentStatus.pending;
 
-    final now = DateTime.now().toUtc().toIso8601String();
+    final now =
+        DateTime.now().toUtc().toIso8601String();
 
     return database.insert(
       'payments',
@@ -30,20 +37,25 @@ class LocalPaymentRepository {
         'customer_id': customerId,
         'invoice_id': invoiceId,
         'amount': amount,
-        'method': method.name,
+        'method': method.value,
         'status': status.name,
-        'created_at': now,
-        'confirmed_at': status == PaymentStatus.paid ? now : null,
         'reference': reference,
-        'note': note,
+        'created_at': now,
+        'confirmed_at':
+            status == PaymentStatus.paid
+                ? now
+                : null,
       },
     );
   }
 
-  Future<void> confirmTransfer(int paymentId) async {
+  Future<void> confirmTransfer(
+    int paymentId,
+  ) async {
     final database = await _database;
 
-    final now = DateTime.now().toUtc().toIso8601String();
+    final now =
+        DateTime.now().toUtc().toIso8601String();
 
     await database.update(
       'payments',
@@ -51,10 +63,14 @@ class LocalPaymentRepository {
         'status': PaymentStatus.paid.name,
         'confirmed_at': now,
       },
-      where: 'id = ? AND method = ? AND status = ?',
+      where: '''
+        id = ?
+        AND method = ?
+        AND status = ?
+      ''',
       whereArgs: [
         paymentId,
-        PaymentMethod.transfer.name,
+        PaymentMethod.transfer.value,
         PaymentStatus.pending.name,
       ],
     );
@@ -65,25 +81,50 @@ class LocalPaymentRepository {
 
     final rows = await database.query(
       'payments',
-      where: 'method = ? AND status = ?',
+      where: '''
+        method = ?
+        AND status = ?
+      ''',
       whereArgs: [
-        PaymentMethod.transfer.name,
+        PaymentMethod.transfer.value,
         PaymentStatus.pending.name,
       ],
       orderBy: 'created_at ASC',
     );
 
-    return rows.map(Payment.fromMap).toList(growable: false);
+    return rows
+        .map(Payment.fromMap)
+        .toList(growable: false);
   }
 
-  Future<List<Payment>> getConfirmedPaymentsForCustomer(
+  Future<List<Payment>> getPaymentsForCustomer(
     int customerId,
   ) async {
     final database = await _database;
 
     final rows = await database.query(
       'payments',
-      where: 'customer_id = ? AND status = ?',
+      where: 'customer_id = ?',
+      whereArgs: [customerId],
+      orderBy: 'created_at DESC',
+    );
+
+    return rows
+        .map(Payment.fromMap)
+        .toList(growable: false);
+  }
+
+  Future<List<Payment>> getPaidPaymentsForCustomer(
+    int customerId,
+  ) async {
+    final database = await _database;
+
+    final rows = await database.query(
+      'payments',
+      where: '''
+        customer_id = ?
+        AND status = ?
+      ''',
       whereArgs: [
         customerId,
         PaymentStatus.paid.name,
@@ -91,10 +132,12 @@ class LocalPaymentRepository {
       orderBy: 'created_at DESC',
     );
 
-    return rows.map(Payment.fromMap).toList(growable: false);
+    return rows
+        .map(Payment.fromMap)
+        .toList(growable: false);
   }
 
-  Future<double> getConfirmedPaymentsTotal(
+  Future<double> getPaidPaymentsTotal(
     int customerId,
   ) async {
     final database = await _database;
@@ -130,7 +173,7 @@ class LocalPaymentRepository {
       ''',
       [
         customerId,
-        PaymentMethod.transfer.name,
+        PaymentMethod.transfer.value,
         PaymentStatus.pending.name,
       ],
     );
@@ -138,7 +181,7 @@ class LocalPaymentRepository {
     return (result.first['total'] as num).toDouble();
   }
 
-  Future<double> getConfirmedCashTotal(
+  Future<double> getPaidCashTotal(
     int customerId,
   ) async {
     final database = await _database;
@@ -153,7 +196,7 @@ class LocalPaymentRepository {
       ''',
       [
         customerId,
-        PaymentMethod.cash.name,
+        PaymentMethod.cash.value,
         PaymentStatus.paid.name,
       ],
     );
@@ -161,7 +204,7 @@ class LocalPaymentRepository {
     return (result.first['total'] as num).toDouble();
   }
 
-  Future<double> getConfirmedTransferTotal(
+  Future<double> getPaidTransferTotal(
     int customerId,
   ) async {
     final database = await _database;
@@ -176,7 +219,7 @@ class LocalPaymentRepository {
       ''',
       [
         customerId,
-        PaymentMethod.transfer.name,
+        PaymentMethod.transfer.value,
         PaymentStatus.paid.name,
       ],
     );
@@ -184,4 +227,3 @@ class LocalPaymentRepository {
     return (result.first['total'] as num).toDouble();
   }
 }
-

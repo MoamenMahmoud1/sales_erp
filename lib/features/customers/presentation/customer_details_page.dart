@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
+
+import '../domain/customer.dart';
+import '../domain/payment_method.dart';
+
 import '../../payment/data/local_payment_repository.dart';
 import '../../payment/domain/payment.dart';
+
 import '../../sales/data/local_sale_repository.dart';
 import '../../sales/presentation/invoice_details_page.dart';
 import '../../sales/presentation/invoice_editor_page.dart';
-import '../domain/customer.dart';
 
 class CustomerDetailsPage extends StatefulWidget {
   final Customer customer;
@@ -22,13 +26,19 @@ class CustomerDetailsPage extends StatefulWidget {
 
 class _CustomerDetailsPageState
     extends State<CustomerDetailsPage> {
-  final _saleRepository = LocalSaleRepository();
-  final _paymentRepository = LocalPaymentRepository();
+  final _saleRepository =
+      LocalSaleRepository();
+
+  final _paymentRepository =
+      LocalPaymentRepository();
 
   List<Map<String, Object?>> _invoices = [];
+
   List<Payment> _payments = [];
 
+  bool _isLoading = true;
   bool _isLoadingPayments = true;
+  
 
   double _subtotal = 0;
   double _couponDiscount = 0;
@@ -43,7 +53,6 @@ class _CustomerDetailsPageState
   @override
   void initState() {
     super.initState();
-
     _loadData();
   }
 
@@ -52,11 +61,20 @@ class _CustomerDetailsPageState
       _loadInvoices(),
       _loadPayments(),
     ]);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
   }
 
   Future<void> _loadInvoices() async {
     final invoices =
-        await _saleRepository.getCustomerInvoices(
+        await _saleRepository
+            .getCustomerInvoices(
       widget.customer.id,
     );
 
@@ -96,12 +114,15 @@ class _CustomerDetailsPageState
   }
 
   Future<void> _loadPayments() async {
-    setState(() {
-      _isLoadingPayments = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoadingPayments = true;
+      });
+    }
 
     final payments =
-        await _paymentRepository.getPaymentsForCustomer(
+        await _paymentRepository
+            .getPaymentsForCustomer(
       widget.customer.id,
     );
 
@@ -111,17 +132,21 @@ class _CustomerDetailsPageState
     double pendingTransfers = 0;
 
     for (final payment in payments) {
-      if (payment.status == PaymentStatus.paid) {
+      if (payment.status ==
+          PaymentStatus.paid) {
         paid += payment.amount;
 
-        if (payment.method == PaymentMethod.cash) {
+        if (payment.method ==
+            PaymentMethod.cash) {
           cashPaid += payment.amount;
         } else {
           transferPaid += payment.amount;
         }
       } else if (
-          payment.method == PaymentMethod.transfer &&
-          payment.status == PaymentStatus.pending) {
+          payment.method ==
+                  PaymentMethod.transfer &&
+              payment.status ==
+                  PaymentStatus.pending) {
         pendingTransfers += payment.amount;
       }
     }
@@ -132,10 +157,13 @@ class _CustomerDetailsPageState
 
     setState(() {
       _payments = payments;
+
       _paid = paid;
       _cashPaid = cashPaid;
       _transferPaid = transferPaid;
-      _pendingTransfers = pendingTransfers;
+      _pendingTransfers =
+          pendingTransfers;
+
       _isLoadingPayments = false;
 
       _recalculateBalance();
@@ -144,16 +172,21 @@ class _CustomerDetailsPageState
 
   void _recalculateBalance() {
     final balance =
-        _total - _paid - _pendingTransfers;
+        _total -
+        _paid -
+        _pendingTransfers;
 
-    _balance = balance > 0 ? balance : 0;
+    _balance =
+        balance > 0 ? balance : 0;
   }
 
   Future<void> _createInvoice() async {
-    final saved = await Navigator.push<bool>(
+    final saved =
+        await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => InvoiceEditorPage(
+        builder: (_) =>
+            InvoiceEditorPage(
           customer: widget.customer,
         ),
       ),
@@ -167,10 +200,12 @@ class _CustomerDetailsPageState
   Future<void> _editInvoice(
     int invoiceId,
   ) async {
-    final saved = await Navigator.push<bool>(
+    final saved =
+        await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => InvoiceEditorPage(
+        builder: (_) =>
+            InvoiceEditorPage(
           customer: widget.customer,
           invoiceId: invoiceId,
         ),
@@ -185,9 +220,8 @@ class _CustomerDetailsPageState
   Future<void> _deleteInvoice(
     int invoiceId,
   ) async {
-    await _saleRepository.deleteInvoice(
-      invoiceId,
-    );
+    await _saleRepository
+        .deleteInvoice(invoiceId);
 
     await _loadData();
   }
@@ -195,9 +229,8 @@ class _CustomerDetailsPageState
   Future<void> _confirmTransfer(
     Payment payment,
   ) async {
-    await _paymentRepository.confirmTransfer(
-      payment.id,
-    );
+    await _paymentRepository
+        .confirmTransfer(payment.id);
 
     await _loadPayments();
   }
@@ -273,6 +306,7 @@ class _CustomerDetailsPageState
                   .textTheme
                   .titleLarge,
             ),
+
             const SizedBox(height: 12),
 
             _financialRow(
@@ -333,7 +367,8 @@ class _CustomerDetailsPageState
         child: Padding(
           padding: EdgeInsets.all(20),
           child: Center(
-            child: CircularProgressIndicator(),
+            child:
+                CircularProgressIndicator(),
           ),
         ),
       );
@@ -352,6 +387,7 @@ class _CustomerDetailsPageState
                   .textTheme
                   .titleLarge,
             ),
+
             const SizedBox(height: 12),
 
             if (_payments.isEmpty)
@@ -372,10 +408,12 @@ class _CustomerDetailsPageState
     Payment payment,
   ) {
     final isPending =
-        payment.status == PaymentStatus.pending;
+        payment.status ==
+            PaymentStatus.pending;
 
     final method =
-        payment.method == PaymentMethod.cash
+        payment.method ==
+                PaymentMethod.cash
             ? 'Cash'
             : 'Transfer';
 
@@ -400,7 +438,9 @@ class _CustomerDetailsPageState
                       ? Icons.payments
                       : Icons.account_balance,
                 ),
+
                 const SizedBox(width: 10),
+
                 Expanded(
                   child: Text(
                     method,
@@ -410,8 +450,11 @@ class _CustomerDetailsPageState
                     ),
                   ),
                 ),
+
                 Text(
-                  _formatMoney(payment.amount),
+                  _formatMoney(
+                    payment.amount,
+                  ),
                   style: const TextStyle(
                     fontWeight:
                         FontWeight.bold,
@@ -444,11 +487,15 @@ class _CustomerDetailsPageState
 
             if (isPending) ...[
               const SizedBox(height: 8),
+
               SizedBox(
                 width: double.infinity,
-                child: OutlinedButton.icon(
+                child:
+                    OutlinedButton.icon(
                   onPressed: () =>
-                      _confirmTransfer(payment),
+                      _confirmTransfer(
+                    payment,
+                  ),
                   icon: const Icon(
                     Icons.check,
                   ),
@@ -475,6 +522,7 @@ class _CustomerDetailsPageState
               .textTheme
               .titleLarge,
         ),
+
         const SizedBox(height: 12),
 
         if (_invoices.isEmpty)
@@ -493,15 +541,18 @@ class _CustomerDetailsPageState
                   invoice['id'] as int;
 
               final createdAt =
-                  invoice['created_at'] as String;
+                  invoice['created_at']
+                      as String;
 
               final updatedAt =
-                  invoice['updated_at'] as String;
+                  invoice['updated_at']
+                      as String;
 
               final subtotal =
-                  (invoice['subtotal'] as num?)
-                          ?.toDouble() ??
-                      0;
+                  (invoice['subtotal']
+                          as num?)
+                      ?.toDouble() ??
+                  0;
 
               final couponDiscount =
                   (invoice[
@@ -511,10 +562,11 @@ class _CustomerDetailsPageState
                   0;
 
               final total =
-                  (invoice['total'] as num?)
-                          ?.toDouble() ??
-                      subtotal -
-                          couponDiscount;
+                  (invoice['total']
+                          as num?)
+                      ?.toDouble() ??
+                  subtotal -
+                      couponDiscount;
 
               return Card(
                 margin:
@@ -525,11 +577,15 @@ class _CustomerDetailsPageState
                   title: Text(
                     'Invoice #$invoiceId',
                   ),
+
                   subtitle: Column(
                     crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                        CrossAxisAlignment
+                            .start,
                     children: [
-                      const SizedBox(height: 4),
+                      const SizedBox(
+                        height: 4,
+                      ),
 
                       Text(
                         'Created: '
@@ -549,7 +605,9 @@ class _CustomerDetailsPageState
                         )}',
                       ),
 
-                      const SizedBox(height: 6),
+                      const SizedBox(
+                        height: 6,
+                      ),
 
                       Text(
                         'Subtotal: '
@@ -575,6 +633,7 @@ class _CustomerDetailsPageState
                       ),
                     ],
                   ),
+
                   onTap: () async {
                     await Navigator.push(
                       context,
@@ -595,6 +654,7 @@ class _CustomerDetailsPageState
 
                     await _loadData();
                   },
+
                   trailing:
                       PopupMenuButton<String>(
                     onSelected: (value) {
@@ -631,16 +691,27 @@ class _CustomerDetailsPageState
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(
+          child:
+              CircularProgressIndicator(),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
           widget.customer.name,
         ),
       ),
+
       body: RefreshIndicator(
         onRefresh: _loadData,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding:
+              const EdgeInsets.all(16),
           children: [
             Text(
               widget.customer.name,
@@ -673,11 +744,15 @@ class _CustomerDetailsPageState
       ),
 
       bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.all(16),
+        minimum:
+            const EdgeInsets.all(16),
         child: FilledButton.icon(
-          onPressed: _createInvoice,
+          onPressed:
+              _createInvoice,
           icon: const Icon(Icons.add),
-          label: const Text('New Invoice'),
+          label: const Text(
+            'New Invoice',
+          ),
         ),
       ),
     );

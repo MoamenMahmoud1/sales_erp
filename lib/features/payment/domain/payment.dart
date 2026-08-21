@@ -1,7 +1,4 @@
-enum PaymentMethod {
-  cash,
-  transfer,
-}
+import '../../customers/domain/payment_method.dart';
 
 enum PaymentStatus {
   paid,
@@ -33,11 +30,14 @@ class Payment {
 
   bool get isCash => method == PaymentMethod.cash;
 
-  bool get isTransfer => method == PaymentMethod.transfer;
+  bool get isTransfer =>
+      method == PaymentMethod.transfer;
 
-  bool get isPaid => status == PaymentStatus.paid;
+  bool get isPaid =>
+      status == PaymentStatus.paid;
 
-  bool get isPending => status == PaymentStatus.pending;
+  bool get isPending =>
+      status == PaymentStatus.pending;
 
   factory Payment.fromMap(
     Map<String, Object?> map,
@@ -47,9 +47,9 @@ class Payment {
       customerId: map['customer_id'] as int,
       invoiceId: map['invoice_id'] as int,
       amount: (map['amount'] as num).toDouble(),
-      method: map['method'] == 'transfer'
-          ? PaymentMethod.transfer
-          : PaymentMethod.cash,
+      method: PaymentMethodExtension.fromValue(
+        map['method'] as String? ?? 'cash',
+      ),
       status: map['status'] == 'pending'
           ? PaymentStatus.pending
           : PaymentStatus.paid,
@@ -71,12 +71,8 @@ class Payment {
       'customer_id': customerId,
       'invoice_id': invoiceId,
       'amount': amount,
-      'method': method == PaymentMethod.cash
-          ? 'cash'
-          : 'transfer',
-      'status': status == PaymentStatus.pending
-          ? 'pending'
-          : 'paid',
+      'method': method.value,
+      'status': status.name,
       'reference': reference,
       'created_at':
           createdAt.toUtc().toIso8601String(),
@@ -85,4 +81,3 @@ class Payment {
     };
   }
 }
-
