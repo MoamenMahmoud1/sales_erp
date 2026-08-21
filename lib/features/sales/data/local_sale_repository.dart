@@ -1,705 +1,221 @@
+import 'package:sqflite/sqflite.dart';
+
 import '../../../core/storage/app_database.dart';
-import '../../customers/domain/payment_method.dart';
-import '../domain/customer_financial_summary.dart';
-import '../domain/daily_sales_summary.dart';
-import '../domain/invoice.dart';
-import '../domain/invoice_change.dart';
-import '../domain/payment_record.dart';
-import '../domain/sale_repository.dart';
+import '../domain/payment.dart';
 
-class LocalSaleRepository implements SaleRepository {
-  @override
-  Future<int> createInvoice({
+class LocalPaymentRepository {
+  Future<Database> get _database async {
+    return AppDatabase.database;
+  }
+
+  Future<int> createPayment({
     required int customerId,
-    required Map<int, int> products,
-    required PaymentMethod paymentMethod,
-    double couponDiscount = 0,
-  }) async {
-    if (products.isEmpty) {
-      throw ArgumentError(
-        'Invoice must contain at least one product.',
-      );
-    }
-
-    if (couponDiscount < 0) {
-      throw ArgumentError(
-        'Coupon discount cannot be negative.',
-      );
-    }
-
-    final database = await AppDatabase.database;
-
-    return database.transaction<int>((txn) async {
-      final now = DateTime.now().toUtc().toIso8601String();
-
-      final invoiceId = await txn.insert(
-        'invoices',
-        {
-          'customer_id': customerId,
-          'created_at': now,
-          'updated_at': now,
-          'subtotal': 0,
-          'coupon_discount': 0,
-          'total': 0,
-        },
-      );
-
-      double subtotal = 0;
-
-      for (final entry in products.entries) {
-        final quantity = entry.value;
-
-        if (quantity <= 0) {
-          continue;
-        }
-
-        final productRows = await txn.query(
-          'products',
-          columns: ['id', 'price'],
-          where: 'id = ?',
-          whereArgs: [entry.key],
-          limit: 1,
-        );
-
-        if (productRows.isEmpty) {
-          throw StateError(
-            'Product ${entry.key} was not found.',
-          );
-        }
-
-        final unitPrice =
-            (productRows.first['price'] as num).toDouble();
-
-        subtotal += unitPrice * quantity;
-
-        await txn.insert(
-          'invoice_items',
-          {
-            'invoice_id': invoiceId,
-            'product_id': entry.key,
-            'quantity': quantity,
-            'unit_price': unitPrice,
-          },
-        );
-      }
-
-      if (subtotal <= 0) {
-        throw ArgumentError(
-          'Invoice must contain at least one product with a positive quantity.',
-        );
-      }
-
-      final appliedDiscount =
-          couponDiscount > subtotal
-              ? subtotal
-              : couponDiscount;
-
-      final total = subtotal - appliedDiscount;
-
-      await txn.update(
-        'invoices',
-        {
-          'subtotal': subtotal,
-          'coupon_discount': appliedDiscount,
-          'total': total,
-        },
-        where: 'id = ?',
-        whereArgs: [invoiceId],
-      );
-
-      await txn.insert(
-        'payments',
-        {
-          'customer_id': customerId,
-          'invoice_id': invoiceId,
-          'amount': total,
-          'method': paymentMethod.value,
-          'status':
-              paymentMethod == PaymentMethod.cash
-                  ? 'paid'
-                  : 'pending',
-          'reference': null,
-          'created_at': now,
-          'confirmed_at':
-              paymentMethod == PaymentMethod.cash
-                  ? now
-                  : null,
-        },
-      );
-
-      return invoiceId;
-    });
-  }
-
-  @override
-  Future<List<Map<String, Object?>>>
-      getCustomerInvoices(
-    int customerId,
-  ) async {
-    final database = await AppDatabase.database;
-
-    return database.query(
-      'invoices',
-      where: 'customer_id = ?',
-      whereArgs: [customerId],
-      orderBy: 'created_at DESC',
-    );
-  }
-
-  @override
-  Future<Invoice?> getInvoice(
-    int invoiceId,
-  ) async {
-    final database = await AppDatabase.database;
-
-    final invoiceRows = await database.query(
-      'invoices',
-      where: 'id = ?',
-      whereArgs: [invoiceId],
-      limit: 1,
-    );
-
-    if (invoiceRows.isEmpty) {
-      return null;
-    }
-
-    final itemRows = await database.query(
-      'invoice_items',
-      where: 'invoice_id = ?',
-      whereArgs: [invoiceId],
-      orderBy: 'id ASC',
-    );
-
-    final products = <int, int>{};
-
-    for (final item in itemRows) {
-      products[item['product_id'] as int] =
-          item['quantity'] as int;
-    }
-
-    return Invoice.fromMap(
-      invoiceRows.first,
-      products: products,
-    );
-  }
-
-  @override
-  Future<void> updateInvoice({
     required int invoiceId,
-    required Map<int, int> products,
+    required double amount,
+    required PaymentMethod method,
+    String? reference,
   }) async {
-    final database = await AppDatabase.database;
-
-    await database.transaction((txn) async {
-      final invoiceRows = await txn.query(
-        'invoices',
-        where: 'id = ?',
-        whereArgs: [invoiceId],
-        limit: 1,
+    if (amount <= 0) {
+      throw ArgumentError(
+        'Payment amount must be greater than zero.',
       );
+    }
 
-      if (invoiceRows.isEmpty) {
-        throw StateError(
-          'Invoice $invoiceId was not found.',
-        );
-      }
+    final database = await _database;
 
-      final oldItems = await txn.query(
-        'invoice_items',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
+    final status = method == PaymentMethod.cash
+        ? PaymentStatus.paid
+        : PaymentStatus.pending;
 
-      final oldProducts = <int, int>{};
+    final now = DateTime.now().toUtc().toIso8601String();
 
-      for (final item in oldItems) {
-        oldProducts[item['product_id'] as int] =
-            item['quantity'] as int;
-      }
-
-      final now = DateTime.now().toUtc();
-
-      final changedAt = now.toIso8601String();
-      final expiresAt = now
-          .add(const Duration(hours: 24))
-          .toIso8601String();
-
-      final allProductIds = <int>{
-        ...oldProducts.keys,
-        ...products.keys,
-      };
-
-      for (final productId in allProductIds) {
-        final oldQuantity =
-            oldProducts[productId] ?? 0;
-
-        final newQuantity =
-            products[productId] ?? 0;
-
-        if (oldQuantity == newQuantity) {
-          continue;
-        }
-
-        await txn.insert(
-          'invoice_changes',
-          {
-            'invoice_id': invoiceId,
-            'product_id': productId,
-            'old_quantity': oldQuantity,
-            'new_quantity': newQuantity,
-            'changed_at': changedAt,
-            'expires_at': expiresAt,
-          },
-        );
-      }
-
-      await txn.delete(
-        'invoice_items',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
-
-      double subtotal = 0;
-
-      for (final entry in products.entries) {
-        final quantity = entry.value;
-
-        if (quantity <= 0) {
-          continue;
-        }
-
-        final productRows = await txn.query(
-          'products',
-          columns: ['id', 'price'],
-          where: 'id = ?',
-          whereArgs: [entry.key],
-          limit: 1,
-        );
-
-        if (productRows.isEmpty) {
-          throw StateError(
-            'Product ${entry.key} was not found.',
-          );
-        }
-
-        final unitPrice =
-            (productRows.first['price'] as num).toDouble();
-
-        subtotal += unitPrice * quantity;
-
-        await txn.insert(
-          'invoice_items',
-          {
-            'invoice_id': invoiceId,
-            'product_id': entry.key,
-            'quantity': quantity,
-            'unit_price': unitPrice,
-          },
-        );
-      }
-
-      final currentCouponDiscount =
-          (invoiceRows.first['coupon_discount'] as num?)
-                  ?.toDouble() ??
-              0;
-
-      final total = subtotal - currentCouponDiscount;
-
-      await txn.update(
-        'invoices',
-        {
-          'updated_at': changedAt,
-          'subtotal': subtotal,
-          'total': total < 0 ? 0 : total,
-        },
-        where: 'id = ?',
-        whereArgs: [invoiceId],
-      );
-    });
+    return database.insert(
+      'payments',
+      {
+        'customer_id': customerId,
+        'invoice_id': invoiceId,
+        'amount': amount,
+        'method': method.name,
+        'status': status.name,
+        'created_at': now,
+        'confirmed_at':
+            status == PaymentStatus.paid ? now : null,
+        'reference': reference,
+      },
+    );
   }
 
-  @override
-  Future<List<InvoiceChange>>
-      getRecentInvoiceChanges(
-    int invoiceId,
+  Future<void> confirmTransfer(
+    int paymentId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    final now =
-        DateTime.now().toUtc().toIso8601String();
+    final now = DateTime.now().toUtc().toIso8601String();
 
-    await database.delete(
-      'invoice_changes',
+    await database.update(
+      'payments',
+      {
+        'status': PaymentStatus.paid.name,
+        'confirmed_at': now,
+      },
       where: '''
-        invoice_id = ?
-        AND expires_at <= ?
+        id = ?
+        AND method = ?
+        AND status = ?
       ''',
       whereArgs: [
-        invoiceId,
-        now,
+        paymentId,
+        PaymentMethod.transfer.name,
+        PaymentStatus.pending.name,
       ],
     );
-
-    final rows = await database.query(
-      'invoice_changes',
-      where: '''
-        invoice_id = ?
-        AND expires_at > ?
-      ''',
-      whereArgs: [
-        invoiceId,
-        now,
-      ],
-      orderBy: 'changed_at DESC',
-    );
-
-    return rows.map((row) {
-      return InvoiceChange(
-        productId: row['product_id'] as int,
-        oldQuantity: row['old_quantity'] as int,
-        newQuantity: row['new_quantity'] as int,
-      );
-    }).toList();
   }
 
-  @override
-  Future<void> deleteInvoice(
-    int invoiceId,
-  ) async {
-    final database = await AppDatabase.database;
-
-    await database.transaction((txn) async {
-      await txn.delete(
-        'payments',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
-
-      await txn.delete(
-        'invoice_changes',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
-
-      await txn.delete(
-        'invoice_coupons',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
-
-      await txn.delete(
-        'invoice_items',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
-
-      await txn.delete(
-        'invoices',
-        where: 'id = ?',
-        whereArgs: [invoiceId],
-      );
-    });
-  }
-
-  @override
-  Future<List<PaymentRecord>>
-      getPendingTransfers() async {
-    final database = await AppDatabase.database;
+  Future<List<Payment>> getPendingTransfers() async {
+    final database = await _database;
 
     final rows = await database.query(
       'payments',
       where: 'method = ? AND status = ?',
       whereArgs: [
-        PaymentMethod.transfer.value,
-        'pending',
+        PaymentMethod.transfer.name,
+        PaymentStatus.pending.name,
       ],
       orderBy: 'created_at ASC',
     );
 
-    return rows.map((row) {
-      return PaymentRecord(
-        id: row['id'] as int,
-        invoiceId: row['invoice_id'] as int,
-        customerId: row['customer_id'] as int,
-        amount: (row['amount'] as num).toDouble(),
-        paymentMethod:
-            PaymentMethodExtension.fromValue(
-          row['method'] as String? ?? 'transfer',
-        ),
-        createdAt: DateTime.parse(
-          row['created_at'] as String,
-        ),
-      );
-    }).toList(growable: false);
+    return rows
+        .map(Payment.fromMap)
+        .toList(growable: false);
   }
 
-  @override
-  Future<void> confirmTransfer(
-    int invoiceId,
+  Future<List<Payment>> getPaymentsForCustomer(
+    int customerId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    final now =
-        DateTime.now().toUtc().toIso8601String();
-
-    await database.update(
+    final rows = await database.query(
       'payments',
-      {
-        'status': 'paid',
-        'confirmed_at': now,
-      },
+      where: 'customer_id = ?',
+      whereArgs: [customerId],
+      orderBy: 'created_at DESC',
+    );
+
+    return rows
+        .map(Payment.fromMap)
+        .toList(growable: false);
+  }
+
+  Future<List<Payment>> getPaidPaymentsForCustomer(
+    int customerId,
+  ) async {
+    final database = await _database;
+
+    final rows = await database.query(
+      'payments',
       where: '''
-        invoice_id = ?
-        AND method = ?
+        customer_id = ?
         AND status = ?
       ''',
       whereArgs: [
-        invoiceId,
-        PaymentMethod.transfer.value,
-        'pending',
+        customerId,
+        PaymentStatus.paid.name,
       ],
+      orderBy: 'created_at DESC',
     );
+
+    return rows
+        .map(Payment.fromMap)
+        .toList(growable: false);
   }
 
-  @override
-  Future<CustomerFinancialSummary>
-      getCustomerFinancialSummary(
+  Future<double> getPaidPaymentsTotal(
     int customerId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    final invoiceResult = await database.rawQuery(
+    final result = await database.rawQuery(
       '''
-      SELECT
-        COALESCE(SUM(subtotal), 0) AS subtotal,
-        COALESCE(SUM(coupon_discount), 0)
-          AS coupon_discount,
-        COALESCE(SUM(total), 0) AS total
-      FROM invoices
-      WHERE customer_id = ?
-      ''',
-      [customerId],
-    );
-
-    final paymentResult = await database.rawQuery(
-      '''
-      SELECT
-        COALESCE(
-          SUM(
-            CASE
-              WHEN status = 'paid'
-              THEN amount
-              ELSE 0
-            END
-          ),
-          0
-        ) AS paid,
-        COALESCE(
-          SUM(
-            CASE
-              WHEN method = 'transfer'
-                AND status = 'pending'
-              THEN amount
-              ELSE 0
-            END
-          ),
-          0
-        ) AS pending_transfers
+      SELECT COALESCE(SUM(amount), 0) AS total
       FROM payments
       WHERE customer_id = ?
+        AND status = ?
       ''',
-      [customerId],
+      [
+        customerId,
+        PaymentStatus.paid.name,
+      ],
     );
 
-    final subtotal =
-        (invoiceResult.first['subtotal'] as num)
-            .toDouble();
-
-    final couponDiscount =
-        (invoiceResult.first['coupon_discount'] as num)
-            .toDouble();
-
-    final total =
-        (invoiceResult.first['total'] as num)
-            .toDouble();
-
-    final paid =
-        (paymentResult.first['paid'] as num)
-            .toDouble();
-
-    final pendingTransfers =
-        (paymentResult.first['pending_transfers'] as num)
-            .toDouble();
-
-    final balance =
-        total - paid - pendingTransfers;
-
-    return CustomerFinancialSummary(
-      subtotal: subtotal,
-      couponDiscount: couponDiscount,
-      total: total,
-      paid: paid,
-      pendingTransfers: pendingTransfers,
-      balance: balance < 0 ? 0 : balance,
-    );
+    return (result.first['total'] as num).toDouble();
   }
 
-  @override
-  Future<DailySalesSummary>
-      getDailySalesSummary(
-    DateTime date,
+  Future<double> getPendingTransfersTotal(
+    int customerId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    final localStart = DateTime(
-      date.year,
-      date.month,
-      date.day,
-    );
-
-    final localEnd =
-        localStart.add(const Duration(days: 1));
-
-    final startUtc =
-        localStart.toUtc().toIso8601String();
-
-    final endUtc =
-        localEnd.toUtc().toIso8601String();
-
-    final invoiceSummary =
-        await database.rawQuery(
+    final result = await database.rawQuery(
       '''
-      SELECT
-        COUNT(*) AS invoice_count,
-        COUNT(DISTINCT customer_id)
-          AS customer_count,
-        COALESCE(SUM(subtotal), 0)
-          AS subtotal,
-        COALESCE(SUM(coupon_discount), 0)
-          AS coupon_discount,
-        COALESCE(SUM(total), 0)
-          AS total
-      FROM invoices
-      WHERE created_at >= ?
-        AND created_at < ?
-      ''',
-      [
-        startUtc,
-        endUtc,
-      ],
-    );
-
-    final paymentSummary =
-        await database.rawQuery(
-      '''
-      SELECT
-        COALESCE(
-          SUM(
-            CASE
-              WHEN method = 'cash'
-                AND status = 'paid'
-              THEN amount
-              ELSE 0
-            END
-          ),
-          0
-        ) AS cash_collected,
-
-        COALESCE(
-          SUM(
-            CASE
-              WHEN method = 'transfer'
-                AND status = 'paid'
-              THEN amount
-              ELSE 0
-            END
-          ),
-          0
-        ) AS transfer_collected,
-
-        COALESCE(
-          SUM(
-            CASE
-              WHEN method = 'transfer'
-                AND status = 'pending'
-              THEN amount
-              ELSE 0
-            END
-          ),
-          0
-        ) AS pending_transfers
-
+      SELECT COALESCE(SUM(amount), 0) AS total
       FROM payments
-      INNER JOIN invoices
-        ON invoices.id = payments.invoice_id
-
-      WHERE invoices.created_at >= ?
-        AND invoices.created_at < ?
+      WHERE customer_id = ?
+        AND method = ?
+        AND status = ?
       ''',
       [
-        startUtc,
-        endUtc,
+        customerId,
+        PaymentMethod.transfer.name,
+        PaymentStatus.pending.name,
       ],
     );
 
-    final invoiceRow =
-        invoiceSummary.first;
+    return (result.first['total'] as num).toDouble();
+  }
 
-    final paymentRow =
-        paymentSummary.first;
+  Future<double> getPaidCashTotal(
+    int customerId,
+  ) async {
+    final database = await _database;
 
-    final invoiceCount =
-        (invoiceRow['invoice_count'] as num)
-            .toInt();
-
-    final customerCount =
-        (invoiceRow['customer_count'] as num)
-            .toInt();
-
-    final subtotal =
-        (invoiceRow['subtotal'] as num)
-            .toDouble();
-
-    final couponDiscount =
-        (invoiceRow['coupon_discount'] as num)
-            .toDouble();
-
-    final total =
-        (invoiceRow['total'] as num)
-            .toDouble();
-
-    final cashCollected =
-        (paymentRow['cash_collected'] as num)
-            .toDouble();
-
-    final transferCollected =
-        (paymentRow['transfer_collected'] as num)
-            .toDouble();
-
-    final pendingTransfers =
-        (paymentRow['pending_transfers'] as num)
-            .toDouble();
-
-    final collected =
-        cashCollected + transferCollected;
-
-    final outstanding =
-        total - collected;
-
-    return DailySalesSummary(
-      date: localStart,
-      invoiceCount: invoiceCount,
-      customerCount: customerCount,
-      subtotal: subtotal,
-      couponDiscount: couponDiscount,
-      total: total,
-      cashCollected: cashCollected,
-      transferCollected: transferCollected,
-      pendingTransfers: pendingTransfers,
-      collected: collected,
-      outstanding:
-          outstanding > 0 ? outstanding : 0,
+    final result = await database.rawQuery(
+      '''
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM payments
+      WHERE customer_id = ?
+        AND method = ?
+        AND status = ?
+      ''',
+      [
+        customerId,
+        PaymentMethod.cash.name,
+        PaymentStatus.paid.name,
+      ],
     );
+
+    return (result.first['total'] as num).toDouble();
+  }
+
+  Future<double> getPaidTransferTotal(
+    int customerId,
+  ) async {
+    final database = await _database;
+
+    final result = await database.rawQuery(
+      '''
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM payments
+      WHERE customer_id = ?
+        AND method = ?
+        AND status = ?
+      ''',
+      [
+        customerId,
+        PaymentMethod.transfer.name,
+        PaymentStatus.paid.name,
+      ],
+    );
+
+    return (result.first['total'] as num).toDouble();
   }
 }
-
