@@ -1,57 +1,43 @@
-class Invoice {
+class InvoiceCoupon {
   final int id;
-  final int customerId;
+  final int invoiceId;
+  final int couponId;
+  final int quantity;
+  final double unitPrice;
+  final double totalValue;
 
-  final DateTime createdAt;
-  final DateTime updatedAt;
-
-  final Map<int, int> products;
-
-  final double subtotal;
-  final double couponDiscount;
-  final double total;
-
-  const Invoice({
+  const InvoiceCoupon({
     required this.id,
-    required this.customerId,
-    required this.createdAt,
-    required this.updatedAt,
-    required this.products,
-    required this.subtotal,
-    required this.couponDiscount,
-    required this.total,
+    required this.invoiceId,
+    required this.couponId,
+    required this.quantity,
+    required this.unitPrice,
+    required this.totalValue,
   });
 
-  double get calculatedTotal {
-    final result = subtotal - couponDiscount;
-
-    return result < 0 ? 0 : result;
-  }
-
-  bool get hasCouponDiscount {
-    return couponDiscount > 0;
-  }
-
-  factory Invoice.fromMap(
-    Map<String, Object?> map, {
-    Map<int, int> products = const {},
-  }) {
-    return Invoice(
+  factory InvoiceCoupon.fromMap(
+    Map<String, Object?> map,
+  ) {
+    return InvoiceCoupon(
       id: map['id'] as int,
-      customerId: map['customer_id'] as int,
-      createdAt: DateTime.parse(
-        map['created_at'] as String,
-      ),
-      updatedAt: DateTime.parse(
-        map['updated_at'] as String,
-      ),
-      products: products,
-      subtotal:
-          (map['subtotal'] as num?)?.toDouble() ?? 0,
-      couponDiscount:
-          (map['coupon_discount'] as num?)?.toDouble() ?? 0,
-      total:
-          (map['total'] as num?)?.toDouble() ?? 0,
+      invoiceId: map['invoice_id'] as int,
+      couponId: map['coupon_id'] as int,
+      quantity: map['quantity'] as int,
+      unitPrice:
+          (map['unit_price'] as num).toDouble(),
+      totalValue:
+          (map['total_value'] as num).toDouble(),
     );
+  }
+
+  Map<String, Object?> toMap() {
+    return {
+      'id': id,
+      'invoice_id': invoiceId,
+      'coupon_id': couponId,
+      'quantity': quantity,
+      'unit_price': unitPrice,
+      'total_value': totalValue,
+    };
   }
 }

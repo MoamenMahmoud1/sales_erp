@@ -1,14 +1,18 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/storage/app_database.dart';
-import '../domain/payment.dart';
 import '../../customers/domain/payment_method.dart';
+import '../domain/payment.dart';
+import '../domain/payment_repository.dart';
+import '../domain/payment_status.dart';
 
-class LocalPaymentRepository {
-  Future<Database> get _database async {
+class LocalPaymentRepository
+    implements PaymentRepository {
+  Future<Database> get _database {
     return AppDatabase.database;
   }
 
+  @override
   Future<int> createPayment({
     required int customerId,
     required int invoiceId,
@@ -16,6 +20,18 @@ class LocalPaymentRepository {
     required PaymentMethod method,
     String? reference,
   }) async {
+    if (customerId <= 0) {
+      throw ArgumentError(
+        'Invalid customer ID.',
+      );
+    }
+
+    if (invoiceId <= 0) {
+      throw ArgumentError(
+        'Invalid invoice ID.',
+      );
+    }
+
     if (amount <= 0) {
       throw ArgumentError(
         'Payment amount must be greater than zero.',
@@ -24,12 +40,42 @@ class LocalPaymentRepository {
 
     final database = await _database;
 
-    final status = method == PaymentMethod.cash
-        ? PaymentStatus.paid
-        : PaymentStatus.pending;
+    final invoice = await database.query(
+      'invoices',
+      columns: [
+        'id',
+        'customer_id',
+        'total',
+      ],
+      where: 'id = ?',
+      whereArgs: [invoiceId],
+      limit: 1,
+    );
+
+    if (invoice.isEmpty) {
+      throw StateError(
+        'Invoice not found.',
+      );
+    }
+
+    final invoiceCustomerId =
+        invoice.first['customer_id'] as int;
+
+    if (invoiceCustomerId != customerId) {
+      throw StateError(
+        'Invoice does not belong to this customer.',
+      );
+    }
+
+    final status =
+        method == PaymentMethod.cash
+            ? PaymentStatus.paid
+            : PaymentStatus.pending;
 
     final now =
-        DateTime.now().toUtc().toIso8601String();
+        DateTime.now()
+            .toUtc()
+            .toIso8601String();
 
     return database.insert(
       'payments',
@@ -38,8 +84,10 @@ class LocalPaymentRepository {
         'invoice_id': invoiceId,
         'amount': amount,
         'method': method.value,
-        'status': status.name,
-        'reference': reference,
+        'status': status.value,
+        'reference': _normalizeReference(
+          reference,
+        ),
         'created_at': now,
         'confirmed_at':
             status == PaymentStatus.paid
@@ -49,18 +97,29 @@ class LocalPaymentRepository {
     );
   }
 
+  @override
   Future<void> confirmTransfer(
     int paymentId,
   ) async {
+    if (paymentId <= 0) {
+      throw ArgumentError(
+        'Invalid payment ID.',
+      );
+    }
+
     final database = await _database;
 
     final now =
-        DateTime.now().toUtc().toIso8601String();
+        DateTime.now()
+            .toUtc()
+            .toIso8601String();
 
-    await database.update(
+    final updated =
+        await database.update(
       'payments',
       {
-        'status': PaymentStatus.paid.name,
+        'status':
+            PaymentStatus.paid.value,
         'confirmed_at': now,
       },
       where: '''
@@ -70,26 +129,43 @@ class LocalPaymentRepository {
       ''',
       whereArgs: [
         paymentId,
-        PaymentMethod.transfer.value,
-        PaymentStatus.pending.name,
+        PaymentMethod
+            .transfer.value,
+        PaymentStatus
+            .pending.value,
       ],
     );
+
+    if (updated == 0) {
+      throw StateError(
+        'Payment is not a pending transfer.',
+      );
+    }
   }
 
-  Future<List<Payment>> getPendingTransfers() async {
+  @override
+  Future<List<Payment>> getPayments() async {
     final database = await _database;
 
-    final rows = await database.query(
-      'payments',
-      where: '''
-        method = ?
-        AND status = ?
+    final rows = await database.rawQuery(
+      '''
+      SELECT
+        p.id,
+        p.customer_id,
+        p.invoice_id,
+        p.amount,
+        p.method,
+        p.status,
+        p.reference,
+        p.created_at,
+        p.confirmed_at,
+        c.name AS customer_name,
+        c.phone AS customer_phone
+      FROM payments p
+      INNER JOIN customers c
+        ON c.id = p.customer_id
+      ORDER BY p.created_at DESC
       ''',
-      whereArgs: [
-        PaymentMethod.transfer.value,
-        PaymentStatus.pending.name,
-      ],
-      orderBy: 'created_at ASC',
     );
 
     return rows
@@ -97,7 +173,44 @@ class LocalPaymentRepository {
         .toList(growable: false);
   }
 
-  Future<List<Payment>> getPaymentsForCustomer(
+  @override
+  Future<List<Payment>>
+      getPendingTransfers() async {
+    final database = await _database;
+
+    final rows = await database.rawQuery(
+      '''
+      SELECT
+        p.id,
+        p.customer_id,
+        p.invoice_id,
+        p.amount,
+        p.method,
+        p.status,
+        p.reference,
+        p.created_at,
+        p.confirmed_at
+      FROM payments p
+      WHERE p.method = ?
+        AND p.status = ?
+      ORDER BY p.created_at ASC
+      ''',
+      [
+        PaymentMethod
+            .transfer.value,
+        PaymentStatus
+            .pending.value,
+      ],
+    );
+
+    return rows
+        .map(Payment.fromMap)
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<Payment>>
+      getPaymentsForCustomer(
     int customerId,
   ) async {
     final database = await _database;
@@ -114,7 +227,9 @@ class LocalPaymentRepository {
         .toList(growable: false);
   }
 
-  Future<List<Payment>> getPaidPaymentsForCustomer(
+  @override
+  Future<List<Payment>>
+      getPaidPaymentsForCustomer(
     int customerId,
   ) async {
     final database = await _database;
@@ -127,7 +242,8 @@ class LocalPaymentRepository {
       ''',
       whereArgs: [
         customerId,
-        PaymentStatus.paid.name,
+        PaymentStatus
+            .paid.value,
       ],
       orderBy: 'created_at DESC',
     );
@@ -137,93 +253,154 @@ class LocalPaymentRepository {
         .toList(growable: false);
   }
 
-  Future<double> getPaidPaymentsTotal(
+  @override
+  Future<double>
+      getPaidPaymentsTotal(
     int customerId,
   ) async {
     final database = await _database;
 
-    final result = await database.rawQuery(
+    final result =
+        await database.rawQuery(
       '''
-      SELECT COALESCE(SUM(amount), 0) AS total
+      SELECT COALESCE(
+        SUM(amount),
+        0
+      ) AS total
+
       FROM payments
+
       WHERE customer_id = ?
         AND status = ?
       ''',
       [
         customerId,
-        PaymentStatus.paid.name,
+        PaymentStatus
+            .paid.value,
       ],
     );
 
-    return (result.first['total'] as num).toDouble();
+    return (result.first['total']
+            as num)
+        .toDouble();
   }
 
-  Future<double> getPendingTransfersTotal(
+  @override
+  Future<double>
+      getPendingTransfersTotal(
     int customerId,
   ) async {
     final database = await _database;
 
-    final result = await database.rawQuery(
+    final result =
+        await database.rawQuery(
       '''
-      SELECT COALESCE(SUM(amount), 0) AS total
+      SELECT COALESCE(
+        SUM(amount),
+        0
+      ) AS total
+
       FROM payments
+
       WHERE customer_id = ?
         AND method = ?
         AND status = ?
       ''',
       [
         customerId,
-        PaymentMethod.transfer.value,
-        PaymentStatus.pending.name,
+        PaymentMethod
+            .transfer.value,
+        PaymentStatus
+            .pending.value,
       ],
     );
 
-    return (result.first['total'] as num).toDouble();
+    return (result.first['total']
+            as num)
+        .toDouble();
   }
 
-  Future<double> getPaidCashTotal(
+  @override
+  Future<double>
+      getPaidCashTotal(
     int customerId,
   ) async {
     final database = await _database;
 
-    final result = await database.rawQuery(
+    final result =
+        await database.rawQuery(
       '''
-      SELECT COALESCE(SUM(amount), 0) AS total
+      SELECT COALESCE(
+        SUM(amount),
+        0
+      ) AS total
+
       FROM payments
+
       WHERE customer_id = ?
         AND method = ?
         AND status = ?
       ''',
       [
         customerId,
-        PaymentMethod.cash.value,
-        PaymentStatus.paid.name,
+        PaymentMethod
+            .cash.value,
+        PaymentStatus
+            .paid.value,
       ],
     );
 
-    return (result.first['total'] as num).toDouble();
+    return (result.first['total']
+            as num)
+        .toDouble();
   }
 
-  Future<double> getPaidTransferTotal(
+  @override
+  Future<double>
+      getPaidTransferTotal(
     int customerId,
   ) async {
     final database = await _database;
 
-    final result = await database.rawQuery(
+    final result =
+        await database.rawQuery(
       '''
-      SELECT COALESCE(SUM(amount), 0) AS total
+      SELECT COALESCE(
+        SUM(amount),
+        0
+      ) AS total
+
       FROM payments
+
       WHERE customer_id = ?
         AND method = ?
         AND status = ?
       ''',
       [
         customerId,
-        PaymentMethod.transfer.value,
-        PaymentStatus.paid.name,
+        PaymentMethod
+            .transfer.value,
+        PaymentStatus
+            .paid.value,
       ],
     );
 
-    return (result.first['total'] as num).toDouble();
+    return (result.first['total']
+            as num)
+        .toDouble();
+  }
+
+  String? _normalizeReference(
+    String? reference,
+  ) {
+    final value =
+        reference?.trim();
+
+    if (value == null ||
+        value.isEmpty) {
+      return null;
+    }
+
+    return value;
   }
 }

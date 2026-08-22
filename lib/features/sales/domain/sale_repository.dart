@@ -1,9 +1,9 @@
+import '../../customers/domain/payment_method.dart';
+import 'customer_financial_summary.dart';
+import 'daily_sales_summary.dart';
 import 'invoice.dart';
 import 'invoice_change.dart';
 import 'payment_record.dart';
-import 'customer_financial_summary.dart';
-import 'daily_sales_summary.dart';
-import '../../customers/domain/payment_method.dart';
 
 abstract interface class SaleRepository {
   Future<int> createInvoice({
@@ -12,6 +12,8 @@ abstract interface class SaleRepository {
     required PaymentMethod paymentMethod,
     double couponDiscount,
   });
+
+  Future<List<Map<String, Object?>>> getInvoices();
 
   Future<List<Map<String, Object?>>>
       getCustomerInvoices(
@@ -40,7 +42,7 @@ abstract interface class SaleRepository {
       getPendingTransfers();
 
   Future<void> confirmTransfer(
-    int invoiceId,
+    int paymentId,
   );
 
   Future<CustomerFinancialSummary>

@@ -29,6 +29,7 @@ class DailySalesSummary {
     required this.outstanding,
   });
 
-  double get netSales => total;
+  double get netSales {
+    return total;
+  }
 }
-

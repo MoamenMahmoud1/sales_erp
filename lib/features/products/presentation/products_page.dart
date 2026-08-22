@@ -1,29 +1,28 @@
 import 'package:flutter/material.dart';
 
-import '../data/local_customer_repository.dart';
-import '../domain/customer.dart';
-import 'customer_details_page.dart';
-import 'customer_form_page.dart';
+import '../data/local_product_repository.dart';
+import '../domain/product.dart';
+import 'product_form_page.dart';
 
-class CustomersPage extends StatefulWidget {
-  const CustomersPage({
+class ProductsPage extends StatefulWidget {
+  const ProductsPage({
     super.key,
   });
 
   @override
-  State<CustomersPage> createState() =>
-      _CustomersPageState();
+  State<ProductsPage> createState() =>
+      _ProductsPageState();
 }
 
-class _CustomersPageState
-    extends State<CustomersPage> {
+class _ProductsPageState
+    extends State<ProductsPage> {
   final _repository =
-      LocalCustomerRepository();
+      LocalProductRepository();
 
   final _searchController =
       TextEditingController();
 
-  List<Customer> _customers = [];
+  List<Product> _products = [];
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -32,38 +31,60 @@ class _CustomersPageState
   void initState() {
     super.initState();
 
-    _loadCustomers();
-
     _searchController.addListener(
-      _searchCustomers,
+      _onSearchChanged,
     );
+
+    _loadProducts();
   }
 
   @override
   void dispose() {
     _searchController
-      ..removeListener(_searchCustomers)
+      ..removeListener(_onSearchChanged)
       ..dispose();
 
     super.dispose();
   }
 
-  Future<void> _loadCustomers() async {
+  void _onSearchChanged() {
+    final query =
+        _searchController.text
+            .trim()
+            .toLowerCase();
+
+    if (query.isEmpty) {
+      _loadProducts();
+      return;
+    }
+
     setState(() {
-      _isLoading = true;
-      _errorMessage = null;
+      _products = _products.where((product) {
+        return product.name
+            .toLowerCase()
+            .contains(query);
+      }).toList();
     });
+  }
+
+  Future<void> _loadProducts() async {
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
-      final customers =
-          await _repository.getCustomers();
+      final products =
+          await _repository.getProducts();
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _customers = customers;
+        _products = products;
         _isLoading = false;
       });
     } catch (error) {
@@ -74,72 +95,30 @@ class _CustomersPageState
       setState(() {
         _isLoading = false;
         _errorMessage =
-            'Failed to load customers.';
+            'Failed to load products.';
       });
     }
   }
 
-  Future<void> _searchCustomers() async {
-    try {
-      final customers =
-          await _repository.searchCustomers(
-        _searchController.text,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _customers = customers;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage =
-            'Failed to search customers.';
-      });
-    }
-  }
-
-  Future<void> _openCustomerForm({
-    Customer? customer,
+  Future<void> _openProductForm({
+    Product? product,
   }) async {
     final saved =
         await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => CustomerFormPage(
-          customer: customer,
+        builder: (_) => ProductFormPage(
+          product: product,
         ),
       ),
     );
 
     if (saved == true && mounted) {
-      await _loadCustomers();
+      await _loadProducts();
     }
   }
 
-  Future<void> _openCustomer(
-    Customer customer,
-  ) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CustomerDetailsPage(
-          customer: customer,
-        ),
-      ),
-    );
-
-    if (mounted) {
-      await _loadCustomers();
-    }
-  }
-
-  Future<void> _deleteCustomer(
-    Customer customer,
+  Future<void> _deleteProduct(
+    Product product,
   ) async {
     final confirmed =
         await showDialog<bool>(
@@ -147,26 +126,24 @@ class _CustomersPageState
       builder: (context) {
         return AlertDialog(
           title: const Text(
-            'Delete customer?',
+            'Delete product?',
           ),
           content: Text(
-            'Delete ${customer.name}?',
+            'Delete ${product.name}?',
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(context)
-                    .pop(false);
-              },
+              onPressed: () =>
+                  Navigator.of(context)
+                      .pop(false),
               child: const Text(
                 'Cancel',
               ),
             ),
             FilledButton(
-              onPressed: () {
-                Navigator.of(context)
-                    .pop(true);
-              },
+              onPressed: () =>
+                  Navigator.of(context)
+                      .pop(true),
               child: const Text(
                 'Delete',
               ),
@@ -181,21 +158,21 @@ class _CustomersPageState
     }
 
     try {
-      await _repository.deleteCustomer(
-        customer.id,
+      await _repository.deleteProduct(
+        product.id,
       );
 
       if (!mounted) {
         return;
       }
 
-      await _loadCustomers();
+      await _loadProducts();
 
       ScaffoldMessenger.of(context)
           .showSnackBar(
         const SnackBar(
           content: Text(
-            'Customer deleted.',
+            'Product deleted.',
           ),
         ),
       );
@@ -208,29 +185,23 @@ class _CustomersPageState
           .showSnackBar(
         SnackBar(
           content: Text(
-            'Failed to delete customer: $error',
+            'Failed to delete product: $error',
           ),
         ),
       );
     }
   }
 
-  Widget _buildCustomerCard(
-    Customer customer,
+  Widget _buildProductCard(
+    Product product,
   ) {
-    final initial = customer.name
-        .trim()
-        .isEmpty
-        ? '?'
-        : customer.name
-            .trim()[0]
-            .toUpperCase();
-
     return Card(
-      margin: const EdgeInsets.only(
+      margin:
+          const EdgeInsets.only(
         bottom: 12,
       ),
-      clipBehavior: Clip.antiAlias,
+      clipBehavior:
+          Clip.antiAlias,
       child: ListTile(
         contentPadding:
             const EdgeInsets.symmetric(
@@ -238,37 +209,40 @@ class _CustomersPageState
           vertical: 8,
         ),
         leading: CircleAvatar(
-          child: Text(initial),
-        ),
-        title: Text(
-          customer.name,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
+          child: Text(
+            product.name.trim().isEmpty
+                ? '?'
+                : product.name
+                    .trim()[0]
+                    .toUpperCase(),
           ),
         ),
-        subtitle: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            Text(customer.phone),
-            const SizedBox(height: 2),
-            Text(
-              customer.paymentTypeName,
-            ),
-          ],
+        title: Text(
+          product.name,
+          style:
+              const TextStyle(
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+        subtitle: Padding(
+          padding:
+              const EdgeInsets.only(
+            top: 4,
+          ),
+          child: Text(
+            '${product.price.toStringAsFixed(2)} EGP',
+          ),
         ),
         trailing:
             PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'edit') {
-              _openCustomerForm(
-                customer: customer,
+              _openProductForm(
+                product: product,
               );
             } else if (value == 'delete') {
-              _deleteCustomer(
-                customer,
-              );
+              _deleteProduct(product);
             }
           },
           itemBuilder: (_) => const [
@@ -282,8 +256,6 @@ class _CustomersPageState
             ),
           ],
         ),
-        onTap: () =>
-            _openCustomer(customer),
       ),
     );
   }
@@ -291,14 +263,16 @@ class _CustomersPageState
   Widget _buildBody() {
     if (_isLoading) {
       return const Center(
-        child: CircularProgressIndicator(),
+        child:
+            CircularProgressIndicator(),
       );
     }
 
     if (_errorMessage != null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding:
+              const EdgeInsets.all(24),
           child: Column(
             mainAxisSize:
                 MainAxisSize.min,
@@ -307,19 +281,22 @@ class _CustomersPageState
                 Icons.error_outline,
                 size: 48,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(
+                height: 12,
+              ),
               Text(
                 _errorMessage!,
                 textAlign:
                     TextAlign.center,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(
+                height: 16,
+              ),
               FilledButton(
                 onPressed:
-                    _loadCustomers,
-                child: const Text(
-                  'Retry',
-                ),
+                    _loadProducts,
+                child:
+                    const Text('Retry'),
               ),
             ],
           ),
@@ -327,30 +304,37 @@ class _CustomersPageState
       );
     }
 
-    if (_customers.isEmpty) {
+    if (_products.isEmpty) {
       return RefreshIndicator(
-        onRefresh: _loadCustomers,
+        onRefresh:
+            _loadProducts,
         child: ListView(
+          padding:
+              const EdgeInsets.only(
+            top: 120,
+          ),
           children: [
-            const SizedBox(height: 160),
             Icon(
-              Icons.people_outline,
+              Icons.inventory_2_outlined,
               size: 64,
               color: Theme.of(context)
                   .colorScheme
                   .outline,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(
+              height: 16,
+            ),
             Center(
               child: Text(
                 _searchController.text
                         .trim()
                         .isEmpty
-                    ? 'No customers yet.'
-                    : 'No customers found.',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium,
+                    ? 'No products yet.'
+                    : 'No products found.',
+                style:
+                    Theme.of(context)
+                        .textTheme
+                        .titleMedium,
               ),
             ),
           ],
@@ -359,18 +343,21 @@ class _CustomersPageState
     }
 
     return RefreshIndicator(
-      onRefresh: _loadCustomers,
+      onRefresh: _loadProducts,
       child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(
+        padding:
+            const EdgeInsets.fromLTRB(
           16,
           12,
           16,
           100,
         ),
-        itemCount: _customers.length,
-        itemBuilder: (context, index) {
-          return _buildCustomerCard(
-            _customers[index],
+        itemCount:
+            _products.length,
+        itemBuilder:
+            (context, index) {
+          return _buildProductCard(
+            _products[index],
           );
         },
       ),
@@ -381,9 +368,8 @@ class _CustomersPageState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Customers',
-        ),
+        title:
+            const Text('Products'),
       ),
       body: Column(
         children: [
@@ -401,7 +387,7 @@ class _CustomersPageState
               decoration:
                   InputDecoration(
                 hintText:
-                    'Search by name or phone',
+                    'Search products...',
                 prefixIcon:
                     const Icon(
                   Icons.search,
@@ -432,18 +418,19 @@ class _CustomersPageState
             ),
           ),
           Expanded(
-            child: _buildBody(),
+            child:
+                _buildBody(),
           ),
         ],
       ),
       floatingActionButton:
           FloatingActionButton.extended(
         onPressed:
-            _openCustomerForm,
+            _openProductForm,
         icon:
-            const Icon(Icons.person_add),
+            const Icon(Icons.add_box),
         label:
-            const Text('Customer'),
+            const Text('Product'),
       ),
     );
   }

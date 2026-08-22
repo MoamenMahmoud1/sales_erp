@@ -1,7 +1,10 @@
+import 'package:sqflite/sqflite.dart';
+
 import '../../../core/storage/app_database.dart';
-
 import '../../customers/domain/payment_method.dart';
-
+import '../../payment/domain/payment_status.dart';
+import '../../products/data/local_product_repository.dart';
+import '../../products/domain/product.dart';
 import '../domain/customer_financial_summary.dart';
 import '../domain/daily_sales_summary.dart';
 import '../domain/invoice.dart';
@@ -9,7 +12,16 @@ import '../domain/invoice_change.dart';
 import '../domain/payment_record.dart';
 import '../domain/sale_repository.dart';
 
-class LocalSaleRepository implements SaleRepository {
+class LocalSaleRepository
+    implements SaleRepository {
+  final LocalProductRepository
+      _productRepository =
+      LocalProductRepository();
+
+  Future<Database> get _database {
+    return AppDatabase.database;
+  }
+
   @override
   Future<int> createInvoice({
     required int customerId,
@@ -17,10 +29,24 @@ class LocalSaleRepository implements SaleRepository {
     required PaymentMethod paymentMethod,
     double couponDiscount = 0,
   }) async {
+    if (customerId <= 0) {
+      throw ArgumentError(
+        'Invalid customer ID.',
+      );
+    }
+
     if (products.isEmpty) {
       throw ArgumentError(
         'Invoice must contain at least one product.',
       );
+    }
+
+    for (final entry in products.entries) {
+      if (entry.value <= 0) {
+        throw ArgumentError(
+          'Product quantity must be greater than zero.',
+        );
+      }
     }
 
     if (couponDiscount < 0) {
@@ -29,120 +55,177 @@ class LocalSaleRepository implements SaleRepository {
       );
     }
 
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    return database.transaction<int>((txn) async {
-      final now =
-          DateTime.now().toUtc().toIso8601String();
+    final customerRows =
+        await database.query(
+      'customers',
+      columns: ['id'],
+      where: 'id = ?',
+      whereArgs: [customerId],
+      limit: 1,
+    );
 
-      final invoiceId = await txn.insert(
-        'invoices',
-        {
-          'customer_id': customerId,
-          'created_at': now,
-          'updated_at': now,
-          'subtotal': 0,
-          'coupon_discount': couponDiscount,
-          'total': 0,
-        },
+    if (customerRows.isEmpty) {
+      throw StateError(
+        'Customer $customerId was not found.',
       );
+    }
 
-      double subtotal = 0;
+    final availableProducts =
+        await _productRepository.getProducts();
 
-      for (final entry in products.entries) {
-        final productId = entry.key;
-        final quantity = entry.value;
+    final productMap =
+        <int, Product>{
+      for (final product
+          in availableProducts)
+        product.id: product,
+    };
 
-        if (quantity <= 0) {
-          continue;
-        }
+    double subtotal = 0;
 
-        final productRows = await txn.query(
-          'products',
-          columns: ['id', 'price'],
-          where: 'id = ?',
-          whereArgs: [productId],
-          limit: 1,
+    for (final entry
+        in products.entries) {
+      final product =
+          productMap[entry.key];
+
+      if (product == null) {
+        throw StateError(
+          'Product with id ${entry.key} was not found.',
+        );
+      }
+
+      subtotal +=
+          product.price * entry.value;
+    }
+
+    final safeDiscount =
+        couponDiscount > subtotal
+            ? subtotal
+            : couponDiscount;
+
+    final total =
+        subtotal - safeDiscount;
+
+    return database.transaction<int>(
+      (transaction) async {
+        final now = DateTime.now()
+            .toUtc()
+            .toIso8601String();
+
+        final invoiceId =
+            await transaction.insert(
+          'invoices',
+          {
+            'customer_id': customerId,
+            'created_at': now,
+            'updated_at': now,
+            'subtotal': subtotal,
+            'coupon_discount':
+                safeDiscount,
+            'total': total,
+          },
         );
 
-        if (productRows.isEmpty) {
-          throw StateError(
-            'Product $productId was not found.',
+        for (final entry
+            in products.entries) {
+          final product =
+              productMap[entry.key]!;
+
+          await transaction.insert(
+            'invoice_items',
+            {
+              'invoice_id': invoiceId,
+              'product_id': product.id,
+              'quantity': entry.value,
+              'unit_price':
+                  product.price,
+            },
           );
         }
 
-        final unitPrice =
-            (productRows.first['price'] as num)
-                .toDouble();
+        if (total > 0) {
+          final status =
+              paymentMethod ==
+                      PaymentMethod.cash
+                  ? PaymentStatus.paid
+                  : PaymentStatus.pending;
 
-        subtotal += unitPrice * quantity;
+          await transaction.insert(
+            'payments',
+            {
+              'customer_id':
+                  customerId,
+              'invoice_id':
+                  invoiceId,
+              'amount': total,
+              'method':
+                  paymentMethod.value,
+              'status':
+                  status.value,
+              'reference': null,
+              'created_at': now,
+              'confirmed_at':
+                  status ==
+                          PaymentStatus.paid
+                      ? now
+                      : null,
+            },
+          );
+        }
 
-        await txn.insert(
-          'invoice_items',
-          {
-            'invoice_id': invoiceId,
-            'product_id': productId,
-            'quantity': quantity,
-            'unit_price': unitPrice,
-          },
-        );
-      }
+        return invoiceId;
+      },
+    );
+  }
 
-      if (subtotal <= 0) {
-        throw ArgumentError(
-          'Invoice must contain valid products.',
-        );
-      }
+  @override
+  Future<List<Map<String, Object?>>>
+      getInvoices() async {
+    final database = await _database;
 
-      final safeDiscount =
-          couponDiscount > subtotal
-              ? subtotal
-              : couponDiscount;
+    return database.rawQuery(
+      '''
+      SELECT
+        i.id,
+        i.customer_id,
+        c.name AS customer_name,
+        c.phone AS customer_phone,
+        i.created_at,
+        i.updated_at,
+        i.subtotal,
+        i.coupon_discount,
+        i.total,
 
-      final total = subtotal - safeDiscount;
+        COALESCE(
+          (
+            SELECT p.method
+            FROM payments p
+            WHERE p.invoice_id = i.id
+            ORDER BY p.id DESC
+            LIMIT 1
+          ),
+          'cash'
+        ) AS payment_method,
 
-      await txn.update(
-        'invoices',
-        {
-          'subtotal': subtotal,
-          'coupon_discount': safeDiscount,
-          'total': total,
-        },
-        where: 'id = ?',
-        whereArgs: [invoiceId],
-      );
+        COALESCE(
+          (
+            SELECT p.status
+            FROM payments p
+            WHERE p.invoice_id = i.id
+            ORDER BY p.id DESC
+            LIMIT 1
+          ),
+          'paid'
+        ) AS payment_status
 
-      /*
-       * Payment is created together with the invoice.
-       *
-       * Cash:
-       *   paid immediately.
-       *
-       * Transfer:
-       *   pending until confirmed.
-       */
-      await txn.insert(
-        'payments',
-        {
-          'customer_id': customerId,
-          'invoice_id': invoiceId,
-          'amount': total,
-          'method': paymentMethod.value,
-          'status':
-              paymentMethod == PaymentMethod.cash
-                  ? 'paid'
-                  : 'pending',
-          'reference': null,
-          'created_at': now,
-          'confirmed_at':
-              paymentMethod == PaymentMethod.cash
-                  ? now
-                  : null,
-        },
-      );
+      FROM invoices i
+      INNER JOIN customers c
+        ON c.id = i.customer_id
 
-      return invoiceId;
-    });
+      ORDER BY i.created_at DESC
+      ''',
+    );
   }
 
   @override
@@ -150,13 +233,51 @@ class LocalSaleRepository implements SaleRepository {
       getCustomerInvoices(
     int customerId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    return database.query(
-      'invoices',
-      where: 'customer_id = ?',
-      whereArgs: [customerId],
-      orderBy: 'created_at DESC',
+    return database.rawQuery(
+      '''
+      SELECT
+        i.id,
+        i.customer_id,
+        c.name AS customer_name,
+        i.created_at,
+        i.updated_at,
+        i.subtotal,
+        i.coupon_discount,
+        i.total,
+
+        COALESCE(
+          (
+            SELECT p.method
+            FROM payments p
+            WHERE p.invoice_id = i.id
+            ORDER BY p.id DESC
+            LIMIT 1
+          ),
+          'cash'
+        ) AS payment_method,
+
+        COALESCE(
+          (
+            SELECT p.status
+            FROM payments p
+            WHERE p.invoice_id = i.id
+            ORDER BY p.id DESC
+            LIMIT 1
+          ),
+          'paid'
+        ) AS payment_status
+
+      FROM invoices i
+      INNER JOIN customers c
+        ON c.id = i.customer_id
+
+      WHERE i.customer_id = ?
+
+      ORDER BY i.created_at DESC
+      ''',
+      [customerId],
     );
   }
 
@@ -164,35 +285,82 @@ class LocalSaleRepository implements SaleRepository {
   Future<Invoice?> getInvoice(
     int invoiceId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    final invoiceRows = await database.query(
-      'invoices',
-      where: 'id = ?',
-      whereArgs: [invoiceId],
-      limit: 1,
+    final rows =
+        await database.rawQuery(
+      '''
+      SELECT
+        i.id,
+        i.customer_id,
+        i.created_at,
+        i.updated_at,
+        i.subtotal,
+        i.coupon_discount,
+        i.total,
+
+        COALESCE(
+          (
+            SELECT p.method
+            FROM payments p
+            WHERE p.invoice_id = i.id
+            ORDER BY p.id DESC
+            LIMIT 1
+          ),
+          'cash'
+        ) AS payment_method,
+
+        COALESCE(
+          (
+            SELECT p.status
+            FROM payments p
+            WHERE p.invoice_id = i.id
+            ORDER BY p.id DESC
+            LIMIT 1
+          ),
+          'paid'
+        ) AS payment_status
+
+      FROM invoices i
+
+      WHERE i.id = ?
+
+      LIMIT 1
+      ''',
+      [invoiceId],
     );
 
-    if (invoiceRows.isEmpty) {
+    if (rows.isEmpty) {
       return null;
     }
 
-    final itemRows = await database.query(
+    final invoiceRow =
+        rows.first;
+
+    final itemRows =
+        await database.query(
       'invoice_items',
+      columns: [
+        'product_id',
+        'quantity',
+      ],
       where: 'invoice_id = ?',
       whereArgs: [invoiceId],
       orderBy: 'id ASC',
     );
 
-    final products = <int, int>{};
+    final products =
+        <int, int>{};
 
-    for (final item in itemRows) {
-      products[item['product_id'] as int] =
-          item['quantity'] as int;
+    for (final row
+        in itemRows) {
+      products[
+              row['product_id'] as int] =
+          row['quantity'] as int;
     }
 
     return Invoice.fromMap(
-      invoiceRows.first,
+      invoiceRow,
       products: products,
     );
   }
@@ -202,205 +370,300 @@ class LocalSaleRepository implements SaleRepository {
     required int invoiceId,
     required Map<int, int> products,
   }) async {
+    if (invoiceId <= 0) {
+      throw ArgumentError(
+        'Invalid invoice ID.',
+      );
+    }
+
     if (products.isEmpty) {
       throw ArgumentError(
         'Invoice must contain at least one product.',
       );
     }
 
-    final database = await AppDatabase.database;
+    for (final entry
+        in products.entries) {
+      if (entry.value <= 0) {
+        throw ArgumentError(
+          'Product quantity must be greater than zero.',
+        );
+      }
+    }
 
-    await database.transaction((txn) async {
-      final invoiceRows = await txn.query(
-        'invoices',
-        where: 'id = ?',
-        whereArgs: [invoiceId],
-        limit: 1,
-      );
+    final availableProducts =
+        await _productRepository.getProducts();
 
-      if (invoiceRows.isEmpty) {
+    final productMap =
+        <int, Product>{
+      for (final product
+          in availableProducts)
+        product.id: product,
+    };
+
+    double subtotal = 0;
+
+    for (final entry
+        in products.entries) {
+      final product =
+          productMap[entry.key];
+
+      if (product == null) {
         throw StateError(
-          'Invoice $invoiceId was not found.',
+          'Product with id ${entry.key} was not found.',
         );
       }
 
-      final oldItems = await txn.query(
-        'invoice_items',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
+      subtotal +=
+          product.price * entry.value;
+    }
 
-      final oldProducts = <int, int>{};
+    final database = await _database;
 
-      for (final item in oldItems) {
-        oldProducts[item['product_id'] as int] =
-            item['quantity'] as int;
-      }
-
-      final now = DateTime.now().toUtc();
-
-      final changedAt =
-          now.toIso8601String();
-
-      final expiresAt = now
-          .add(const Duration(hours: 24))
-          .toIso8601String();
-
-      final allProductIds = <int>{
-        ...oldProducts.keys,
-        ...products.keys,
-      };
-
-      for (final productId in allProductIds) {
-        final oldQuantity =
-            oldProducts[productId] ?? 0;
-
-        final newQuantity =
-            products[productId] ?? 0;
-
-        if (oldQuantity == newQuantity) {
-          continue;
-        }
-
-        await txn.insert(
-          'invoice_changes',
-          {
-            'invoice_id': invoiceId,
-            'product_id': productId,
-            'old_quantity': oldQuantity,
-            'new_quantity': newQuantity,
-            'changed_at': changedAt,
-            'expires_at': expiresAt,
-          },
-        );
-      }
-
-      await txn.delete(
-        'invoice_items',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
-
-      double subtotal = 0;
-
-      for (final entry in products.entries) {
-        final productId = entry.key;
-        final quantity = entry.value;
-
-        if (quantity <= 0) {
-          continue;
-        }
-
-        final productRows = await txn.query(
-          'products',
-          columns: ['id', 'price'],
+    await database.transaction(
+      (transaction) async {
+        final invoiceRows =
+            await transaction.query(
+          'invoices',
+          columns: [
+            'id',
+            'coupon_discount',
+          ],
           where: 'id = ?',
-          whereArgs: [productId],
+          whereArgs: [invoiceId],
           limit: 1,
         );
 
-        if (productRows.isEmpty) {
+        if (invoiceRows.isEmpty) {
           throw StateError(
-            'Product $productId was not found.',
+            'Invoice $invoiceId was not found.',
           );
         }
 
-        final unitPrice =
-            (productRows.first['price'] as num)
-                .toDouble();
-
-        subtotal += unitPrice * quantity;
-
-        await txn.insert(
+        final existingRows =
+            await transaction.query(
           'invoice_items',
+          columns: [
+            'product_id',
+            'quantity',
+          ],
+          where: 'invoice_id = ?',
+          whereArgs: [invoiceId],
+        );
+
+        final oldQuantities =
+            <int, int>{
+          for (final row
+              in existingRows)
+            row['product_id'] as int:
+                row['quantity'] as int,
+        };
+
+        final now = DateTime.now()
+            .toUtc()
+            .toIso8601String();
+
+        for (final entry
+            in products.entries) {
+          final oldQuantity =
+              oldQuantities[
+                      entry.key] ??
+                  0;
+
+          if (oldQuantity !=
+              entry.value) {
+            final changedAt =
+                DateTime.now().toUtc();
+
+            final expiresAt =
+                changedAt.add(
+              const Duration(
+                days: 7,
+              ),
+            );
+
+            await transaction.insert(
+              'invoice_changes',
+              {
+                'invoice_id':
+                    invoiceId,
+                'product_id':
+                    entry.key,
+                'old_quantity':
+                    oldQuantity,
+                'new_quantity':
+                    entry.value,
+                'changed_at':
+                    changedAt
+                        .toIso8601String(),
+                'expires_at':
+                    expiresAt
+                        .toIso8601String(),
+              },
+            );
+          }
+        }
+
+        for (final entry
+            in oldQuantities.entries) {
+          if (!products
+              .containsKey(
+            entry.key,
+          )) {
+            final changedAt =
+                DateTime.now().toUtc();
+
+            final expiresAt =
+                changedAt.add(
+              const Duration(
+                days: 7,
+              ),
+            );
+
+            await transaction.insert(
+              'invoice_changes',
+              {
+                'invoice_id':
+                    invoiceId,
+                'product_id':
+                    entry.key,
+                'old_quantity':
+                    entry.value,
+                'new_quantity': 0,
+                'changed_at':
+                    changedAt
+                        .toIso8601String(),
+                'expires_at':
+                    expiresAt
+                        .toIso8601String(),
+              },
+            );
+          }
+        }
+
+        await transaction.delete(
+          'invoice_items',
+          where:
+              'invoice_id = ?',
+          whereArgs: [
+            invoiceId,
+          ],
+        );
+
+        for (final entry
+            in products.entries) {
+          final product =
+              productMap[entry.key]!;
+
+          await transaction.insert(
+            'invoice_items',
+            {
+              'invoice_id':
+                  invoiceId,
+              'product_id':
+                  product.id,
+              'quantity':
+                  entry.value,
+              'unit_price':
+                  product.price,
+            },
+          );
+        }
+
+        final existingDiscount =
+            (invoiceRows.first[
+                        'coupon_discount']
+                    as num?)
+                ?.toDouble() ??
+                0;
+
+        final safeDiscount =
+            existingDiscount >
+                    subtotal
+                ? subtotal
+                : existingDiscount;
+
+        final total =
+            subtotal - safeDiscount;
+
+        await transaction.update(
+          'invoices',
           {
-            'invoice_id': invoiceId,
-            'product_id': productId,
-            'quantity': quantity,
-            'unit_price': unitPrice,
+            'updated_at': now,
+            'subtotal': subtotal,
+            'coupon_discount':
+                safeDiscount,
+            'total': total,
           },
+          where: 'id = ?',
+          whereArgs: [
+            invoiceId,
+          ],
         );
-      }
-
-      if (subtotal <= 0) {
-        throw ArgumentError(
-          'Invoice must contain valid products.',
-        );
-      }
-
-      final currentCouponDiscount =
-          (invoiceRows.first['coupon_discount']
-                  as num?)
-              ?.toDouble() ??
-          0;
-
-      final safeDiscount =
-          currentCouponDiscount > subtotal
-              ? subtotal
-              : currentCouponDiscount;
-
-      final total = subtotal - safeDiscount;
-
-      await txn.update(
-        'invoices',
-        {
-          'updated_at': changedAt,
-          'subtotal': subtotal,
-          'coupon_discount': safeDiscount,
-          'total': total,
-        },
-        where: 'id = ?',
-        whereArgs: [invoiceId],
-      );
-
-      /*
-       * IMPORTANT:
-       * Editing an invoice does not automatically
-       * recreate payments.
-       *
-       * Existing payments stay attached to the
-       * invoice.
-       */
-    });
+      },
+    );
   }
 
   @override
   Future<void> deleteInvoice(
     int invoiceId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    await database.transaction((txn) async {
-      await txn.delete(
-        'payments',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
+    await database.transaction(
+      (transaction) async {
+        await transaction.delete(
+          'payments',
+          where:
+              'invoice_id = ?',
+          whereArgs: [
+            invoiceId,
+          ],
+        );
 
-      await txn.delete(
-        'invoice_changes',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
+        await transaction.delete(
+          'invoice_coupons',
+          where:
+              'invoice_id = ?',
+          whereArgs: [
+            invoiceId,
+          ],
+        );
 
-      await txn.delete(
-        'invoice_coupons',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
+        await transaction.delete(
+          'invoice_changes',
+          where:
+              'invoice_id = ?',
+          whereArgs: [
+            invoiceId,
+          ],
+        );
 
-      await txn.delete(
-        'invoice_items',
-        where: 'invoice_id = ?',
-        whereArgs: [invoiceId],
-      );
+        await transaction.delete(
+          'invoice_items',
+          where:
+              'invoice_id = ?',
+          whereArgs: [
+            invoiceId,
+          ],
+        );
 
-      await txn.delete(
-        'invoices',
-        where: 'id = ?',
-        whereArgs: [invoiceId],
-      );
-    });
+        final deleted =
+            await transaction.delete(
+          'invoices',
+          where: 'id = ?',
+          whereArgs: [
+            invoiceId,
+          ],
+        );
+
+        if (deleted == 0) {
+          throw StateError(
+            'Invoice $invoiceId was not found.',
+          );
+        }
+      },
+    );
   }
 
   @override
@@ -408,24 +671,14 @@ class LocalSaleRepository implements SaleRepository {
       getRecentInvoiceChanges(
     int invoiceId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    final now =
-        DateTime.now().toUtc().toIso8601String();
+    final now = DateTime.now()
+        .toUtc()
+        .toIso8601String();
 
-    await database.delete(
-      'invoice_changes',
-      where: '''
-        invoice_id = ?
-        AND expires_at <= ?
-      ''',
-      whereArgs: [
-        invoiceId,
-        now,
-      ],
-    );
-
-    final rows = await database.query(
+    final rows =
+        await database.query(
       'invoice_changes',
       where: '''
         invoice_id = ?
@@ -435,85 +688,111 @@ class LocalSaleRepository implements SaleRepository {
         invoiceId,
         now,
       ],
-      orderBy: 'changed_at DESC',
+      orderBy:
+          'changed_at DESC',
     );
 
-    return rows.map((row) {
-      return InvoiceChange(
-        productId: row['product_id'] as int,
-        oldQuantity:
-            row['old_quantity'] as int,
-        newQuantity:
-            row['new_quantity'] as int,
-      );
-    }).toList();
+    return rows.map(
+      (row) {
+        return InvoiceChange(
+          productId:
+              row['product_id'] as int,
+          oldQuantity:
+              row['old_quantity']
+                  as int,
+          newQuantity:
+              row['new_quantity']
+                  as int,
+        );
+      },
+    ).toList(growable: false);
   }
 
   @override
   Future<List<PaymentRecord>>
       getPendingTransfers() async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    final rows = await database.query(
+    final rows =
+        await database.query(
       'payments',
       where: '''
         method = ?
         AND status = ?
       ''',
       whereArgs: [
-        PaymentMethod.transfer.value,
-        'pending',
+        PaymentMethod
+            .transfer.value,
+        PaymentStatus
+            .pending.value,
       ],
-      orderBy: 'created_at ASC',
+      orderBy:
+          'created_at ASC',
     );
 
-    return rows.map((row) {
-      return PaymentRecord(
-        id: row['id'] as int,
-        invoiceId:
-            row['invoice_id'] as int,
-        customerId:
-            row['customer_id'] as int,
-        amount:
-            (row['amount'] as num).toDouble(),
-        paymentMethod:
-            PaymentMethodExtension.fromValue(
-          row['method'] as String? ?? 'transfer',
-        ),
-        createdAt:
-            DateTime.parse(
-          row['created_at'] as String,
-        ),
-      );
-    }).toList();
+    return rows.map(
+      (row) {
+        return PaymentRecord(
+          id: row['id'] as int,
+          invoiceId:
+              row['invoice_id'] as int,
+          customerId:
+              row['customer_id'] as int,
+          amount:
+              (row['amount'] as num)
+                  .toDouble(),
+          paymentMethod:
+              paymentMethodFromValue(
+            row['method'] as String?,
+          ),
+          createdAt:
+              DateTime.parse(
+            row['created_at']
+                as String,
+          ),
+        );
+      },
+    ).toList(growable: false);
   }
 
   @override
   Future<void> confirmTransfer(
-    int invoiceId,
+    int paymentId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    final now =
-        DateTime.now().toUtc().toIso8601String();
+    final now = DateTime.now()
+        .toUtc()
+        .toIso8601String();
 
-    await database.update(
+    final updated =
+        await database.update(
       'payments',
       {
-        'status': 'paid',
+        'status':
+            PaymentStatus
+                .paid.value,
         'confirmed_at': now,
       },
       where: '''
-        invoice_id = ?
+        id = ?
         AND method = ?
         AND status = ?
       ''',
       whereArgs: [
-        invoiceId,
-        PaymentMethod.transfer.value,
-        'pending',
+        paymentId,
+        PaymentMethod
+            .transfer.value,
+        PaymentStatus
+            .pending.value,
       ],
     );
+
+    if (updated == 0) {
+      throw StateError(
+        'Payment is not a pending transfer.',
+      );
+    }
   }
 
   @override
@@ -521,17 +800,29 @@ class LocalSaleRepository implements SaleRepository {
       getCustomerFinancialSummary(
     int customerId,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
     final invoiceResult =
         await database.rawQuery(
       '''
       SELECT
-        COALESCE(SUM(subtotal), 0) AS subtotal,
-        COALESCE(SUM(coupon_discount), 0)
-          AS coupon_discount,
-        COALESCE(SUM(total), 0) AS total
+        COALESCE(
+          SUM(subtotal),
+          0
+        ) AS subtotal,
+
+        COALESCE(
+          SUM(coupon_discount),
+          0
+        ) AS coupon_discount,
+
+        COALESCE(
+          SUM(total),
+          0
+        ) AS total
+
       FROM invoices
+
       WHERE customer_id = ?
       ''',
       [customerId],
@@ -544,7 +835,7 @@ class LocalSaleRepository implements SaleRepository {
         COALESCE(
           SUM(
             CASE
-              WHEN status = 'paid'
+              WHEN status = ?
               THEN amount
               ELSE 0
             END
@@ -555,51 +846,81 @@ class LocalSaleRepository implements SaleRepository {
         COALESCE(
           SUM(
             CASE
-              WHEN method = 'transfer'
-               AND status = 'pending'
+              WHEN method = ?
+              AND status = ?
               THEN amount
               ELSE 0
             END
           ),
           0
-        ) AS pending
+        ) AS pending_transfers
+
       FROM payments
+
       WHERE customer_id = ?
       ''',
-      [customerId],
+      [
+        PaymentStatus
+            .paid.value,
+        PaymentMethod
+            .transfer.value,
+        PaymentStatus
+            .pending.value,
+        customerId,
+      ],
     );
 
+    final invoiceData =
+        invoiceResult.first;
+
+    final paymentData =
+        paymentResult.first;
+
     final subtotal =
-        (invoiceResult.first['subtotal'] as num)
+        (invoiceData[
+                    'subtotal']
+                as num)
             .toDouble();
 
     final couponDiscount =
-        (invoiceResult.first['coupon_discount']
+        (invoiceData[
+                    'coupon_discount']
                 as num)
             .toDouble();
 
     final total =
-        (invoiceResult.first['total'] as num)
+        (invoiceData['total']
+                as num)
             .toDouble();
 
     final paid =
-        (paymentResult.first['paid'] as num)
+        (paymentData['paid']
+                as num)
             .toDouble();
 
-    final pending =
-        (paymentResult.first['pending'] as num)
+    final pendingTransfers =
+        (paymentData[
+                    'pending_transfers']
+                as num)
             .toDouble();
 
     final balance =
-        total - paid - pending;
+        total -
+        paid -
+        pendingTransfers;
 
     return CustomerFinancialSummary(
       subtotal: subtotal,
-      couponDiscount: couponDiscount,
+      couponDiscount:
+          couponDiscount,
       total: total,
       paid: paid,
-      pendingTransfers: pending,
-      balance: balance > 0 ? balance : 0,
+      pendingTransfers:
+          pendingTransfers,
+      balance:
+          balance > 0
+              ? balance
+              : 0,
     );
   }
 
@@ -608,49 +929,77 @@ class LocalSaleRepository implements SaleRepository {
       getDailySalesSummary(
     DateTime date,
   ) async {
-    final database = await AppDatabase.database;
+    final database = await _database;
 
-    /*
-     * We use UTC day boundaries because all records
-     * are stored in UTC.
-     */
-
-    final start = DateTime.utc(
+    final localStart = DateTime(
       date.year,
       date.month,
       date.day,
     );
 
-    final end = start.add(
+    final localEnd =
+        localStart.add(
       const Duration(days: 1),
     );
 
-    final startString =
-        start.toIso8601String();
+    final startUtc =
+        localStart
+            .toUtc()
+            .toIso8601String();
 
-    final endString =
-        end.toIso8601String();
+    final endUtc =
+        localEnd
+            .toUtc()
+            .toIso8601String();
 
     final invoiceResult =
         await database.rawQuery(
       '''
       SELECT
         COUNT(*) AS invoice_count,
-        COUNT(DISTINCT customer_id)
-          AS customer_count,
-        COALESCE(SUM(subtotal), 0)
-          AS subtotal,
-        COALESCE(SUM(coupon_discount), 0)
-          AS coupon_discount,
-        COALESCE(SUM(total), 0)
-          AS total
+
+        COALESCE(
+          SUM(subtotal),
+          0
+        ) AS subtotal,
+
+        COALESCE(
+          SUM(coupon_discount),
+          0
+        ) AS coupon_discount,
+
+        COALESCE(
+          SUM(total),
+          0
+        ) AS total
+
       FROM invoices
+
       WHERE created_at >= ?
         AND created_at < ?
       ''',
       [
-        startString,
-        endString,
+        startUtc,
+        endUtc,
+      ],
+    );
+
+    final customerResult =
+        await database.rawQuery(
+      '''
+      SELECT
+        COUNT(
+          DISTINCT customer_id
+        ) AS customer_count
+
+      FROM invoices
+
+      WHERE created_at >= ?
+        AND created_at < ?
+      ''',
+      [
+        startUtc,
+        endUtc,
       ],
     );
 
@@ -658,108 +1007,146 @@ class LocalSaleRepository implements SaleRepository {
         await database.rawQuery(
       '''
       SELECT
-        COALESCE(
-          SUM(
-            CASE
-              WHEN method = 'cash'
-               AND status = 'paid'
-              THEN amount
-              ELSE 0
-            END
-          ),
-          0
-        ) AS cash,
 
         COALESCE(
           SUM(
             CASE
-              WHEN method = 'transfer'
-               AND status = 'paid'
+              WHEN method = ?
+              AND status = ?
               THEN amount
               ELSE 0
             END
           ),
           0
-        ) AS transfer,
+        ) AS cash_collected,
 
         COALESCE(
           SUM(
             CASE
-              WHEN method = 'transfer'
-               AND status = 'pending'
+              WHEN method = ?
+              AND status = ?
               THEN amount
               ELSE 0
             END
           ),
           0
-        ) AS pending
+        ) AS transfer_collected,
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN method = ?
+              AND status = ?
+              THEN amount
+              ELSE 0
+            END
+          ),
+          0
+        ) AS pending_transfers
+
       FROM payments
+
       WHERE created_at >= ?
         AND created_at < ?
       ''',
       [
-        startString,
-        endString,
+        PaymentMethod.cash.value,
+        PaymentStatus.paid.value,
+        PaymentMethod.transfer.value,
+        PaymentStatus.paid.value,
+        PaymentMethod.transfer.value,
+        PaymentStatus.pending.value,
+        startUtc,
+        endUtc,
       ],
     );
 
-    final invoiceRow =
+    final invoiceData =
         invoiceResult.first;
 
-    final paymentRow =
+    final customerData =
+        customerResult.first;
+
+    final paymentData =
         paymentResult.first;
 
     final invoiceCount =
-        (invoiceRow['invoice_count'] as num)
+        (invoiceData[
+                    'invoice_count']
+                as num)
             .toInt();
 
     final customerCount =
-        (invoiceRow['customer_count'] as num)
+        (customerData[
+                    'customer_count']
+                as num)
             .toInt();
 
     final subtotal =
-        (invoiceRow['subtotal'] as num)
+        (invoiceData['subtotal']
+                as num)
             .toDouble();
 
     final couponDiscount =
-        (invoiceRow['coupon_discount'] as num)
+        (invoiceData[
+                    'coupon_discount']
+                as num)
             .toDouble();
 
     final total =
-        (invoiceRow['total'] as num)
+        (invoiceData['total']
+                as num)
             .toDouble();
 
     final cashCollected =
-        (paymentRow['cash'] as num)
+        (paymentData[
+                    'cash_collected']
+                as num)
             .toDouble();
 
     final transferCollected =
-        (paymentRow['transfer'] as num)
+        (paymentData[
+                    'transfer_collected']
+                as num)
             .toDouble();
 
     final pendingTransfers =
-        (paymentRow['pending'] as num)
+        (paymentData[
+                    'pending_transfers']
+                as num)
             .toDouble();
 
     final collected =
-        cashCollected + transferCollected;
+        cashCollected +
+        transferCollected;
 
     final outstanding =
-        total - collected - pendingTransfers;
+        total -
+        collected -
+        pendingTransfers;
 
     return DailySalesSummary(
-      date: date,
-      invoiceCount: invoiceCount,
-      customerCount: customerCount,
+      date: localStart,
+      invoiceCount:
+          invoiceCount,
+      customerCount:
+          customerCount,
       subtotal: subtotal,
-      couponDiscount: couponDiscount,
+      couponDiscount:
+          couponDiscount,
       total: total,
-      cashCollected: cashCollected,
-      transferCollected: transferCollected,
-      pendingTransfers: pendingTransfers,
+      cashCollected:
+          cashCollected,
+      transferCollected:
+          transferCollected,
+      pendingTransfers:
+          pendingTransfers,
       collected: collected,
       outstanding:
-          outstanding > 0 ? outstanding : 0,
+          outstanding > 0
+              ? outstanding
+              : 0,
     );
   }
 }
+

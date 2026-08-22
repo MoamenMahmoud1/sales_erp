@@ -1,58 +1,84 @@
 class Coupon {
   final int id;
   final String name;
-  final int piecesPerCoupon;
-  final double unitPrice;
+  final int unitsPerCarton;
+  final double cartonPrice;
   final DateTime createdAt;
   final DateTime updatedAt;
 
   const Coupon({
     required this.id,
     required this.name,
-    required this.piecesPerCoupon,
-    required this.unitPrice,
+    required this.unitsPerCarton,
+    required this.cartonPrice,
     required this.createdAt,
     required this.updatedAt,
   });
 
-  double get totalValue {
-    return piecesPerCoupon * unitPrice;
+  /// سعر الوحدة = سعر الكرتونة ÷ عدد الوحدات في الكرتونة.
+  double get unitPrice {
+    if (unitsPerCarton <= 0) {
+      return 0;
+    }
+
+    return cartonPrice / unitsPerCarton;
   }
 
-  double valueForQuantity(int quantity) {
+  /// القيمة الإجمالية لعدد معين من الوحدات.
+  double valueForQuantity(
+    int quantity,
+  ) {
+    if (quantity <= 0) {
+      return 0;
+    }
+
     return quantity * unitPrice;
   }
 
-  int cartonsForQuantity(int quantity) {
-    if (quantity <= 0 || piecesPerCoupon <= 0) {
+  /// عدد الكراتين الكاملة في الكمية.
+  int cartonsForQuantity(
+    int quantity,
+  ) {
+    if (quantity <= 0 ||
+        unitsPerCarton <= 0) {
       return 0;
     }
 
-    return quantity ~/ piecesPerCoupon;
+    return quantity ~/ unitsPerCarton;
   }
 
-  int remainderForQuantity(int quantity) {
-    if (quantity <= 0 || piecesPerCoupon <= 0) {
+  /// الوحدات المتبقية بعد الكراتين الكاملة.
+  int remainderForQuantity(
+    int quantity,
+  ) {
+    if (quantity <= 0 ||
+        unitsPerCarton <= 0) {
       return 0;
     }
 
-    return quantity % piecesPerCoupon;
+    return quantity % unitsPerCarton;
   }
 
-  String formatQuantity(int quantity) {
+  /// عرض الكمية بشكل مفهوم للمستخدم.
+  String formatQuantity(
+    int quantity,
+  ) {
     if (quantity <= 0) {
-      return '0 Coupons';
+      return '0 Units';
     }
 
-    if (piecesPerCoupon <= 0) {
-      return '$quantity Coupons';
+    if (unitsPerCarton <= 0) {
+      return '$quantity Units';
     }
 
-    final cartons = cartonsForQuantity(quantity);
-    final remainder = remainderForQuantity(quantity);
+    final cartons =
+        cartonsForQuantity(quantity);
+
+    final remainder =
+        remainderForQuantity(quantity);
 
     if (cartons == 0) {
-      return '$quantity Coupons';
+      return '$quantity Units';
     }
 
     if (remainder == 0) {
@@ -65,7 +91,7 @@ class Coupon {
         ? '1 Carton'
         : '$cartons Cartons';
 
-    return '$cartonText + $remainder Coupons';
+    return '$cartonText + $remainder Units';
   }
 
   factory Coupon.fromMap(
@@ -74,10 +100,18 @@ class Coupon {
     return Coupon(
       id: map['id'] as int,
       name: map['name'] as String,
-      piecesPerCoupon:
-          map['pieces_per_coupon'] as int,
-      unitPrice:
-          (map['unit_price'] as num).toDouble(),
+      unitsPerCarton:
+          (map['units_per_carton'] as num?)
+                  ?.toInt() ??
+              (map['pieces_per_coupon'] as num?)
+                  ?.toInt() ??
+              0,
+      cartonPrice:
+          (map['carton_price'] as num?)
+                  ?.toDouble() ??
+              (map['unit_price'] as num?)
+                  ?.toDouble() ??
+              0,
       createdAt: DateTime.parse(
         map['created_at'] as String,
       ),
@@ -91,12 +125,43 @@ class Coupon {
     return {
       'id': id,
       'name': name,
-      'pieces_per_coupon': piecesPerCoupon,
-      'unit_price': unitPrice,
+      'units_per_carton':
+          unitsPerCarton,
+      'carton_price':
+          cartonPrice,
       'created_at':
-          createdAt.toUtc().toIso8601String(),
+          createdAt
+              .toUtc()
+              .toIso8601String(),
       'updated_at':
-          updatedAt.toUtc().toIso8601String(),
+          updatedAt
+              .toUtc()
+              .toIso8601String(),
     };
   }
+
+  Coupon copyWith({
+    int? id,
+    String? name,
+    int? unitsPerCarton,
+    double? cartonPrice,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Coupon(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      unitsPerCarton:
+          unitsPerCarton ??
+              this.unitsPerCarton,
+      cartonPrice:
+          cartonPrice ??
+              this.cartonPrice,
+      createdAt:
+          createdAt ?? this.createdAt,
+      updatedAt:
+          updatedAt ?? this.updatedAt,
+    );
+  }
 }
+

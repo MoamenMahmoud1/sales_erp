@@ -1,29 +1,29 @@
 import 'package:flutter/material.dart';
 
-import '../data/local_customer_repository.dart';
-import '../domain/customer.dart';
-import 'customer_details_page.dart';
-import 'customer_form_page.dart';
+import '../data/local_coupon_repository.dart';
+import '../domain/coupon.dart';
+import 'coupon_form_page.dart';
 
-class CustomersPage extends StatefulWidget {
-  const CustomersPage({
+class CouponsPage extends StatefulWidget {
+  const CouponsPage({
     super.key,
   });
 
   @override
-  State<CustomersPage> createState() =>
-      _CustomersPageState();
+  State<CouponsPage> createState() =>
+      _CouponsPageState();
 }
 
-class _CustomersPageState
-    extends State<CustomersPage> {
+class _CouponsPageState
+    extends State<CouponsPage> {
   final _repository =
-      LocalCustomerRepository();
+      LocalCouponRepository();
 
   final _searchController =
       TextEditingController();
 
-  List<Customer> _customers = [];
+  List<Coupon> _allCoupons = [];
+  List<Coupon> _coupons = [];
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -32,114 +32,105 @@ class _CustomersPageState
   void initState() {
     super.initState();
 
-    _loadCustomers();
-
     _searchController.addListener(
-      _searchCustomers,
+      _filterCoupons,
     );
+
+    _loadCoupons();
   }
 
   @override
   void dispose() {
     _searchController
-      ..removeListener(_searchCustomers)
+      ..removeListener(
+        _filterCoupons,
+      )
       ..dispose();
 
     super.dispose();
   }
 
-  Future<void> _loadCustomers() async {
+  Future<void> _loadCoupons() async {
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      final coupons =
+          await _repository.getCoupons();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _allCoupons = coupons;
+        _coupons = coupons;
+        _isLoading = false;
+      });
+
+      _filterCoupons();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _isLoading = false;
+        _errorMessage =
+            'Failed to load coupons.';
+      });
+    }
+  }
+
+  void _filterCoupons() {
+    final query =
+        _searchController.text
+            .trim()
+            .toLowerCase();
+
+    final filtered = _allCoupons
+        .where(
+          (coupon) => coupon.name
+              .toLowerCase()
+              .contains(query),
+        )
+        .toList();
+
+    if (!mounted) {
+      return;
+    }
+
     setState(() {
-      _isLoading = true;
-      _errorMessage = null;
+      _coupons = filtered;
     });
-
-    try {
-      final customers =
-          await _repository.getCustomers();
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _customers = customers;
-        _isLoading = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _isLoading = false;
-        _errorMessage =
-            'Failed to load customers.';
-      });
-    }
   }
 
-  Future<void> _searchCustomers() async {
-    try {
-      final customers =
-          await _repository.searchCustomers(
-        _searchController.text,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _customers = customers;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _errorMessage =
-            'Failed to search customers.';
-      });
-    }
-  }
-
-  Future<void> _openCustomerForm({
-    Customer? customer,
+  Future<void> _openCouponForm({
+    Coupon? coupon,
   }) async {
     final saved =
-        await Navigator.of(context).push<bool>(
+        await Navigator.of(context)
+            .push<bool>(
       MaterialPageRoute(
-        builder: (_) => CustomerFormPage(
-          customer: customer,
+        builder: (_) =>
+            CouponFormPage(
+          coupon: coupon,
         ),
       ),
     );
 
-    if (saved == true && mounted) {
-      await _loadCustomers();
+    if (saved == true &&
+        mounted) {
+      await _loadCoupons();
     }
   }
 
-  Future<void> _openCustomer(
-    Customer customer,
-  ) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CustomerDetailsPage(
-          customer: customer,
-        ),
-      ),
-    );
-
-    if (mounted) {
-      await _loadCustomers();
-    }
-  }
-
-  Future<void> _deleteCustomer(
-    Customer customer,
+  Future<void> _deleteCoupon(
+    Coupon coupon,
   ) async {
     final confirmed =
         await showDialog<bool>(
@@ -147,10 +138,10 @@ class _CustomersPageState
       builder: (context) {
         return AlertDialog(
           title: const Text(
-            'Delete customer?',
+            'Delete coupon?',
           ),
           content: Text(
-            'Delete ${customer.name}?',
+            'Delete ${coupon.name}?',
           ),
           actions: [
             TextButton(
@@ -181,21 +172,21 @@ class _CustomersPageState
     }
 
     try {
-      await _repository.deleteCustomer(
-        customer.id,
+      await _repository.deleteCoupon(
+        coupon.id,
       );
 
       if (!mounted) {
         return;
       }
 
-      await _loadCustomers();
+      await _loadCoupons();
 
       ScaffoldMessenger.of(context)
           .showSnackBar(
         const SnackBar(
           content: Text(
-            'Customer deleted.',
+            'Coupon deleted.',
           ),
         ),
       );
@@ -208,82 +199,116 @@ class _CustomersPageState
           .showSnackBar(
         SnackBar(
           content: Text(
-            'Failed to delete customer: $error',
+            '$error',
           ),
         ),
       );
     }
   }
 
-  Widget _buildCustomerCard(
-    Customer customer,
+  String _formatMoney(
+    double value,
   ) {
-    final initial = customer.name
-        .trim()
-        .isEmpty
-        ? '?'
-        : customer.name
-            .trim()[0]
-            .toUpperCase();
+    return '${value.toStringAsFixed(2)} EGP';
+  }
 
+  Widget _buildCouponCard(
+    Coupon coupon,
+  ) {
     return Card(
-      margin: const EdgeInsets.only(
+      margin:
+          const EdgeInsets.only(
         bottom: 12,
       ),
-      clipBehavior: Clip.antiAlias,
+      clipBehavior:
+          Clip.antiAlias,
       child: ListTile(
         contentPadding:
             const EdgeInsets.symmetric(
           horizontal: 16,
-          vertical: 8,
+          vertical: 10,
         ),
-        leading: CircleAvatar(
-          child: Text(initial),
-        ),
-        title: Text(
-          customer.name,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
+        leading: const CircleAvatar(
+          child: Icon(
+            Icons.local_offer_outlined,
           ),
         ),
-        subtitle: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            Text(customer.phone),
-            const SizedBox(height: 2),
-            Text(
-              customer.paymentTypeName,
-            ),
-          ],
+        title: Text(
+          coupon.name,
+          style:
+              const TextStyle(
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+        subtitle: Padding(
+          padding:
+              const EdgeInsets.only(
+            top: 8,
+          ),
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment
+                    .start,
+            children: [
+              Text(
+                '${coupon.unitsPerCarton} Units / Carton',
+              ),
+              const SizedBox(
+                height: 4,
+              ),
+              Text(
+                'Carton Price: '
+                '${_formatMoney(
+                  coupon.cartonPrice,
+                )}',
+              ),
+              const SizedBox(
+                height: 4,
+              ),
+              Text(
+                'Unit Price: '
+                '${_formatMoney(
+                  coupon.unitPrice,
+                )}',
+                style:
+                    const TextStyle(
+                  fontWeight:
+                      FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
         ),
         trailing:
             PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'edit') {
-              _openCustomerForm(
-                customer: customer,
-              );
-            } else if (value == 'delete') {
-              _deleteCustomer(
-                customer,
+              _openCouponForm(
+                coupon: coupon,
               );
             }
+
+            if (value == 'delete') {
+              _deleteCoupon(coupon);
+            }
           },
-          itemBuilder: (_) => const [
+          itemBuilder: (_) =>
+              const [
             PopupMenuItem(
               value: 'edit',
-              child: Text('Edit'),
+              child: Text(
+                'Edit',
+              ),
             ),
             PopupMenuItem(
               value: 'delete',
-              child: Text('Delete'),
+              child: Text(
+                'Delete',
+              ),
             ),
           ],
         ),
-        onTap: () =>
-            _openCustomer(customer),
       ),
     );
   }
@@ -291,14 +316,16 @@ class _CustomersPageState
   Widget _buildBody() {
     if (_isLoading) {
       return const Center(
-        child: CircularProgressIndicator(),
+        child:
+            CircularProgressIndicator(),
       );
     }
 
     if (_errorMessage != null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding:
+              const EdgeInsets.all(24),
           child: Column(
             mainAxisSize:
                 MainAxisSize.min,
@@ -307,19 +334,22 @@ class _CustomersPageState
                 Icons.error_outline,
                 size: 48,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(
+                height: 12,
+              ),
               Text(
                 _errorMessage!,
                 textAlign:
                     TextAlign.center,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(
+                height: 16,
+              ),
               FilledButton(
                 onPressed:
-                    _loadCustomers,
-                child: const Text(
-                  'Retry',
-                ),
+                    _loadCoupons,
+                child:
+                    const Text('Retry'),
               ),
             ],
           ),
@@ -327,30 +357,41 @@ class _CustomersPageState
       );
     }
 
-    if (_customers.isEmpty) {
+    if (_coupons.isEmpty) {
       return RefreshIndicator(
-        onRefresh: _loadCustomers,
+        onRefresh:
+            _loadCoupons,
         child: ListView(
+          physics:
+              const AlwaysScrollableScrollPhysics(),
+          padding:
+              const EdgeInsets.only(
+            top: 120,
+          ),
           children: [
-            const SizedBox(height: 160),
             Icon(
-              Icons.people_outline,
+              Icons
+                  .local_offer_outlined,
               size: 64,
               color: Theme.of(context)
                   .colorScheme
                   .outline,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(
+              height: 16,
+            ),
             Center(
               child: Text(
-                _searchController.text
+                _searchController
+                        .text
                         .trim()
                         .isEmpty
-                    ? 'No customers yet.'
-                    : 'No customers found.',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium,
+                    ? 'No coupons yet.'
+                    : 'No coupons found.',
+                style:
+                    Theme.of(context)
+                        .textTheme
+                        .titleMedium,
               ),
             ),
           ],
@@ -359,18 +400,22 @@ class _CustomersPageState
     }
 
     return RefreshIndicator(
-      onRefresh: _loadCustomers,
+      onRefresh:
+          _loadCoupons,
       child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(
+        padding:
+            const EdgeInsets.fromLTRB(
           16,
           12,
           16,
           100,
         ),
-        itemCount: _customers.length,
-        itemBuilder: (context, index) {
-          return _buildCustomerCard(
-            _customers[index],
+        itemCount:
+            _coupons.length,
+        itemBuilder:
+            (context, index) {
+          return _buildCouponCard(
+            _coupons[index],
           );
         },
       ),
@@ -378,12 +423,13 @@ class _CustomersPageState
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+    BuildContext context,
+  ) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Customers',
-        ),
+        title:
+            const Text('Coupons'),
       ),
       body: Column(
         children: [
@@ -401,7 +447,7 @@ class _CustomersPageState
               decoration:
                   InputDecoration(
                 hintText:
-                    'Search by name or phone',
+                    'Search coupons...',
                 prefixIcon:
                     const Icon(
                   Icons.search,
@@ -431,21 +477,22 @@ class _CustomersPageState
               ),
             ),
           ),
+
           Expanded(
-            child: _buildBody(),
+            child:
+                _buildBody(),
           ),
         ],
       ),
       floatingActionButton:
           FloatingActionButton.extended(
         onPressed:
-            _openCustomerForm,
+            _openCouponForm,
         icon:
-            const Icon(Icons.person_add),
+            const Icon(Icons.add),
         label:
-            const Text('Customer'),
+            const Text('Coupon'),
       ),
     );
   }
 }
-

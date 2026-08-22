@@ -25,12 +25,32 @@ class PaymentRecord {
       invoiceId: map['invoice_id'] as int,
       customerId: map['customer_id'] as int,
       amount: (map['amount'] as num).toDouble(),
-      paymentMethod: PaymentMethodExtension.fromValue(
-        map['payment_method'] as String? ?? 'transfer',
+      paymentMethod: paymentMethodFromValue(
+        map['method'] as String?,
       ),
       createdAt: DateTime.parse(
         map['created_at'] as String,
       ),
     );
+  }
+
+  Map<String, Object?> toMap() {
+    return {
+      'id': id,
+      'invoice_id': invoiceId,
+      'customer_id': customerId,
+      'amount': amount,
+      'method': paymentMethod.value,
+      'created_at':
+          createdAt.toUtc().toIso8601String(),
+    };
+  }
+
+  bool get isCash {
+    return paymentMethod == PaymentMethod.cash;
+  }
+
+  bool get isTransfer {
+    return paymentMethod == PaymentMethod.transfer;
   }
 }

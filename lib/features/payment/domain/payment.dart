@@ -1,9 +1,5 @@
 import '../../customers/domain/payment_method.dart';
-
-enum PaymentStatus {
-  paid,
-  pending,
-}
+import 'payment_status.dart';
 
 class Payment {
   final int id;
@@ -23,21 +19,26 @@ class Payment {
     required this.amount,
     required this.method,
     required this.status,
-    this.reference,
+    required this.reference,
     required this.createdAt,
-    this.confirmedAt,
+    required this.confirmedAt,
   });
 
-  bool get isCash => method == PaymentMethod.cash;
+  bool get isPending {
+    return status == PaymentStatus.pending;
+  }
 
-  bool get isTransfer =>
-      method == PaymentMethod.transfer;
+  bool get isPaid {
+    return status == PaymentStatus.paid;
+  }
 
-  bool get isPaid =>
-      status == PaymentStatus.paid;
+  bool get isCash {
+    return method == PaymentMethod.cash;
+  }
 
-  bool get isPending =>
-      status == PaymentStatus.pending;
+  bool get isTransfer {
+    return method == PaymentMethod.transfer;
+  }
 
   factory Payment.fromMap(
     Map<String, Object?> map,
@@ -47,21 +48,22 @@ class Payment {
       customerId: map['customer_id'] as int,
       invoiceId: map['invoice_id'] as int,
       amount: (map['amount'] as num).toDouble(),
-      method: PaymentMethodExtension.fromValue(
-        map['method'] as String? ?? 'cash',
+      method: paymentMethodFromValue(
+        map['method'] as String?,
       ),
-      status: map['status'] == 'pending'
-          ? PaymentStatus.pending
-          : PaymentStatus.paid,
+      status: PaymentStatus.fromValue(
+        map['status'] as String?,
+      ),
       reference: map['reference'] as String?,
       createdAt: DateTime.parse(
         map['created_at'] as String,
       ),
-      confirmedAt: map['confirmed_at'] == null
-          ? null
-          : DateTime.parse(
-              map['confirmed_at'] as String,
-            ),
+      confirmedAt:
+          map['confirmed_at'] == null
+              ? null
+              : DateTime.parse(
+                  map['confirmed_at'] as String,
+                ),
     );
   }
 
@@ -72,10 +74,9 @@ class Payment {
       'invoice_id': invoiceId,
       'amount': amount,
       'method': method.value,
-      'status': status.name,
+      'status': status.value,
       'reference': reference,
-      'created_at':
-          createdAt.toUtc().toIso8601String(),
+      'created_at': createdAt.toUtc().toIso8601String(),
       'confirmed_at':
           confirmedAt?.toUtc().toIso8601String(),
     };

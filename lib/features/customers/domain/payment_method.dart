@@ -8,6 +8,7 @@ extension PaymentMethodExtension on PaymentMethod {
     switch (this) {
       case PaymentMethod.cash:
         return 'cash';
+
       case PaymentMethod.transfer:
         return 'transfer';
     }
@@ -17,18 +18,20 @@ extension PaymentMethodExtension on PaymentMethod {
     switch (this) {
       case PaymentMethod.cash:
         return 'Cash';
+
       case PaymentMethod.transfer:
         return 'Transfer';
     }
   }
+}
 
-  static PaymentMethod fromValue(String value) {
-    switch (value) {
-      case 'transfer':
-        return PaymentMethod.transfer;
-      case 'cash':
-      default:
-        return PaymentMethod.cash;
-    }
+PaymentMethod paymentMethodFromValue(String? value) {
+  switch (value) {
+    case 'transfer':
+      return PaymentMethod.transfer;
+
+    case 'cash':
+    default:
+      return PaymentMethod.cash;
   }
 }

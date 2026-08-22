@@ -1,32 +1,106 @@
+import 'package:sqflite/sqflite.dart';
+
+import '../../../core/storage/app_database.dart';
 import '../domain/product.dart';
 import '../domain/product_repository.dart';
 
 class LocalProductRepository implements ProductRepository {
-  final List<Product> _products = [
-    const Product(
-      id: 1,
-      name: 'Product A',
-      price: 100,
-    ),
-    const Product(
-      id: 2,
-      name: 'Product B',
-      price: 150,
-    ),
-    const Product(
-      id: 3,
-      name: 'Product C',
-      price: 200,
-    ),
-    const Product(
-      id: 4,
-      name: 'Product D',
-      price: 75,
-    ),
-  ];
+  Future<Database> get _database async {
+    return AppDatabase.database;
+  }
 
   @override
   Future<List<Product>> getProducts() async {
-    return List.unmodifiable(_products);
+    final database = await _database;
+
+    final rows = await database.query(
+      'products',
+      orderBy: 'name COLLATE NOCASE ASC',
+    );
+
+    return rows
+        .map(Product.fromMap)
+        .toList(growable: false);
+  }
+
+  @override
+  Future<int> addProduct({
+    required String name,
+    required double price,
+  }) async {
+    final normalizedName = name.trim();
+
+    if (normalizedName.isEmpty) {
+      throw ArgumentError('Product name is required.');
+    }
+
+    if (price <= 0) {
+      throw ArgumentError(
+        'Product price must be greater than zero.',
+      );
+    }
+
+    final database = await _database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    return database.insert(
+      'products',
+      {
+        'name': normalizedName,
+        'price': price,
+        'created_at': now,
+        'updated_at': now,
+      },
+    );
+  }
+
+  @override
+  Future<void> updateProduct({
+    required int id,
+    required String name,
+    required double price,
+  }) async {
+    final normalizedName = name.trim();
+
+    if (normalizedName.isEmpty) {
+      throw ArgumentError('Product name is required.');
+    }
+
+    if (price <= 0) {
+      throw ArgumentError(
+        'Product price must be greater than zero.',
+      );
+    }
+
+    final database = await _database;
+
+    final updatedRows = await database.update(
+      'products',
+      {
+        'name': normalizedName,
+        'price': price,
+        'updated_at':
+            DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    if (updatedRows == 0) {
+      throw StateError(
+        'Product with id $id was not found.',
+      );
+    }
+  }
+
+  @override
+  Future<void> deleteProduct(int id) async {
+    final database = await _database;
+
+    await database.delete(
+      'products',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 }
