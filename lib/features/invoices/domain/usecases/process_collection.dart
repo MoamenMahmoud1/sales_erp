@@ -48,15 +48,10 @@ class ProcessCollection {
     }
 
     // --------------------------------------------------
-    // 4. Nothing was received
+    // 4. Nothing was allocated
     //
     // There is no financial transaction to persist.
     // --------------------------------------------------
-
-    if (result.totalReceived == result.totalOutstanding &&
-        result.allocations.isEmpty) {
-      return result;
-    }
 
     if (result.allocations.isEmpty) {
       return result;
