@@ -1,6 +1,7 @@
 import '../entities/invoice.dart';
 import '../entities/money.dart';
 import '../entities/payment.dart';
+import '../results/collection_allocation.dart';
 import '../results/collection_result.dart';
 import 'invoice_calculator.dart';
 
@@ -28,8 +29,7 @@ class PaymentAllocationService {
 
     if (payment.cashAmount < Money.zero) {
       return CollectionResult.failure(
-        errorMessage:
-            'Cash amount cannot be negative.',
+        errorMessage: 'Cash amount cannot be negative.',
         totalOutstanding: totalOutstanding,
         totalReceived: totalReceived,
       );
@@ -37,8 +37,7 @@ class PaymentAllocationService {
 
     if (payment.transferAmount < Money.zero) {
       return CollectionResult.failure(
-        errorMessage:
-            'Transfer amount cannot be negative.',
+        errorMessage: 'Transfer amount cannot be negative.',
         totalOutstanding: totalOutstanding,
         totalReceived: totalReceived,
       );
@@ -50,8 +49,7 @@ class PaymentAllocationService {
 
     if (totalReceived > totalOutstanding) {
       return CollectionResult.failure(
-        errorMessage:
-            'Payment exceeds outstanding balance.',
+        errorMessage: 'Payment exceeds outstanding balance.',
         totalOutstanding: totalOutstanding,
         totalReceived: totalReceived,
       );
@@ -66,6 +64,7 @@ class PaymentAllocationService {
         totalOutstanding: totalOutstanding,
         totalReceived: totalReceived,
         updatedInvoices: invoices,
+        allocations: const [],
       );
     }
 
@@ -77,6 +76,7 @@ class PaymentAllocationService {
     var remainingTransfer = payment.transferAmount;
 
     final updatedInvoices = <Invoice>[];
+    final allocations = <CollectionAllocation>[];
 
     for (final invoice in invoices) {
       final invoiceRemaining =
@@ -121,6 +121,23 @@ class PaymentAllocationService {
 
       remainingTransfer =
           remainingTransfer - transferForInvoice;
+
+      // ------------------------------------------------
+      // Record allocation
+      // ------------------------------------------------
+
+      final totalAllocated =
+          cashForInvoice + transferForInvoice;
+
+      if (totalAllocated > Money.zero) {
+        allocations.add(
+          CollectionAllocation(
+            invoiceId: invoice.id,
+            cashAmount: cashForInvoice,
+            transferAmount: transferForInvoice,
+          ),
+        );
+      }
 
       // ------------------------------------------------
       // Payment allocated to this invoice
@@ -177,6 +194,7 @@ class PaymentAllocationService {
       totalOutstanding: totalOutstanding,
       totalReceived: totalReceived,
       updatedInvoices: updatedInvoices,
+      allocations: allocations,
     );
   }
 
@@ -206,4 +224,3 @@ class PaymentAllocationService {
         : second;
   }
 }
-

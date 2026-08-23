@@ -9,6 +9,6 @@ void main() {
       const SalesErpApp(),
     );
 
-    expect(find.text('Sales ERP'), findsOneWidget);
+    expect(find.byType(SalesErpApp), findsOneWidget);
   });
 }

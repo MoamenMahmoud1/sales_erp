@@ -1,5 +1,6 @@
 import '../entities/invoice.dart';
 import '../entities/money.dart';
+import 'collection_allocation.dart';
 
 class CollectionResult {
   final bool isSuccess;
@@ -9,6 +10,7 @@ class CollectionResult {
   final Money totalReceived;
 
   final List<Invoice> updatedInvoices;
+  final List<CollectionAllocation> allocations;
 
   const CollectionResult({
     required this.isSuccess,
@@ -16,19 +18,22 @@ class CollectionResult {
     required this.totalOutstanding,
     required this.totalReceived,
     required this.updatedInvoices,
+    required this.allocations,
   });
 
   factory CollectionResult.success({
     required Money totalOutstanding,
     required Money totalReceived,
     required List<Invoice> updatedInvoices,
+    required List<CollectionAllocation> allocations,
   }) {
     return CollectionResult(
       isSuccess: true,
       errorMessage: null,
       totalOutstanding: totalOutstanding,
       totalReceived: totalReceived,
-      updatedInvoices: updatedInvoices,
+      updatedInvoices: List.unmodifiable(updatedInvoices),
+      allocations: List.unmodifiable(allocations),
     );
   }
 
@@ -43,7 +48,7 @@ class CollectionResult {
       totalOutstanding: totalOutstanding,
       totalReceived: totalReceived,
       updatedInvoices: const [],
+      allocations: const [],
     );
   }
 }
-
