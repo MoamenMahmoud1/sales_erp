@@ -22,27 +22,29 @@ class Invoice {
     this.coupon,
     required this.payment,
   });
+
   Invoice copyWith({
-  int? id,
-  int? customerId,
-  DateTime? createdAt,
-  DateTime? updatedAt,
-  DateTime? paidAt,
-  List<InvoiceItem>? items,
-  Coupon? coupon,
-  Payment? payment,
+    int? id,
+    int? customerId,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    DateTime? paidAt,
+    List<InvoiceItem>? items,
+    Coupon? coupon,
+    Payment? payment,
   }) {
-  return Invoice(
-    id: id ?? this.id,
-    customerId: customerId ?? this.customerId,
-    createdAt: createdAt ?? this.createdAt,
-    updatedAt: updatedAt ?? this.updatedAt,
-    paidAt: paidAt ?? this.paidAt,
-    items: items ?? this.items,
-    coupon: coupon ?? this.coupon,
-    payment: payment ?? this.payment,
-  );
+    return Invoice(
+      id: id ?? this.id,
+      customerId: customerId ?? this.customerId,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      paidAt: paidAt ?? this.paidAt,
+      items: items ?? this.items,
+      coupon: coupon ?? this.coupon,
+      payment: payment ?? this.payment,
+    );
   }
 
   bool get isPaid => paidAt != null;
 }
+

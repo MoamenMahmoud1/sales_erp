@@ -12,18 +12,21 @@ class InvoiceItem {
     required this.unitPrice,
     required this.quantity,
   });
+
   InvoiceItem copyWith({
-  int? productId,
-  String? productName,
-  Money? unitPrice,
-  int? quantity,
+    int? productId,
+    String? productName,
+    Money? unitPrice,
+    int? quantity,
   }) {
-  return InvoiceItem(
-    productId: productId ?? this.productId,
-    productName: productName ?? this.productName,
-    unitPrice: unitPrice ?? this.unitPrice,
-    quantity: quantity ?? this.quantity,
-  );
-}
+    return InvoiceItem(
+      productId: productId ?? this.productId,
+      productName: productName ?? this.productName,
+      unitPrice: unitPrice ?? this.unitPrice,
+      quantity: quantity ?? this.quantity,
+    );
+  }
+
   Money get total => unitPrice * quantity;
 }
+

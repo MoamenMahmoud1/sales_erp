@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'core/presentation/dashboard_page.dart';
+import 'features/invoices/presentation/invoice_demo_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,7 +42,7 @@ class SalesErpApp extends StatelessWidget {
 
       themeMode: ThemeMode.system,
 
-      home: const DashboardPage(),
+      home: const InvoiceDemoPage(),
     );
   }
 }

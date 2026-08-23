@@ -11,25 +11,13 @@ class Payment {
 
   Money get totalPaid => cashAmount + transferAmount;
 
-  bool isValidFor(Money invoiceTotal) {
-    if (cashAmount < Money.zero) {
-      return false;
-    }
-
-    if (transferAmount < Money.zero) {
-      return false;
-    }
-
-    return totalPaid <= invoiceTotal;
-  }
-
   Payment copyWith({
-  Money? cashAmount,
-  Money? transferAmount,
+    Money? cashAmount,
+    Money? transferAmount,
   }) {
-  return Payment(
-    cashAmount: cashAmount ?? this.cashAmount,
-    transferAmount: transferAmount ?? this.transferAmount,
-  );
-}
+    return Payment(
+      cashAmount: cashAmount ?? this.cashAmount,
+      transferAmount: transferAmount ?? this.transferAmount,
+    );
+  }
 }
