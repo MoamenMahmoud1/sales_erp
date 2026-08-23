@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../data/local_coupon_repository.dart';
+import '../data/database/coupon_database.dart';
 import '../domain/coupon.dart';
 
 class CouponFormPage extends StatefulWidget {

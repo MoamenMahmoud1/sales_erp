@@ -1,7 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
-import '../../../core/storage/app_database.dart';
-import '../domain/coupon.dart';
+import '../../../../core/storage/app_database.dart';
+import '../../domain/coupon.dart';
 
 class LocalCouponRepository {
   Future<Database> get _database async {
