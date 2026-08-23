@@ -1,5 +1,5 @@
-
 import '../entities/payment.dart';
+import '../entities/payment_transaction.dart';
 import '../repositories/invoice_repository.dart';
 import '../results/collection_result.dart';
 import '../services/payment_allocation_service.dart';
@@ -21,8 +21,7 @@ class ProcessCollection {
     // 1. Get customer's invoices
     // --------------------------------------------------
 
-    final invoices =
-        await repository.getCustomerInvoices(
+    final invoices = await repository.getCustomerInvoices(
       customerId,
     );
 
@@ -30,11 +29,12 @@ class ProcessCollection {
     // 2. Allocate payment
     // --------------------------------------------------
 
-    final result =
-        allocationService.allocate(
+    final now = DateTime.now();
+
+    final result = allocationService.allocate(
       invoices: invoices,
       payment: payment,
-      now: DateTime.now(),
+      now: now,
     );
 
     // --------------------------------------------------
@@ -48,15 +48,46 @@ class ProcessCollection {
     }
 
     // --------------------------------------------------
-    // 4. Save updated invoices
+    // 4. Nothing was received
+    //
+    // There is no financial transaction to persist.
     // --------------------------------------------------
 
-    await repository.updateInvoices(
-      result.updatedInvoices,
+    if (result.totalReceived == result.totalOutstanding &&
+        result.allocations.isEmpty) {
+      return result;
+    }
+
+    if (result.allocations.isEmpty) {
+      return result;
+    }
+
+    // --------------------------------------------------
+    // 5. Create payment transaction
+    //
+    // id = 0 because SQLite generates it.
+    // --------------------------------------------------
+
+    final transaction = PaymentTransaction(
+      id: 0,
+      customerId: customerId,
+      cashAmount: payment.cashAmount,
+      transferAmount: payment.transferAmount,
+      createdAt: now,
     );
 
     // --------------------------------------------------
-    // 5. Return result
+    // 6. Persist the complete collection atomically
+    // --------------------------------------------------
+
+    await repository.saveCollection(
+      transaction: transaction,
+      allocations: result.allocations,
+      updatedInvoices: result.updatedInvoices,
+    );
+
+    // --------------------------------------------------
+    // 7. Return result
     // --------------------------------------------------
 
     return result;
