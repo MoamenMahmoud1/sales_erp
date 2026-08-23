@@ -2,10 +2,18 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
 class InvoiceDatabase {
-  static const _databaseName = 'sales_erp.db';
+  static const _defaultDatabaseName = 'sales_erp.db';
   static const _databaseVersion = 1;
 
+  final String databaseName;
+  final String? databasePath;
+
   Database? _database;
+
+  InvoiceDatabase({
+    this.databaseName = _defaultDatabaseName,
+    this.databasePath,
+  });
 
   Future<Database> get database async {
     if (_database != null) {
@@ -18,11 +26,11 @@ class InvoiceDatabase {
   }
 
   Future<Database> _openDatabase() async {
-    final databasePath = await getDatabasesPath();
+    final basePath = databasePath ?? await getDatabasesPath();
 
     final path = join(
-      databasePath,
-      _databaseName,
+      basePath,
+      databaseName,
     );
 
     return openDatabase(
@@ -193,4 +201,3 @@ class InvoiceDatabase {
     _database = null;
   }
 }
-
