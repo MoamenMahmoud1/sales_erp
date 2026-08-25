@@ -1,34 +1,42 @@
 import 'package:flutter/material.dart';
 
-import '../../features/coupons/presentation/coupon_form_page.dart';
 import '../../features/coupons/presentation/coupons_page.dart';
 import '../../features/customers/presentation/customers_page.dart';
 import '../../features/payment/presentation/payments_page.dart';
-import '../../features/products/presentation/product_form_page.dart';
 import '../../features/products/presentation/products_page.dart';
+import '../../features/products/domain/product_repository.dart';
 import '../../features/sales/presentation/invoices_page.dart';
 import '../storage/app_database.dart';
+import '../theme/app_theme.dart';
 
 class DashboardPage extends StatefulWidget {
+  final Future<void> Function() onLogout;
+  final AppThemeController themeController;
+  final ProductRepository? productRepository;
+
   const DashboardPage({
     super.key,
+    required this.onLogout,
+    required this.themeController,
+    this.productRepository,
   });
 
   @override
-  State<DashboardPage> createState() =>
-      _DashboardPageState();
+  State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState
-    extends State<DashboardPage> {
-  bool _isLoading = true;
-  String? _errorMessage;
-
-  int _customersCount = 0;
-  int _productsCount = 0;
-  int _invoicesCount = 0;
-
-  double _paymentsTotal = 0;
+class _DashboardPageState extends State<DashboardPage> {
+  bool _loading = true;
+  String? _error;
+  int _customers = 0;
+  int _products = 0;
+  int _invoices = 0;
+  double _invoiceValue = 0;
+  double _outstanding = 0;
+  double _cash = 0;
+  double _transfers = 0;
+  String _topCustomer = 'No data';
+  String _lowestCustomer = 'No data';
 
   @override
   void initState() {
@@ -39,778 +47,253 @@ class _DashboardPageState
   Future<void> _loadDashboard() async {
     if (mounted) {
       setState(() {
-        _isLoading = true;
-        _errorMessage = null;
+        _loading = true;
+        _error = null;
       });
     }
-
     try {
-      final database =
-          await AppDatabase.database;
-
+      final database = await AppDatabase.database;
       final results = await Future.wait([
-        database.rawQuery(
-          '''
-          SELECT COUNT(*) AS count
-          FROM customers
-          ''',
-        ),
-        database.rawQuery(
-          '''
-          SELECT COUNT(*) AS count
-          FROM products
-          ''',
-        ),
-        database.rawQuery(
-          '''
-          SELECT COUNT(*) AS count
+        database.rawQuery('SELECT COUNT(*) AS count FROM customers'),
+        database.rawQuery('SELECT COUNT(*) AS count FROM products'),
+        database.rawQuery('SELECT COUNT(*) AS count FROM invoices'),
+        database.rawQuery('''
+          SELECT COALESCE(SUM(total), 0) AS invoice_value,
+            COALESCE(SUM(CASE WHEN id NOT IN (
+              SELECT invoice_id FROM payments WHERE status = 'paid'
+            ) THEN total ELSE 0 END), 0) AS outstanding
           FROM invoices
-          ''',
-        ),
-        database.rawQuery(
-          '''
-          SELECT COALESCE(
-            SUM(amount),
-            0
-          ) AS total
-
+        '''),
+        database.rawQuery('''
+          SELECT COALESCE(SUM(CASE WHEN method = 'cash' AND status = 'paid'
+            THEN amount ELSE 0 END), 0) AS cash,
+            COALESCE(SUM(CASE WHEN method = 'transfer' AND status = 'paid'
+            THEN amount ELSE 0 END), 0) AS transfers
           FROM payments
-
-          WHERE status = ?
-          ''',
-          ['paid'],
-        ),
+        '''),
+        database.rawQuery('''
+          SELECT c.name FROM invoices i
+          INNER JOIN customers c ON c.id = i.customer_id
+          GROUP BY i.customer_id ORDER BY SUM(i.total) DESC LIMIT 1
+        '''),
+        database.rawQuery('''
+          SELECT c.name FROM invoices i
+          INNER JOIN customers c ON c.id = i.customer_id
+          GROUP BY i.customer_id ORDER BY SUM(i.total) ASC LIMIT 1
+        '''),
       ]);
-
-      final customersResult =
-          results[0];
-
-      final productsResult =
-          results[1];
-
-      final invoicesResult =
-          results[2];
-
-      final paymentsResult =
-          results[3];
-
-      final customersCount =
-          (customersResult.first['count']
-                  as num)
-              .toInt();
-
-      final productsCount =
-          (productsResult.first['count']
-                  as num)
-              .toInt();
-
-      final invoicesCount =
-          (invoicesResult.first['count']
-                  as num)
-              .toInt();
-
-      final paymentsTotal =
-          (paymentsResult.first['total']
-                  as num)
-              .toDouble();
-
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
+      final totals = results[3].first;
+      final payments = results[4].first;
       setState(() {
-        _customersCount =
-            customersCount;
-
-        _productsCount =
-            productsCount;
-
-        _invoicesCount =
-            invoicesCount;
-
-        _paymentsTotal =
-            paymentsTotal;
-
-        _isLoading = false;
+        _customers = (results[0].first['count'] as num).toInt();
+        _products = (results[1].first['count'] as num).toInt();
+        _invoices = (results[2].first['count'] as num).toInt();
+        _invoiceValue = (totals['invoice_value'] as num).toDouble();
+        _outstanding = (totals['outstanding'] as num).toDouble();
+        _cash = (payments['cash'] as num).toDouble();
+        _transfers = (payments['transfers'] as num).toDouble();
+        _topCustomer = results[5].isEmpty ? 'No data' : '${results[5].first['name']}';
+        _lowestCustomer = results[6].isEmpty ? 'No data' : '${results[6].first['name']}';
+        _loading = false;
       });
-    } catch (error) {
-      if (!mounted) {
-        return;
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Failed to load dashboard data.';
+        });
       }
-
-      setState(() {
-        _isLoading = false;
-        _errorMessage =
-            'Failed to load dashboard data.';
-      });
     }
   }
 
-  String _formatMoney(
-    double value,
-  ) {
-    return '${value.toStringAsFixed(2)} EGP';
-  }
+  String _money(double value) => '${value.toStringAsFixed(2)} EGP';
 
-  Future<void> _openPage(
-    Widget page,
-  ) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => page,
-      ),
-    );
-
-    if (!mounted) {
-      return;
+  Future<void> _openSection(String value) async {
+    final Widget page;
+    switch (value) {
+      case 'customers':
+        page = const CustomersPage();
+      case 'products':
+        page = ProductsPage(repository: widget.productRepository);
+      case 'coupons':
+        page = const CouponsPage();
+      case 'invoices':
+        page = const InvoicesPage();
+      case 'payments':
+        page = const PaymentsPage();
+      default:
+        return;
     }
-
-    await _loadDashboard();
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    if (mounted) await _loadDashboard();
   }
 
-  Widget _buildDashboard() {
-    final theme =
-        Theme.of(context);
-
-    return RefreshIndicator(
-      onRefresh: _loadDashboard,
-      child: SingleChildScrollView(
-        physics:
-            const AlwaysScrollableScrollPhysics(),
-        padding:
-            const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
-          children: [
-            // ==================================================
-            // HEADER
-            // ==================================================
-
-            Text(
-              'Dashboard',
-              style:
-                  theme.textTheme.headlineMedium
-                      ?.copyWith(
-                fontWeight:
-                    FontWeight.bold,
+  Future<void> _showMenu() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Workspace', style: Theme.of(sheetContext).textTheme.titleLarge),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _MenuItem('Customers', Icons.people_alt_outlined, () => _openSection('customers')),
+                  _MenuItem('Products', Icons.inventory_2_outlined, () => _openSection('products')),
+                  _MenuItem('Coupons', Icons.local_offer_outlined, () => _openSection('coupons')),
+                  _MenuItem('Invoices', Icons.receipt_long_outlined, () => _openSection('invoices')),
+                  _MenuItem('Payments', Icons.payments_outlined, () => _openSection('payments')),
+                ],
               ),
-            ),
-
-            const SizedBox(
-              height: 6,
-            ),
-
-            Text(
-              'Manage your sales business',
-              style:
-                  theme.textTheme.bodyLarge
-                      ?.copyWith(
-                color: theme
-                    .colorScheme
-                    .onSurfaceVariant,
-              ),
-            ),
-
-            const SizedBox(
-              height: 24,
-            ),
-
-            // ==================================================
-            // SUMMARY CARDS
-            // ==================================================
-
-            Row(
-              children: [
-                Expanded(
-                  child:
-                      _SummaryCard(
-                    icon: Icons
-                        .people_alt_outlined,
-                    title: 'Customers',
-                    value:
-                        _customersCount
-                            .toString(),
-                  ),
-                ),
-
-                const SizedBox(
-                  width: 12,
-                ),
-
-                Expanded(
-                  child:
-                      _SummaryCard(
-                    icon: Icons
-                        .receipt_long_outlined,
-                    title: 'Invoices',
-                    value:
-                        _invoicesCount
-                            .toString(),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(
-              height: 12,
-            ),
-
-            Row(
-              children: [
-                Expanded(
-                  child:
-                      _SummaryCard(
-                    icon: Icons
-                        .payments_outlined,
-                    title: 'Payments',
-                    value:
-                        _formatMoney(
-                      _paymentsTotal,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(
-                  width: 12,
-                ),
-
-                Expanded(
-                  child:
-                      _SummaryCard(
-                    icon: Icons
-                        .inventory_2_outlined,
-                    title: 'Products',
-                    value:
-                        _productsCount
-                            .toString(),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(
-              height: 32,
-            ),
-
-            // ==================================================
-            // MANAGEMENT
-            // ==================================================
-
-            Text(
-              'Management',
-              style:
-                  theme.textTheme.titleLarge
-                      ?.copyWith(
-                fontWeight:
-                    FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(
-              height: 14,
-            ),
-
-            _DashboardButton(
-              icon:
-                  Icons.people_alt_outlined,
-              title: 'Customers',
-              subtitle:
-                  'Manage customers and their accounts',
-              onTap: () {
-                _openPage(
-                  const CustomersPage(),
-                );
-              },
-            ),
-
-            const SizedBox(
-              height: 12,
-            ),
-
-            _DashboardButton(
-              icon:
-                  Icons.inventory_2_outlined,
-              title: 'Products',
-              subtitle:
-                  'Manage products and prices',
-              onTap: () {
-                _openPage(
-                  const ProductsPage(),
-                );
-              },
-            ),
-
-            const SizedBox(
-              height: 12,
-            ),
-
-            _DashboardButton(
-              icon:
-                  Icons.local_offer_outlined,
-              title: 'Coupons',
-              subtitle:
-                  'Manage coupons and customer coupons',
-              onTap: () {
-                _openPage(
-                  const CouponsPage(),
-                );
-              },
-            ),
-
-            const SizedBox(
-              height: 12,
-            ),
-
-            _DashboardButton(
-              icon:
-                  Icons.receipt_long_outlined,
-              title: 'Invoices',
-              subtitle:
-                  'Create and manage sales invoices',
-              onTap: () {
-                _openPage(
-                  const InvoicesPage(),
-                );
-              },
-            ),
-
-            const SizedBox(
-              height: 12,
-            ),
-
-            _DashboardButton(
-              icon:
-                  Icons.payments_outlined,
-              title: 'Payments',
-              subtitle:
-                  'Manage cash and bank transfers',
-              onTap: () {
-                _openPage(
-                  const PaymentsPage(),
-                );
-              },
-            ),
-
-            const SizedBox(
-              height: 32,
-            ),
-
-            // ==================================================
-            // QUICK ACTIONS
-            // ==================================================
-
-            Text(
-              'Quick Actions',
-              style:
-                  theme.textTheme.titleLarge
-                      ?.copyWith(
-                fontWeight:
-                    FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(
-              height: 14,
-            ),
-
-            Row(
-              children: [
-                Expanded(
-                  child:
-                      _QuickAction(
-                    icon: Icons
-                        .person_add_alt_1,
-                    title:
-                        'New Customer',
-                    onTap: () {
-                      _openPage(
-                        const CustomersPage(),
-                      );
-                    },
-                  ),
-                ),
-
-                const SizedBox(
-                  width: 12,
-                ),
-
-                Expanded(
-                  child:
-                      _QuickAction(
-                    icon: Icons
-                        .add_shopping_cart,
-                    title:
-                        'New Invoice',
-                    onTap: () {
-                      _openPage(
-                        const InvoicesPage(),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(
-              height: 12,
-            ),
-
-            Row(
-              children: [
-                Expanded(
-                  child:
-                      _QuickAction(
-                    icon: Icons
-                        .add_box_outlined,
-                    title:
-                        'New Product',
-                    onTap: () {
-                      _openPage(
-                        const ProductFormPage(),
-                      );
-                    },
-                  ),
-                ),
-
-                const SizedBox(
-                  width: 12,
-                ),
-
-                Expanded(
-                  child:
-                      _QuickAction(
-                    icon: Icons
-                        .local_offer_outlined,
-                    title:
-                        'New Coupon',
-                    onTap: () {
-                      _openPage(
-                        const CouponFormPage(),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(
-              height: 40,
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Sales ERP',
-          style: TextStyle(
-            fontWeight:
-                FontWeight.bold,
+        title: const Text('Sales ERP', style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(tooltip: 'Menu', icon: const Icon(Icons.menu_rounded), onPressed: _showMenu),
+          PopupMenuButton<AppThemeMode>(
+            tooltip: 'Theme',
+            icon: const Icon(Icons.palette_outlined),
+            onSelected: widget.themeController.setMode,
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: AppThemeMode.light, child: Text('Light')),
+              PopupMenuItem(value: AppThemeMode.mid, child: Text('Mid')),
+              PopupMenuItem(value: AppThemeMode.dark, child: Text('Dark')),
+            ],
           ),
-        ),
+          IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: widget.onLogout),
+        ],
       ),
-      body: _isLoading
-          ? const Center(
-              child:
-                  CircularProgressIndicator(),
-            )
-          : _errorMessage != null
-              ? _buildErrorState()
-              : _buildDashboard(),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? _ErrorState(message: _error!, onRetry: _loadDashboard)
+              : RefreshIndicator(onRefresh: _loadDashboard, child: _buildBody(context)),
     );
   }
 
-  Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding:
-            const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize:
-              MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              size: 48,
-            ),
+  Widget _buildBody(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+      children: [
+        Text('Good to see you', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text('Here is today\'s business at a glance.', style: theme.textTheme.bodyLarge),
+        const SizedBox(height: 24),
+        _SectionTitle('Financial overview'),
+        const SizedBox(height: 12),
+        LayoutBuilder(builder: (context, constraints) {
+          final width = constraints.maxWidth < 600 ? (constraints.maxWidth - 12) / 2 : (constraints.maxWidth - 36) / 4;
+          return Wrap(spacing: 12, runSpacing: 12, children: [
+            _MetricCard(width, 'Invoice value', _money(_invoiceValue), Icons.receipt_long_outlined),
+            _MetricCard(width, 'Outstanding', _money(_outstanding), Icons.hourglass_bottom_outlined),
+            _MetricCard(width, 'Cash received', _money(_cash), Icons.payments_outlined),
+            _MetricCard(width, 'Transfers', _money(_transfers), Icons.account_balance_outlined),
+          ]);
+        }),
+        const SizedBox(height: 12),
+        LayoutBuilder(builder: (context, constraints) {
+          final width = constraints.maxWidth < 600 ? constraints.maxWidth : (constraints.maxWidth - 12) / 2;
+          return Wrap(spacing: 12, runSpacing: 12, children: [
+            _InsightCard(width, 'Top customer', _topCustomer, Icons.trending_up),
+            _InsightCard(width, 'Lowest sales customer', _lowestCustomer, Icons.trending_down),
+          ]);
+        }),
+        const SizedBox(height: 28),
+        _SectionTitle('Activity'),
+        const SizedBox(height: 12),
+        Wrap(spacing: 12, runSpacing: 12, children: [
+          _CountCard('Customers', '$_customers', Icons.people_alt_outlined),
+          _CountCard('Products', '$_products', Icons.inventory_2_outlined),
+          _CountCard('Invoices', '$_invoices', Icons.receipt_long_outlined),
+        ]),
+      ],
+    );
+  }
+}
 
-            const SizedBox(
-              height: 12,
-            ),
-
-            Text(
-              _errorMessage!,
-              textAlign:
-                  TextAlign.center,
-            ),
-
-            const SizedBox(
-              height: 16,
-            ),
-
-            FilledButton(
-              onPressed:
-                  _loadDashboard,
-              child:
-                  const Text('Retry'),
-            ),
-          ],
+class _MenuItem extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _MenuItem(this.label, this.icon, this.onTap);
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 104,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          Navigator.pop(context);
+          onTap();
+        },
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(children: [Icon(icon), const SizedBox(height: 8), Text(label, overflow: TextOverflow.ellipsis)]),
+          ),
         ),
       ),
     );
   }
 }
 
-// ================================================================
-// SUMMARY CARD
-// ================================================================
+class _SectionTitle extends StatelessWidget {
+  final String text;
+  const _SectionTitle(this.text);
+  @override
+  Widget build(BuildContext context) => Text(text, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold));
+}
 
-class _SummaryCard
-    extends StatelessWidget {
-  final IconData icon;
-  final String title;
+class _MetricCard extends StatelessWidget {
+  final double width;
+  final String label;
   final String value;
-
-  const _SummaryCard({
-    required this.icon,
-    required this.title,
-    required this.value,
-  });
-
-  @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final theme =
-        Theme.of(context);
-
-    return Card(
-      elevation: 0,
-      child: Padding(
-        padding:
-            const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
-          children: [
-            Icon(
-              icon,
-              size: 28,
-              color:
-                  theme.colorScheme.primary,
-            ),
-
-            const SizedBox(
-              height: 12,
-            ),
-
-            Text(
-              value,
-              style:
-                  theme.textTheme.titleLarge
-                      ?.copyWith(
-                fontWeight:
-                    FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(
-              height: 4,
-            ),
-
-            Text(
-              title,
-              style:
-                  theme.textTheme.bodyMedium
-                      ?.copyWith(
-                color: theme
-                    .colorScheme
-                    .onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ================================================================
-// DASHBOARD BUTTON
-// ================================================================
-
-class _DashboardButton
-    extends StatelessWidget {
   final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _DashboardButton({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
+  const _MetricCard(this.width, this.label, this.value, this.icon);
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final theme =
-        Theme.of(context);
-
-    return Card(
-      elevation: 0,
-      clipBehavior:
-          Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding:
-              const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration:
-                    BoxDecoration(
-                  color: theme
-                      .colorScheme
-                      .primaryContainer,
-                  borderRadius:
-                      BorderRadius.circular(
-                    14,
-                  ),
-                ),
-                child: Icon(
-                  icon,
-                  color: theme
-                      .colorScheme
-                      .onPrimaryContainer,
-                ),
-              ),
-
-              const SizedBox(
-                width: 16,
-              ),
-
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style:
-                          theme.textTheme.titleMedium
-                              ?.copyWith(
-                        fontWeight:
-                            FontWeight.bold,
-                      ),
-                    ),
-
-                    const SizedBox(
-                      height: 4,
-                    ),
-
-                    Text(
-                      subtitle,
-                      style:
-                          theme.textTheme.bodyMedium
-                              ?.copyWith(
-                        color: theme
-                            .colorScheme
-                            .onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const Icon(
-                Icons.chevron_right,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(width: width, child: Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(icon, color: Theme.of(context).colorScheme.primary), const SizedBox(height: 14), Text(value, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis), const SizedBox(height: 4), Text(label)]))));
 }
 
-// ================================================================
-// QUICK ACTION
-// ================================================================
-
-class _QuickAction
-    extends StatelessWidget {
+class _CountCard extends StatelessWidget {
+  final String label;
+  final String value;
   final IconData icon;
-  final String title;
-  final VoidCallback onTap;
-
-  const _QuickAction({
-    required this.icon,
-    required this.title,
-    required this.onTap,
-  });
-
+  const _CountCard(this.label, this.value, this.icon);
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final theme =
-        Theme.of(context);
-
-    return Card(
-      elevation: 0,
-      clipBehavior:
-          Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding:
-              const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 18,
-          ),
-          child: Column(
-            children: [
-              Icon(
-                icon,
-                size: 30,
-                color:
-                    theme.colorScheme.primary,
-              ),
-
-              const SizedBox(
-                height: 10,
-              ),
-
-              Text(
-                title,
-                textAlign:
-                    TextAlign.center,
-                style:
-                    const TextStyle(
-                  fontWeight:
-                      FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(width: 150, child: Card(child: ListTile(leading: Icon(icon), title: Text(value, style: const TextStyle(fontWeight: FontWeight.bold)), subtitle: Text(label))));
 }
 
+class _InsightCard extends StatelessWidget {
+  final double width;
+  final String label;
+  final String value;
+  final IconData icon;
+  const _InsightCard(this.width, this.label, this.value, this.icon);
+  @override
+  Widget build(BuildContext context) => SizedBox(width: width, child: Card(child: ListTile(leading: CircleAvatar(child: Icon(icon)), title: Text(label), subtitle: Text(value, overflow: TextOverflow.ellipsis))));
+}
+
+class _ErrorState extends StatelessWidget {
+  final String message;
+  final Future<void> Function() onRetry;
+  const _ErrorState({required this.message, required this.onRetry});
+  @override
+  Widget build(BuildContext context) => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Text(message), const SizedBox(height: 12), FilledButton(onPressed: onRetry, child: const Text('Retry'))]));
+}

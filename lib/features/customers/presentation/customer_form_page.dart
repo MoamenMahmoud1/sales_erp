@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../data/local_customer_repository.dart';
 import '../domain/customer.dart';
+import '../domain/customer_repository.dart';
 
 class CustomerFormPage extends StatefulWidget {
   final Customer? customer;
+  final CustomerRepository? repository;
 
   const CustomerFormPage({
     super.key,
     this.customer,
+    this.repository,
   });
 
   bool get isEditing => customer != null;
@@ -23,6 +26,9 @@ class _CustomerFormPageState
   final _formKey = GlobalKey<FormState>();
 
   final _repository = LocalCustomerRepository();
+
+  CustomerRepository get _dataSource =>
+      widget.repository ?? _repository;
 
   late final TextEditingController _nameController;
   late final TextEditingController _phoneController;

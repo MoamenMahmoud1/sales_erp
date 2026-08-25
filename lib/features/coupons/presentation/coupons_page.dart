@@ -182,6 +182,10 @@ class _CouponsPageState
 
       await _loadCoupons();
 
+      if (!mounted) {
+        return;
+      }
+
       ScaffoldMessenger.of(context)
           .showSnackBar(
         const SnackBar(

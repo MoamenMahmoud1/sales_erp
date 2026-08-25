@@ -16,8 +16,6 @@ class InvoiceEditorPage extends StatefulWidget {
     this.invoiceId,
   });
 
-  bool get isEditing => invoiceId != null;
-
   @override
   State<InvoiceEditorPage> createState() => _InvoiceEditorPageState();
 }
@@ -25,198 +23,81 @@ class InvoiceEditorPage extends StatefulWidget {
 class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
   final _productRepository = LocalProductRepository();
   final _saleRepository = LocalSaleRepository();
-
-  List<Product> _products = [];
   final Map<int, int> _quantities = {};
-
-  bool _isLoading = true;
-  bool _isSaving = false;
+  List<Product> _products = const [];
+  bool _loading = true;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadProducts();
   }
 
-  Future<void> _load() async {
+  Future<void> _loadProducts() async {
     final products = await _productRepository.getProducts();
-
-    if (widget.invoiceId != null) {
-      final invoice = await _saleRepository.getInvoice(
-        widget.invoiceId!,
-      );
-
-      if (invoice != null) {
-        _quantities.addAll(invoice.products);
-      }
-    }
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _products = products;
-      _isLoading = false;
-    });
-  }
-
-  void _changeQuantity(
-    Product product,
-    int change,
-  ) {
-    final currentQuantity = _quantities[product.id] ?? 0;
-    final newQuantity = currentQuantity + change;
-
-    setState(() {
-      if (newQuantity <= 0) {
-        _quantities.remove(product.id);
-      } else {
-        _quantities[product.id] = newQuantity;
-      }
-    });
-  }
-
-  PaymentMethod _getPaymentMethod() {
-    switch (widget.customer.paymentType) {
-      case CustomerPaymentType.cash:
-        return PaymentMethod.cash;
-      case CustomerPaymentType.bankTransfer:
-        return PaymentMethod.transfer;
-    }
+    if (mounted) setState(() { _products = products; _loading = false; });
   }
 
   Future<void> _save() async {
-    if (_quantities.isEmpty || _isSaving) {
-      return;
-    }
-
-    setState(() {
-      _isSaving = true;
-    });
-
+    if (_quantities.isEmpty || _saving) return;
+    setState(() => _saving = true);
     try {
-      final products = Map<int, int>.from(_quantities);
-
-      if (widget.isEditing) {
-        await _saleRepository.updateInvoice(
-          invoiceId: widget.invoiceId!,
-          products: products,
-        );
-      } else {
-        await _saleRepository.createInvoice(
-          customerId: widget.customer.id,
-          products: products,
-          paymentMethod: _getPaymentMethod(),
-        );
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      Navigator.of(context).pop(true);
+      await _saleRepository.createInvoice(
+        customerId: widget.customer.id,
+        products: _quantities,
+        paymentMethod: widget.customer.paymentType == CustomerPaymentType.cash
+            ? PaymentMethod.cash
+            : PaymentMethod.transfer,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.isEditing
-              ? 'Edit Invoice'
-              : 'New Invoice',
-        ),
-      ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _products.length,
-        itemBuilder: (context, index) {
-          final product = _products[index];
-          final quantity = _quantities[product.id] ?? 0;
-
-          return Card(
-            margin: const EdgeInsets.only(
-              bottom: 12,
-            ),
-            child: ListTile(
-              title: Text(product.name),
-              subtitle: Text(
-                '${product.price.toStringAsFixed(2)} EGP',
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    onPressed: quantity == 0
-                        ? null
-                        : () {
-                            _changeQuantity(
-                              product,
-                              -1,
-                            );
-                          },
-                    icon: const Icon(
-                      Icons.remove,
+      appBar: AppBar(title: Text(widget.invoiceId == null ? 'New Invoice' : 'Edit Invoice')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Text('Customer: ${widget.customer.name}'),
+                const SizedBox(height: 12),
+                for (final product in _products)
+                  ListTile(
+                    title: Text(product.name),
+                    subtitle: Text('${product.price.toStringAsFixed(2)} EGP'),
+                    trailing: SizedBox(
+                      width: 90,
+                      child: TextFormField(
+                        initialValue: '0',
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Qty'),
+                        onChanged: (value) {
+                          final quantity = int.tryParse(value) ?? 0;
+                          if (quantity > 0) {
+                            _quantities[product.id] = quantity;
+                          } else {
+                            _quantities.remove(product.id);
+                          }
+                        },
+                      ),
                     ),
                   ),
-                  SizedBox(
-                    width: 32,
-                    child: Text(
-                      '$quantity',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {
-                      _changeQuantity(
-                        product,
-                        1,
-                      );
-                    },
-                    icon: const Icon(
-                      Icons.add,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.all(16),
-        child: FilledButton(
-          onPressed: _isSaving ? null : _save,
-          child: _isSaving
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(),
-                )
-              : Text(
-                  widget.isEditing
-                      ? 'SAVE CHANGES'
-                      : 'CREATE INVOICE',
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: _saving ? null : _save,
+                  icon: const Icon(Icons.save_outlined),
+                  label: Text(_saving ? 'Saving...' : 'Save invoice'),
                 ),
-        ),
-      ),
+              ],
+            ),
     );
   }
 }
-

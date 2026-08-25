@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../data/local_product_repository.dart';
 import '../domain/product.dart';
+import '../domain/product_repository.dart';
 import 'product_form_page.dart';
 
 class ProductsPage extends StatefulWidget {
+  final ProductRepository? repository;
+
   const ProductsPage({
     super.key,
+    this.repository,
   });
 
   @override
@@ -18,6 +22,9 @@ class _ProductsPageState
     extends State<ProductsPage> {
   final _repository =
       LocalProductRepository();
+
+    ProductRepository get _dataSource =>
+      widget.repository ?? _repository;
 
   final _searchController =
       TextEditingController();
@@ -77,7 +84,7 @@ class _ProductsPageState
 
     try {
       final products =
-          await _repository.getProducts();
+          await _dataSource.getProducts();
 
       if (!mounted) {
         return;
@@ -107,7 +114,8 @@ class _ProductsPageState
         await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => ProductFormPage(
-          product: product,
+            product: product,
+            repository: _dataSource,
         ),
       ),
     );
@@ -158,7 +166,7 @@ class _ProductsPageState
     }
 
     try {
-      await _repository.deleteProduct(
+      await _dataSource.deleteProduct(
         product.id,
       );
 
@@ -167,6 +175,10 @@ class _ProductsPageState
       }
 
       await _loadProducts();
+
+      if (!mounted) {
+        return;
+      }
 
       ScaffoldMessenger.of(context)
           .showSnackBar(

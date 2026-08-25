@@ -10,10 +10,13 @@ class Product {
   });
 
   factory Product.fromMap(Map<String, Object?> map) {
+    final rawPrice = map['price'];
     return Product(
       id: map['id'] as int,
       name: map['name'] as String,
-      price: (map['price'] as num).toDouble(),
+      price: rawPrice is num
+          ? rawPrice.toDouble()
+          : double.parse(rawPrice as String),
     );
   }
 

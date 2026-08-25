@@ -1,8 +1,6 @@
 import '../../domain/entities/coupon.dart';
 import '../../domain/entities/invoice.dart';
 import '../../domain/entities/invoice_item.dart';
-import '../../domain/entities/money.dart';
-import '../../domain/entities/payment.dart';
 import 'invoice_item_model.dart';
 import 'payment_model.dart';
 

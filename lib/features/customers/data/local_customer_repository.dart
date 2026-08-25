@@ -1,7 +1,8 @@
 import '../../../core/storage/app_database.dart';
 import '../domain/customer.dart';
+import '../domain/customer_repository.dart';
 
-class LocalCustomerRepository {
+class LocalCustomerRepository implements CustomerRepository {
   Future<List<Customer>> getCustomers() async {
     final database = await AppDatabase.database;
 

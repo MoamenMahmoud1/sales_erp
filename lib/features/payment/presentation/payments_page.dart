@@ -205,6 +205,10 @@ class _PaymentsPageState
 
       await _loadPayments();
 
+      if (!mounted) {
+        return;
+      }
+
       ScaffoldMessenger.of(context)
           .showSnackBar(
         const SnackBar(

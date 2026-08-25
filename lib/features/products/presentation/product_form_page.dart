@@ -3,13 +3,16 @@ import 'package:flutter/material.dart';
 
 import '../data/local_product_repository.dart';
 import '../domain/product.dart';
+import '../domain/product_repository.dart';
 
 class ProductFormPage extends StatefulWidget {
   final Product? product;
+  final ProductRepository? repository;
 
   const ProductFormPage({
     super.key,
     this.product,
+    this.repository,
   });
 
   bool get isEditing =>
@@ -27,6 +30,9 @@ class _ProductFormPageState
 
   final _repository =
       LocalProductRepository();
+
+    ProductRepository get _dataSource =>
+      widget.repository ?? _repository;
 
   late final TextEditingController
       _nameController;
@@ -116,13 +122,13 @@ class _ProductFormPageState
 
     try {
       if (widget.isEditing) {
-        await _repository.updateProduct(
+        await _dataSource.updateProduct(
           id: widget.product!.id,
           name: _nameController.text,
           price: price,
         );
       } else {
-        await _repository.addProduct(
+        await _dataSource.addProduct(
           name: _nameController.text,
           price: price,
         );

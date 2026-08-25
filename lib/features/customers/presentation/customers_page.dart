@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../data/local_customer_repository.dart';
 import '../domain/customer.dart';
+import '../domain/customer_repository.dart';
 import 'customer_details_page.dart';
 import 'customer_form_page.dart';
 
 class CustomersPage extends StatefulWidget {
+  final CustomerRepository? repository;
+
   const CustomersPage({
     super.key,
+    this.repository,
   });
 
   @override
@@ -19,6 +23,9 @@ class _CustomersPageState
     extends State<CustomersPage> {
   final _repository =
       LocalCustomerRepository();
+
+    CustomerRepository get _dataSource =>
+      widget.repository ?? _repository;
 
   final _searchController =
       TextEditingController();
@@ -56,7 +63,7 @@ class _CustomersPageState
 
     try {
       final customers =
-          await _repository.getCustomers();
+          await _dataSource.getCustomers();
 
       if (!mounted) {
         return;
@@ -82,7 +89,7 @@ class _CustomersPageState
   Future<void> _searchCustomers() async {
     try {
       final customers =
-          await _repository.searchCustomers(
+          await _dataSource.searchCustomers(
         _searchController.text,
       );
 
@@ -181,7 +188,7 @@ class _CustomersPageState
     }
 
     try {
-      await _repository.deleteCustomer(
+      await _dataSource.deleteCustomer(
         customer.id,
       );
 
@@ -190,6 +197,10 @@ class _CustomersPageState
       }
 
       await _loadCustomers();
+
+      if (!mounted) {
+        return;
+      }
 
       ScaffoldMessenger.of(context)
           .showSnackBar(
