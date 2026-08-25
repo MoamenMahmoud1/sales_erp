@@ -18,13 +18,13 @@ class ApiCustomerRepository implements CustomerRepository {
 
   @override
   Future<List<Customer>> getCustomers() async {
-    return _items(await client.dio.get('/sales/customers/'));
+    return _items(await client.dio.get('/customers/'));
   }
 
   @override
   Future<Customer?> getCustomerById(int customerId) async {
     try {
-      final response = await client.dio.get('/sales/customers/$customerId/');
+      final response = await client.dio.get('/customers/$customerId/');
       return Customer.fromMap(Map<String, Object?>.from(response.data as Map));
     } on DioException catch (error) {
       if (error.response?.statusCode == 404) return null;
@@ -34,7 +34,7 @@ class ApiCustomerRepository implements CustomerRepository {
 
   @override
   Future<int> createCustomer(Customer customer) async {
-    final response = await client.dio.post('/sales/customers/', data: {
+    final response = await client.dio.post('/customers/', data: {
       'name': customer.name,
       'phone': customer.phone,
       'address': customer.address,
@@ -44,7 +44,7 @@ class ApiCustomerRepository implements CustomerRepository {
 
   @override
   Future<int> updateCustomer(Customer customer) async {
-    await client.dio.patch('/sales/customers/${customer.id}/', data: {
+    await client.dio.patch('/customers/${customer.id}/', data: {
       'name': customer.name,
       'phone': customer.phone,
       'address': customer.address,
@@ -54,7 +54,7 @@ class ApiCustomerRepository implements CustomerRepository {
 
   @override
   Future<int> deleteCustomer(int customerId) async {
-    await client.dio.delete('/sales/customers/$customerId/');
+    await client.dio.delete('/customers/$customerId/');
     return customerId;
   }
 

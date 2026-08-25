@@ -7,15 +7,16 @@ from .views import version_view
 
 urlpatterns = [
     path("api/v1/system/version/", version_view, name="system-version"),
-    path("api/v1/", include("accounts.urls", namespace="accounts")),
+    path("api/v1/", include(("accounts.urls", "accounts"), namespace="accounts")),
     path(
         "api/v1/organization/",
-        include("organization.urls", namespace="organization"),
+        include(("organization.urls", "organization"), namespace="organization"),
     ),
-    path(
-        "api/v1/sales/",
-        include("sales.urls", namespace="sales"),
-    ),
+    path("api/v1/", include(("customers.urls", "customers"), namespace="customers")),
+    path("api/v1/", include(("products.urls", "products"), namespace="products")),
+    path("api/v1/", include(("coupons.urls", "coupons"), namespace="coupons")),
+    path("api/v1/", include(("invoices.urls", "invoices"), namespace="invoices")),
+    path("api/v1/", include(("payments.urls", "payments"), namespace="payments")),
     path("admin/", admin.site.urls),
 ]
 

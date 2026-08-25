@@ -55,7 +55,6 @@ PROJECT_APPS = [
     'accounts.apps.AccountsConfig',
     'authsession.apps.AuthSessionConfig',
     'organization.apps.OrganizationConfig',
-    'sales.apps.SalesConfig',
     'customers.apps.CustomersConfig',
     'products.apps.ProductsConfig',
     'coupons.apps.CouponsConfig',

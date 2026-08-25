@@ -19,13 +19,13 @@ class ApiProductRepository implements ProductRepository {
 
   @override
   Future<List<Product>> getProducts() async {
-    final response = await client.dio.get('/sales/products/');
+    final response = await client.dio.get('/products/');
     return _rows(response).map(Product.fromMap).toList(growable: false);
   }
 
   @override
   Future<int> addProduct({required String name, required double price}) async {
-    final response = await client.dio.post('/sales/products/', data: {
+    final response = await client.dio.post('/products/', data: {
       'name': name.trim(),
       'price': price,
       'stock_quantity': 0,
@@ -35,7 +35,7 @@ class ApiProductRepository implements ProductRepository {
 
   @override
   Future<void> updateProduct({required int id, required String name, required double price}) async {
-    await client.dio.patch('/sales/products/$id/', data: {
+    await client.dio.patch('/products/$id/', data: {
       'name': name.trim(),
       'price': price,
     });
@@ -43,6 +43,6 @@ class ApiProductRepository implements ProductRepository {
 
   @override
   Future<void> deleteProduct(int id) async {
-    await client.dio.delete('/sales/products/$id/');
+    await client.dio.delete('/products/$id/');
   }
 }
