@@ -54,6 +54,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "created_by",
             "coupon",
             "coupon_discount",
+            "status",
             "subtotal",
             "total",
             "sold_quantity",
@@ -66,6 +67,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "created_by",
             "coupon_discount",  # authoritative → computed by the backend,
             # never trusted from the client.
+            "status",  # transitions only via business operations.
             "subtotal",
             "total",
             "sold_quantity",
@@ -111,6 +113,7 @@ class InvoiceSummarySerializer(serializers.ModelSerializer):
             "id",
             "customer",
             "customer_name",
+            "status",
             "subtotal",
             "coupon_discount",
             "total",

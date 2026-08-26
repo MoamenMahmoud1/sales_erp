@@ -27,5 +27,10 @@ class InvalidDiscount(DomainError):
     """Raised when a discount is invalid (e.g. exceeds the subtotal)."""
 
 
-# NOTE: InvalidStateTransition is intentionally omitted until the invoice
-# state machine exists (Phase 4), per the "no premature abstractions" rule.
+class InvalidStateTransition(DomainError):
+    """Raised when an object cannot move between two states."""
+
+
+class CouponInvalid(DomainError):
+    """Raised when a coupon cannot be applied (missing, inactive, expired,
+    below minimum, etc.)."""

@@ -10,6 +10,13 @@ class InvoiceItemInline(admin.TabularInline):
 
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
-    list_display = ("id", "customer", "created_by", "created_at", "total")
-    list_filter = ("created_at",)
+    list_display = (
+        "id",
+        "customer",
+        "created_by",
+        "status",
+        "total",
+        "created_at",
+    )
+    list_filter = ("status", "created_at")
     inlines = (InvoiceItemInline,)

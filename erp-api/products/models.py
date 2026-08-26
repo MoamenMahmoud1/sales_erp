@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import Q
 
 
 class Product(models.Model):
@@ -19,6 +20,12 @@ class Product(models.Model):
         ordering = ("name",)
         indexes = [
             models.Index(fields=("name",), name="products_product_name_idx")
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(price__gte=Decimal("0")),
+                name="product_price_non_negative",
+            ),
         ]
 
     @property
@@ -62,6 +69,12 @@ class CartonPricing(models.Model):
         ordering = ("name",)
         verbose_name = "Carton pricing"
         verbose_name_plural = "Carton pricings"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(carton_price__gte=Decimal("0")),
+                name="cartonpricing_carton_price_non_negative",
+            ),
+        ]
 
     def __str__(self):
         return self.name

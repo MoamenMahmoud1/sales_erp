@@ -5,10 +5,18 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import Q
 
-from common.money import quantize_money
+from invoices.calculator import InvoiceCalculator
+
+_calculator = InvoiceCalculator()
 
 
 class Invoice(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        CONFIRMED = "confirmed", "Confirmed"
+        CANCELLED = "cancelled", "Cancelled"
+        PAID = "paid", "Paid"
+
     customer = models.ForeignKey(
         "customers.Customer",
         on_delete=models.PROTECT,
@@ -30,6 +38,12 @@ class Invoice(models.Model):
         decimal_places=2,
         default=Decimal("0"),
     )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -50,18 +64,15 @@ class Invoice(models.Model):
 
     @property
     def subtotal(self):
-        return quantize_money(
-            sum(
-                (item.line_total for item in self.items.all()),
-                Decimal("0"),
-            )
-        )
+        return _calculator.subtotal(self)
+
+    @property
+    def discount(self):
+        return _calculator.discount(self)
 
     @property
     def total(self):
-        # NOTE: no silent clamping. The discount is expected to be
-        # authoritatively computed (Phase 4) so it never exceeds the subtotal.
-        return quantize_money(self.subtotal - self.coupon_discount)
+        return _calculator.total(self)
 
     @property
     def sold_quantity(self):
@@ -102,4 +113,6 @@ class InvoiceItem(models.Model):
 
     @property
     def line_total(self):
+        from common.money import quantize_money
+
         return quantize_money(self.unit_price * self.quantity)
