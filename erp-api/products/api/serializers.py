@@ -1,4 +1,4 @@
-from adrf import serializers
+from rest_framework import serializers
 
 from products.models import CartonPricing, Product
 
@@ -29,11 +29,10 @@ class ProductSerializer(serializers.ModelSerializer):
 
         read_only_fields = (
             "id",
-            "stock_quantity",
-            "sold_quantity",
-            "remaining_quantity",
             "created_at",
             "updated_at",
+            "sold_quantity",
+            "remaining_quantity",
         )
 
 
