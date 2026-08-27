@@ -1,9 +1,15 @@
+import json
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.test.client import AsyncRequestFactory
+from django.urls import reverse
+from rest_framework.test import force_authenticate
 
+from coupons.api.views import CouponViewSet
 from coupons.models import Coupon
 
 
@@ -14,6 +20,7 @@ class CouponModelTests(TestCase):
             discount_type=Coupon.DiscountType.PERCENTAGE,
             discount_value=Decimal("101"),
         )
+
         with self.assertRaises(ValidationError):
             coupon.full_clean()
 
@@ -23,7 +30,8 @@ class CouponModelTests(TestCase):
             discount_type=Coupon.DiscountType.PERCENTAGE,
             discount_value=Decimal("50"),
         )
-        coupon.full_clean()  # should not raise
+
+        coupon.full_clean()
 
     def test_valid_until_must_be_after_valid_from(self):
         coupon = Coupon(
@@ -33,6 +41,7 @@ class CouponModelTests(TestCase):
             valid_from="2025-01-10T00:00:00Z",
             valid_until="2025-01-01T00:00:00Z",
         )
+
         with self.assertRaises(ValidationError):
             coupon.full_clean()
 
@@ -42,11 +51,10 @@ class CouponModelTests(TestCase):
             discount_type=Coupon.DiscountType.FIXED,
             discount_value=Decimal("-5"),
         )
-        # Model-level validation (MinValueValidator) rejects it first.
+
         with self.assertRaises(ValidationError):
             coupon.full_clean()
 
-        # Also ensure the DB constraint exists by bypassing Python validation.
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 Coupon.objects.create(
@@ -54,8 +62,11 @@ class CouponModelTests(TestCase):
                     discount_type=Coupon.DiscountType.FIXED,
                     discount_value=Decimal("0"),
                 )
-                Coupon.objects.filter(code="neg2").update(
-                    discount_value=Decimal("-5")
+
+                Coupon.objects.filter(
+                    code="neg2",
+                ).update(
+                    discount_value=Decimal("-5"),
                 )
 
     def test_percentage_above_100_rejected_at_database(self):
@@ -64,8 +75,393 @@ class CouponModelTests(TestCase):
             discount_type=Coupon.DiscountType.PERCENTAGE,
             discount_value=Decimal("10"),
         )
+
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                Coupon.objects.filter(pk=coupon.pk).update(
-                    discount_value=Decimal("150")
+                Coupon.objects.filter(
+                    pk=coupon.pk,
+                ).update(
+                    discount_value=Decimal("150"),
                 )
+
+
+class CouponAsyncViewsTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+
+        self.user = User.objects.create_user(
+            username="coupon_user",
+            email="coupon@example.com",
+            password="test-password",
+            is_staff=False,
+        )
+
+        self.staff_user = User.objects.create_user(
+            username="coupon_staff",
+            email="coupon_staff@example.com",
+            password="test-password",
+            is_staff=True,
+        )
+
+        self.coupon = Coupon.objects.create(
+            code="SAVE10",
+            discount_type=Coupon.DiscountType.PERCENTAGE,
+            discount_value=Decimal("10"),
+            minimum_invoice_amount=Decimal("100"),
+            is_active=True,
+        )
+
+        self.factory = AsyncRequestFactory()
+
+    async def test_list_view_is_async(self):
+        request = self.factory.get(
+            reverse("coupons:coupon-list"),
+        )
+
+        force_authenticate(
+            request,
+            user=self.user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"get": "list"},
+        )(
+            request,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+    async def test_retrieve_view_is_async(self):
+        request = self.factory.get(
+            reverse(
+                "coupons:coupon-detail",
+                kwargs={"pk": self.coupon.pk},
+            ),
+        )
+
+        force_authenticate(
+            request,
+            user=self.user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"get": "retrieve"},
+        )(
+            request,
+            pk=self.coupon.pk,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.assertEqual(
+            response.data["code"],
+            "SAVE10",
+        )
+
+    async def test_unauthenticated_user_is_rejected(self):
+        request = self.factory.get(
+            reverse("coupons:coupon-list"),
+        )
+
+        response = await CouponViewSet.as_view(
+            {"get": "list"},
+        )(
+            request,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            401,
+        )
+    async def test_authenticated_user_can_read(self):
+        request = self.factory.get(
+            reverse("coupons:coupon-list"),
+        )
+
+        force_authenticate(
+            request,
+            user=self.user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"get": "list"},
+        )(
+            request,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+    async def test_regular_user_cannot_create_coupon(self):
+        payload = {
+            "code": "NEW10",
+            "discount_type": Coupon.DiscountType.PERCENTAGE,
+            "discount_value": "10.00",
+            "minimum_invoice_amount": "100.00",
+            "is_active": True,
+        }
+
+        request = self.factory.post(
+            reverse("coupons:coupon-list"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+        force_authenticate(
+            request,
+            user=self.user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"post": "create"},
+        )(
+            request,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            403,
+        )
+
+    async def test_staff_can_create_coupon(self):
+        payload = {
+            "code": "NEW10",
+            "discount_type": Coupon.DiscountType.PERCENTAGE,
+            "discount_value": "10.00",
+            "minimum_invoice_amount": "100.00",
+            "is_active": True,
+        }
+
+        request = self.factory.post(
+            reverse("coupons:coupon-list"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+        force_authenticate(
+            request,
+            user=self.staff_user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"post": "create"},
+        )(
+            request,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            201,
+        )
+
+        self.assertTrue(
+            await Coupon.objects.filter(
+                code="NEW10",
+            ).aexists(),
+        )
+
+    async def test_staff_can_update_coupon(self):
+        payload = {
+            "discount_value": "20.00",
+        }
+
+        request = self.factory.patch(
+            reverse(
+                 "coupons:coupon-detail",
+                    kwargs={"pk": self.coupon.pk},
+                ),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+        force_authenticate(
+            request,
+            user=self.staff_user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"patch": "partial_update"},
+        )(
+            request,
+            pk=self.coupon.pk,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        await self.coupon.arefresh_from_db()
+
+        self.assertEqual(
+            self.coupon.discount_value,
+            Decimal("20.00"),
+        )
+
+    async def test_regular_user_cannot_update_coupon(self):
+        payload = {
+            "discount_value": "20.00",
+        }
+
+        request = self.factory.patch(
+            reverse(
+                    "coupons:coupon-detail",
+                    kwargs={"pk": self.coupon.pk},
+                ),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+        force_authenticate(
+            request,
+            user=self.user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"patch": "partial_update"},
+        )(
+            request,
+            pk=self.coupon.pk,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            403,
+        )
+
+    async def test_staff_can_delete_coupon(self):
+        coupon_id = self.coupon.pk
+
+        request = self.factory.delete(
+            reverse(
+               "coupons:coupon-detail",
+               kwargs={"pk": self.coupon.pk},
+                ),
+       )
+
+        force_authenticate(
+            request,
+            user=self.staff_user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"delete": "destroy"},
+        )(
+            request,
+            pk=coupon_id,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            204,
+        )
+
+        self.assertFalse(
+            await Coupon.objects.filter(
+                pk=coupon_id,
+            ).aexists(),
+        )
+
+    async def test_regular_user_cannot_delete_coupon(self):
+        coupon_id = self.coupon.pk
+
+        request = self.factory.delete(
+            reverse(
+                "coupons:coupon-detail",
+                kwargs={"pk": self.coupon.pk},
+            ),
+        )
+
+        force_authenticate(
+            request,
+            user=self.user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"delete": "destroy"},
+        )(
+            request,
+            pk=coupon_id,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            403,
+        )
+
+        self.assertTrue(
+            await Coupon.objects.filter(
+                pk=coupon_id,
+            ).aexists(),
+        )
+
+    async def test_invalid_percentage_returns_400(self):
+        payload = {
+            "code": "BAD100",
+            "discount_type": Coupon.DiscountType.PERCENTAGE,
+            "discount_value": "101.00",
+            "is_active": True,
+        }
+
+        request = self.factory.post(
+            reverse("coupons:coupon-list"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+        force_authenticate(
+            request,
+            user=self.staff_user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"post": "create"},
+        )(
+            request,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            400,
+        )
+
+        self.assertFalse(
+            await Coupon.objects.filter(
+                code="BAD100",
+            ).aexists(),
+        )
+
+    async def test_search_by_code(self):
+        request = self.factory.get(
+            reverse("coupons:coupon-list"),
+            data={"search": "SAVE10"},
+        )
+
+        force_authenticate(
+            request,
+            user=self.user,
+        )
+
+        response = await CouponViewSet.as_view(
+            {"get": "list"},
+        )(
+            request,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.assertEqual(
+            response.data["count"],
+            1,
+        )
