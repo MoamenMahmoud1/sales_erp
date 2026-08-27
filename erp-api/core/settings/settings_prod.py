@@ -15,18 +15,28 @@ CSRF_TRUSTED_ORIGINS = config(
 
 # PostgreSQL Production
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME'),
-        'USER': config('DB_USER'),
-        'PASSWORD': config('DB_PASSWORD'),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
-        'CONN_MAX_AGE': config('DB_CONN_MAX_AGE', default=60, cast=int),
-        'CONN_HEALTH_CHECKS': True,
-    }
-}
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
 
+        "NAME": config("DB_NAME"),
+        "USER": config("DB_USER"),
+        "PASSWORD": config("DB_PASSWORD"),
+        "HOST": config("DB_HOST", default="localhost"),
+        "PORT": config("DB_PORT", default="5432"),
+
+        "CONN_MAX_AGE": 0,
+        "CONN_HEALTH_CHECKS": True,
+
+        "OPTIONS": {
+            "pool": {
+                "min_size": 2,
+                "max_size": 20,
+                "max_lifetime": 3600,
+                "max_idle": 600,
+            },
+        },
+    },
+}
 # Static & Media (S3)
 INSTALLED_APPS += ['storages']
 STORAGES = {
