@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -24,10 +26,16 @@ class InventoryTestMixin:
             password="test-password",
         )
 
-    def create_product(self, name="Test Product", price="100.00"):
+    def create_product(
+        self,
+        name="Test Product",
+        purchase_price="100.00",
+        selling_price="150.00",
+    ):
         return Product.objects.create(
             name=name,
-            price=price,
+            purchase_price=Decimal(purchase_price),
+            selling_price=Decimal(selling_price),
         )
 
     def create_locations(self):
@@ -96,15 +104,28 @@ class StockMovementTests(InventoryTestMixin, TestCase):
             quantity=20,
         )
 
-        self.assertEqual(movement.source_location, self.warehouse)
-        self.assertEqual(movement.destination_location, self.vehicle)
-        self.assertEqual(item.product, self.product)
-        self.assertEqual(item.quantity, 20)
+        self.assertEqual(
+            movement.source_location,
+            self.warehouse,
+        )
+        self.assertEqual(
+            movement.destination_location,
+            self.vehicle,
+        )
+        self.assertEqual(
+            item.product,
+            self.product,
+        )
+        self.assertEqual(
+            item.quantity,
+            20,
+        )
 
     def test_movement_can_have_multiple_products(self):
         second_product = self.create_product(
             name="Second Product",
-            price="50.00",
+            purchase_price="50.00",
+            selling_price="75.00",
         )
 
         movement = StockMovement.objects.create(
@@ -125,7 +146,10 @@ class StockMovementTests(InventoryTestMixin, TestCase):
             quantity=5,
         )
 
-        self.assertEqual(movement.items.count(), 2)
+        self.assertEqual(
+            movement.items.count(),
+            2,
+        )
 
 
 class StockBalanceServiceTests(InventoryTestMixin, TestCase):
@@ -141,7 +165,10 @@ class StockBalanceServiceTests(InventoryTestMixin, TestCase):
             quantity=100,
         )
 
-        self.assertEqual(balance.quantity, 100)
+        self.assertEqual(
+            balance.quantity,
+            100,
+        )
 
     def test_increase_adds_to_existing_balance(self):
         StockBalance.objects.create(
@@ -156,7 +183,10 @@ class StockBalanceServiceTests(InventoryTestMixin, TestCase):
             quantity=25,
         )
 
-        self.assertEqual(balance.quantity, 125)
+        self.assertEqual(
+            balance.quantity,
+            125,
+        )
 
     def test_decrease_reduces_balance(self):
         StockBalance.objects.create(
@@ -171,7 +201,10 @@ class StockBalanceServiceTests(InventoryTestMixin, TestCase):
             quantity=30,
         )
 
-        self.assertEqual(balance.quantity, 70)
+        self.assertEqual(
+            balance.quantity,
+            70,
+        )
 
     def test_decrease_rejects_insufficient_stock(self):
         StockBalance.objects.create(
@@ -180,7 +213,10 @@ class StockBalanceServiceTests(InventoryTestMixin, TestCase):
             quantity=10,
         )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesMessage(
+            ValueError,
+            "Insufficient stock.",
+        ):
             StockBalanceService.decrease(
                 location=self.warehouse,
                 product=self.product,
@@ -192,7 +228,43 @@ class StockBalanceServiceTests(InventoryTestMixin, TestCase):
             product=self.product,
         )
 
-        self.assertEqual(balance.quantity, 10)
+        self.assertEqual(
+            balance.quantity,
+            10,
+        )
+
+    def test_increase_rejects_zero_quantity(self):
+        with self.assertRaisesMessage(
+            ValueError,
+            "Quantity must be greater than zero.",
+        ):
+            StockBalanceService.increase(
+                location=self.warehouse,
+                product=self.product,
+                quantity=0,
+            )
+
+    def test_increase_rejects_negative_quantity(self):
+        with self.assertRaisesMessage(
+            ValueError,
+            "Quantity must be greater than zero.",
+        ):
+            StockBalanceService.increase(
+                location=self.warehouse,
+                product=self.product,
+                quantity=-1,
+            )
+
+    def test_decrease_rejects_zero_quantity(self):
+        with self.assertRaisesMessage(
+            ValueError,
+            "Quantity must be greater than zero.",
+        ):
+            StockBalanceService.decrease(
+                location=self.warehouse,
+                product=self.product,
+                quantity=0,
+            )
 
 
 class TransferStockServiceTests(InventoryTestMixin, TestCase):
@@ -231,25 +303,52 @@ class TransferStockServiceTests(InventoryTestMixin, TestCase):
             product=self.product,
         )
 
-        self.assertEqual(warehouse_balance.quantity, 70)
-        self.assertEqual(vehicle_balance.quantity, 30)
+        self.assertEqual(
+            warehouse_balance.quantity,
+            70,
+        )
+        self.assertEqual(
+            vehicle_balance.quantity,
+            30,
+        )
 
         self.assertEqual(
             movement.movement_type,
             StockMovement.MovementType.TRANSFER,
         )
-        self.assertEqual(movement.source_location, self.warehouse)
-        self.assertEqual(movement.destination_location, self.vehicle)
 
-        self.assertEqual(movement.items.count(), 1)
+        self.assertEqual(
+            movement.source_location,
+            self.warehouse,
+        )
+
+        self.assertEqual(
+            movement.destination_location,
+            self.vehicle,
+        )
+
+        self.assertEqual(
+            movement.items.count(),
+            1,
+        )
 
         item = movement.items.get()
 
-        self.assertEqual(item.product, self.product)
-        self.assertEqual(item.quantity, 30)
+        self.assertEqual(
+            item.product,
+            self.product,
+        )
+
+        self.assertEqual(
+            item.quantity,
+            30,
+        )
 
     def test_transfer_rejects_insufficient_stock(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesMessage(
+            ValueError,
+            "Insufficient stock.",
+        ):
             TransferStockService.execute(
                 source=self.warehouse,
                 destination=self.vehicle,
@@ -267,11 +366,20 @@ class TransferStockServiceTests(InventoryTestMixin, TestCase):
             product=self.product,
         )
 
-        self.assertEqual(warehouse_balance.quantity, 100)
-        self.assertFalse(StockMovement.objects.exists())
+        self.assertEqual(
+            warehouse_balance.quantity,
+            100,
+        )
+
+        self.assertFalse(
+            StockMovement.objects.exists(),
+        )
 
     def test_transfer_rejects_same_location(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesMessage(
+            ValueError,
+            "Source and destination must be different.",
+        ):
             TransferStockService.execute(
                 source=self.warehouse,
                 destination=self.warehouse,
@@ -284,12 +392,62 @@ class TransferStockServiceTests(InventoryTestMixin, TestCase):
                 created_by=self.user,
             )
 
-        self.assertFalse(StockMovement.objects.exists())
+        self.assertFalse(
+            StockMovement.objects.exists(),
+        )
+
+    def test_transfer_rejects_empty_items(self):
+        with self.assertRaisesMessage(
+            ValueError,
+            "Transfer must contain at least one item.",
+        ):
+            TransferStockService.execute(
+                source=self.warehouse,
+                destination=self.vehicle,
+                items=[],
+                created_by=self.user,
+            )
+
+        self.assertFalse(
+            StockMovement.objects.exists(),
+        )
+
+    def test_transfer_rejects_invalid_quantity(self):
+        with self.assertRaisesMessage(
+            ValueError,
+            "Quantity must be greater than zero.",
+        ):
+            TransferStockService.execute(
+                source=self.warehouse,
+                destination=self.vehicle,
+                items=[
+                    {
+                        "product": self.product,
+                        "quantity": 0,
+                    }
+                ],
+                created_by=self.user,
+            )
+
+        warehouse_balance = StockBalance.objects.get(
+            location=self.warehouse,
+            product=self.product,
+        )
+
+        self.assertEqual(
+            warehouse_balance.quantity,
+            100,
+        )
+
+        self.assertFalse(
+            StockMovement.objects.exists(),
+        )
 
     def test_transfer_multiple_products(self):
         second_product = self.create_product(
             name="Second Product",
-            price="50.00",
+            purchase_price="50.00",
+            selling_price="75.00",
         )
 
         StockBalance.objects.create(
@@ -314,7 +472,10 @@ class TransferStockServiceTests(InventoryTestMixin, TestCase):
             created_by=self.user,
         )
 
-        self.assertEqual(movement.items.count(), 2)
+        self.assertEqual(
+            movement.items.count(),
+            2,
+        )
 
         self.assertEqual(
             StockBalance.objects.get(

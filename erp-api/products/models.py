@@ -6,32 +6,59 @@ from django.db.models import Q
 
 
 class Product(models.Model):
-    name = models.CharField(max_length=200)
-    purchase_price = models.DecimalField(
-    max_digits=12,
-    decimal_places=2,
+    name = models.CharField(
+        max_length=200,
     )
-    
+
+    purchase_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[
+            MinValueValidator(Decimal("0")),
+        ],
+    )
+
     selling_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,
+        validators=[
+            MinValueValidator(Decimal("0")),
+        ],
     )
-    stock_quantity = models.PositiveIntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+
+    stock_quantity = models.PositiveIntegerField(
+        default=0,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
 
     class Meta:
         ordering = ("name",)
+
         indexes = [
-            models.Index(fields=("name",), name="products_product_name_idx")
+            models.Index(
+                fields=("name",),
+                name="products_product_name_idx",
+            ),
         ]
+
         constraints = [
             models.CheckConstraint(
-                condition=Q(purchase_price__gte=0),
+                condition=Q(
+                    purchase_price__gte=Decimal("0"),
+                ),
                 name="product_purchase_price_non_negative",
             ),
             models.CheckConstraint(
-                condition=Q(selling_price__gte=0),
+                condition=Q(
+                    selling_price__gte=Decimal("0"),
+                ),
                 name="product_selling_price_non_negative",
             ),
         ]
@@ -40,46 +67,70 @@ class Product(models.Model):
     def sold_quantity(self):
         if hasattr(self, "_sold_quantity"):
             return self._sold_quantity or 0
+
         return (
-            self.invoice_items.aggregate(total=models.Sum("quantity"))["total"]
+            self.invoice_items.aggregate(
+                total=models.Sum("quantity"),
+            )["total"]
             or 0
         )
 
     @property
     def remaining_quantity(self):
-        return max(0, self.stock_quantity - self.sold_quantity)
+        return max(
+            0,
+            self.stock_quantity - self.sold_quantity,
+        )
 
     def __str__(self):
         return self.name
 
 
 class CartonPricing(models.Model):
-    """Pricing model for selling a product in carton (pack) units.
+    """
+    Pricing model for selling a product in carton/pack units.
 
-    This represents carton / pack pricing (units per carton + carton price).
-    Originally this concept was incorrectly named ``Coupon`` in a monolith.
-    It is NOT a discount coupon — that now lives in the ``coupons`` app.
+    This is not a discount coupon.
+    Discount coupons belong to the coupons app.
     """
 
-    name = models.CharField(max_length=200)
-    units_per_carton = models.PositiveIntegerField(
-        validators=[MinValueValidator(1)]
+    name = models.CharField(
+        max_length=200,
     )
+
+    units_per_carton = models.PositiveIntegerField(
+        validators=[
+            MinValueValidator(1),
+        ],
+    )
+
     carton_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        validators=[MinValueValidator(Decimal("0"))],
+        validators=[
+            MinValueValidator(Decimal("0")),
+        ],
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
 
     class Meta:
         ordering = ("name",)
+
         verbose_name = "Carton pricing"
         verbose_name_plural = "Carton pricings"
+
         constraints = [
             models.CheckConstraint(
-                condition=Q(carton_price__gte=Decimal("0")),
+                condition=Q(
+                    carton_price__gte=Decimal("0"),
+                ),
                 name="cartonpricing_carton_price_non_negative",
             ),
         ]
