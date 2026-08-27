@@ -48,6 +48,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "corsheaders",
     'rest_framework',
+    "adrf",
     'phonenumber_field',
     "django_filters",
 ]

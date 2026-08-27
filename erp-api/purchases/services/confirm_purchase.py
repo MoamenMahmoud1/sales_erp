@@ -1,3 +1,4 @@
+from asgiref.sync import sync_to_async
 from django.db import transaction
 
 from inventory.models import (
@@ -11,7 +12,6 @@ from purchases.models import Purchase
 
 
 class ConfirmPurchaseService:
-
     @staticmethod
     @transaction.atomic
     def execute(*, purchase_id, created_by):
@@ -72,7 +72,17 @@ class ConfirmPurchaseService:
 
         purchase.status = Purchase.Status.CONFIRMED
         purchase.save(
-            update_fields=["status", "updated_at"]
+            update_fields=["status", "updated_at"],
         )
 
         return purchase
+
+    @staticmethod
+    async def aexecute(*, purchase_id, created_by):
+        return await sync_to_async(
+            ConfirmPurchaseService.execute,
+            thread_sensitive=True,
+        )(
+            purchase_id=purchase_id,
+            created_by=created_by,
+        )

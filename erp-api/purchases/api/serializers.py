@@ -1,9 +1,8 @@
+from asgiref.sync import sync_to_async
 from django.db import transaction
-from rest_framework import serializers
+from adrf import serializers
 
-from products.models import Product
 from purchases.models import Purchase, PurchaseItem
-from suppliers.models import Supplier
 
 
 class PurchaseItemSerializer(serializers.ModelSerializer):
@@ -29,6 +28,39 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
         )
 
 
+class PurchaseListSerializer(serializers.ModelSerializer):
+    supplier_name = serializers.CharField(
+        source="supplier.name",
+        read_only=True,
+    )
+    total_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        read_only=True,
+    )
+
+    class Meta:
+        model = Purchase
+        fields = (
+            "id",
+            "supplier",
+            "supplier_name",
+            "status",
+            "reference",
+            "created_at",
+            "total_amount",
+        )
+        read_only_fields = (
+            "id",
+            "supplier",
+            "supplier_name",
+            "status",
+            "reference",
+            "created_at",
+            "total_amount",
+        )
+
+
 class PurchaseSerializer(serializers.ModelSerializer):
     items = PurchaseItemSerializer(many=True)
 
@@ -36,7 +68,6 @@ class PurchaseSerializer(serializers.ModelSerializer):
         source="supplier.name",
         read_only=True,
     )
-
     total_amount = serializers.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -89,12 +120,13 @@ class PurchaseSerializer(serializers.ModelSerializer):
 
         return items
 
+    @staticmethod
     @transaction.atomic
-    def create(self, validated_data):
+    def _create_sync(validated_data, user):
         items_data = validated_data.pop("items")
 
         purchase = Purchase.objects.create(
-            created_by=self.context["request"].user,
+            created_by=user,
             **validated_data,
         )
 
@@ -110,8 +142,20 @@ class PurchaseSerializer(serializers.ModelSerializer):
 
         return purchase
 
+    async def acreate(self, validated_data):
+        user = self.context["request"].user
+
+        return await sync_to_async(
+            self._create_sync,
+            thread_sensitive=True,
+        )(
+            validated_data,
+            user,
+        )
+
+    @staticmethod
     @transaction.atomic
-    def update(self, instance, validated_data):
+    def _update_sync(instance, validated_data):
         if instance.status != Purchase.Status.DRAFT:
             raise serializers.ValidationError(
                 "Only draft purchases can be edited."
@@ -138,3 +182,12 @@ class PurchaseSerializer(serializers.ModelSerializer):
             )
 
         return instance
+
+    async def aupdate(self, instance, validated_data):
+        return await sync_to_async(
+            self._update_sync,
+            thread_sensitive=True,
+        )(
+            instance,
+            validated_data,
+        )

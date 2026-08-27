@@ -1,10 +1,10 @@
+from asgiref.sync import sync_to_async
 from django.db import transaction
 
 from purchases.models import Purchase
 
 
 class CancelPurchaseService:
-
     @staticmethod
     @transaction.atomic
     def execute(*, purchase_id):
@@ -21,7 +21,14 @@ class CancelPurchaseService:
 
         purchase.status = Purchase.Status.CANCELLED
         purchase.save(
-            update_fields=["status", "updated_at"]
+            update_fields=["status", "updated_at"],
         )
 
         return purchase
+
+    @staticmethod
+    async def aexecute(*, purchase_id):
+        return await sync_to_async(
+            CancelPurchaseService.execute,
+            thread_sensitive=True,
+        )(purchase_id=purchase_id)
