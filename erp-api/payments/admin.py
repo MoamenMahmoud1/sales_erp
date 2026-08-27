@@ -1,9 +1,30 @@
 from django.contrib import admin
 
-from .models import Payment
+from .models import PaymentTransaction, PaymentAllocation
 
 
-@admin.register(Payment)
-class PaymentAdmin(admin.ModelAdmin):
-    list_display = ("invoice", "amount", "method", "status", "created_at")
-    list_filter = ("method", "status")
+@admin.register(PaymentTransaction)
+class PaymentTransactionAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "customer",
+        "cash_amount",
+        "transfer_amount",
+        "created_at",
+    )
+    list_filter = ("created_at",)
+    search_fields = ("customer__name",)
+
+
+@admin.register(PaymentAllocation)
+class PaymentAllocationAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "transaction",
+        "invoice",
+        "cash_amount",
+        "transfer_amount",
+        "created_at",
+    )
+    list_filter = ("created_at",)
+    search_fields = ("invoice__id",)
