@@ -1,6 +1,10 @@
 from django.db import transaction
 
-from inventory.models import StockLocation, StockMovement, StockMovementItem
+from inventory.models import (
+    StockLocation,
+    StockMovement,
+    StockMovementItem,
+)
 from inventory.services.stock_balance import StockBalanceService
 
 from purchases.models import Purchase
@@ -10,7 +14,7 @@ class ConfirmPurchaseService:
 
     @staticmethod
     @transaction.atomic
-    def execute(*, purchase_id):
+    def execute(*, purchase_id, created_by):
         purchase = (
             Purchase.objects
             .select_for_update()
@@ -33,7 +37,9 @@ class ConfirmPurchaseService:
         warehouse = (
             StockLocation.objects
             .filter(
-                location_type=StockLocation.LocationType.MAIN_WAREHOUSE,
+                location_type=(
+                    StockLocation.LocationType.MAIN_WAREHOUSE
+                ),
                 is_active=True,
             )
             .first()
@@ -47,7 +53,7 @@ class ConfirmPurchaseService:
         movement = StockMovement.objects.create(
             movement_type=StockMovement.MovementType.PURCHASE,
             destination_location=warehouse,
-            created_by=purchase.created_by,
+            created_by=created_by,
             reference=purchase.reference,
         )
 

@@ -64,6 +64,7 @@ class PurchaseConfirmView(APIView):
         try:
             purchase = ConfirmPurchaseService.execute(
                 purchase_id=pk,
+                created_by=request.user,
             )
         except Purchase.DoesNotExist:
             return Response(

@@ -4,6 +4,7 @@ from purchases.models import Purchase
 
 
 class CancelPurchaseService:
+
     @staticmethod
     @transaction.atomic
     def execute(*, purchase_id):
@@ -19,6 +20,8 @@ class CancelPurchaseService:
             )
 
         purchase.status = Purchase.Status.CANCELLED
-        purchase.save(update_fields=["status", "updated_at"])
+        purchase.save(
+            update_fields=["status", "updated_at"]
+        )
 
         return purchase

@@ -27,6 +27,16 @@ class StockLocation(models.Model):
 
     class Meta:
         ordering = ("name",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("location_type",),
+                condition=Q(
+                    location_type="MAIN_WAREHOUSE",
+                    is_active=True,
+                ),
+                name="inventory_one_active_main_warehouse",
+            ),
+        ]
 
     def __str__(self):
         return self.name
