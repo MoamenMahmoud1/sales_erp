@@ -100,3 +100,35 @@ class StockMovementItem(models.Model):
 
     def __str__(self):
         return f"{self.product} x {self.quantity}"
+
+
+class StockBalance(models.Model):
+    location = models.ForeignKey(
+        StockLocation,
+        on_delete=models.CASCADE,
+        related_name="stock_balances",
+    )
+    product = models.ForeignKey(
+        "products.Product",
+        on_delete=models.PROTECT,
+        related_name="stock_balances",
+    )
+    quantity = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("location", "product"),
+                name="stock_balance_unique_location_product",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("location", "product"),
+                name="stock_bal_loc_prod_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.location_id} - {self.product_id}: {self.quantity}"
