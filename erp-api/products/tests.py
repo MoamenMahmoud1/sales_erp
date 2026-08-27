@@ -34,7 +34,7 @@ class ProductApiTests(APITestCase):
         self.client.force_authenticate(self.user)
         response = self.client.post(
             "/api/v1/products/",
-            {"name": "Blocked", "price": "10.00", "stock_quantity": 5},
+            {"name": "Widget", "purchase_price": "10.00", "selling_price": "15.00", "stock_quantity": 5},
             format="json",
         )
         self.assertEqual(response.status_code, 403)
@@ -43,10 +43,10 @@ class ProductApiTests(APITestCase):
         self.client.force_authenticate(self.staff)
         response = self.client.post(
             "/api/v1/products/",
-            {"name": "Widget", "price": "10.00", "stock_quantity": 5},
+            {"name": "Widget", "purchase_price": "10.00", "selling_price": "15.00", "stock_quantity": 5},
             format="json",
         )
         self.assertEqual(response.status_code, 201)
         product = Product.objects.get(name="Widget")
-        self.assertEqual(product.price, Decimal("10.00"))
+        self.assertEqual(product.purchase_price, Decimal("10.00"))
         self.assertEqual(product.stock_quantity, 5)

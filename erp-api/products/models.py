@@ -7,10 +7,14 @@ from django.db.models import Q
 
 class Product(models.Model):
     name = models.CharField(max_length=200)
-    price = models.DecimalField(
+    purchase_price = models.DecimalField(
+    max_digits=12,
+    decimal_places=2,
+    )
+    
+    selling_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        validators=[MinValueValidator(Decimal("0"))],
     )
     stock_quantity = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -23,8 +27,12 @@ class Product(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                condition=Q(price__gte=Decimal("0")),
-                name="product_price_non_negative",
+                condition=Q(purchase_price__gte=0),
+                name="product_purchase_price_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=Q(selling_price__gte=0),
+                name="product_selling_price_non_negative",
             ),
         ]
 

@@ -12,7 +12,8 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "name",
-            "price",
+            "purchase_price",
+            "selling_price",
             "stock_quantity",
             "sold_quantity",
             "remaining_quantity",

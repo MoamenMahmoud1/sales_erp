@@ -5,7 +5,7 @@ from .models import CartonPricing, Product
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ("name", "price", "stock_quantity", "created_at")
+    list_display = ("name",  "purchase_price", "selling_price", "stock_quantity", "created_at")
     search_fields = ("name",)
 
 
