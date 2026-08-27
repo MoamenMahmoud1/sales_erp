@@ -1,5 +1,5 @@
 from django.db import models
-
+from .querysets.supplier import SupplierQuerySet
 
 class Supplier(models.Model):
     name = models.CharField(max_length=150)
@@ -9,6 +9,7 @@ class Supplier(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = SupplierQuerySet.as_manager()
 
     class Meta:
         ordering = ("name",)

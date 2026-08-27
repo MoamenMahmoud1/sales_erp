@@ -6,7 +6,7 @@ from django.db.models import Q
 
 from products.models import Product
 from django.conf import settings
-
+from purchases.querysets.purchase import PurchaseQuerySet
 
 class Purchase(models.Model):
     class Status(models.TextChoices):
@@ -36,8 +36,17 @@ class Purchase(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+
+    objects = PurchaseQuerySet.as_manager()
+
+
     class Meta:
         ordering = ("-created_at",)
+
+        permissions = [
+           ("confirm_purchase", "Can confirm purchase"),
+           ("cancel_purchase", "Can cancel purchase"),
+        ]
 
     def __str__(self):
         return f"Purchase #{self.pk}"

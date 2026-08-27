@@ -49,6 +49,7 @@ THIRD_PARTY_APPS = [
     "corsheaders",
     'rest_framework',
     'phonenumber_field',
+    "django_filters",
 ]
 
 PROJECT_APPS = [
@@ -122,7 +123,8 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
-    'DEFAULT_PAGINATION_CLASS': 'common.pagination.DefaultPagination',
+    "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend",],
+    'DEFAULT_PAGINATION_CLASS': 'common.pagination.StandardPagination',
     'DEFAULT_THROTTLE_CLASSES': (),
     'DEFAULT_THROTTLE_RATES': {
         'login_burst': '5/min',

@@ -7,6 +7,7 @@ from purchases.models import Purchase
 
 
 class ConfirmPurchaseService:
+
     @staticmethod
     @transaction.atomic
     def execute(*, purchase_id):
@@ -18,21 +19,30 @@ class ConfirmPurchaseService:
         )
 
         if purchase.status != Purchase.Status.DRAFT:
-            raise ValueError("Only draft purchases can be confirmed.")
+            raise ValueError(
+                "Only draft purchases can be confirmed."
+            )
 
         items = list(purchase.items.all())
 
         if not items:
-            raise ValueError("Purchase must contain at least one item.")
+            raise ValueError(
+                "Purchase must contain at least one item."
+            )
 
         warehouse = (
             StockLocation.objects
-            .select_for_update()
-            .get(
+            .filter(
                 location_type=StockLocation.LocationType.MAIN_WAREHOUSE,
                 is_active=True,
             )
+            .first()
         )
+
+        if warehouse is None:
+            raise ValueError(
+                "Active main warehouse does not exist."
+            )
 
         movement = StockMovement.objects.create(
             movement_type=StockMovement.MovementType.PURCHASE,
@@ -55,6 +65,8 @@ class ConfirmPurchaseService:
             )
 
         purchase.status = Purchase.Status.CONFIRMED
-        purchase.save(update_fields=["status", "updated_at"])
+        purchase.save(
+            update_fields=["status", "updated_at"]
+        )
 
         return purchase
