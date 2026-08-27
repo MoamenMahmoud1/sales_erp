@@ -61,6 +61,8 @@ PROJECT_APPS = [
     'invoices.apps.InvoicesConfig',
     'payments.apps.PaymentsConfig',
     'inventory.apps.InventoryConfig',
+    'purchases.apps.PurchasesConfig',
+    "suppliers.apps.SuppliersConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS

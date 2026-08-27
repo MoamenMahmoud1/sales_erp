@@ -5,6 +5,7 @@ from django.db import models
 from django.db.models import Q
 
 from products.models import Product
+from django.conf import settings
 
 
 class Purchase(models.Model):
@@ -28,7 +29,7 @@ class Purchase(models.Model):
         blank=True,
     )
     created_by = models.ForeignKey(
-        "accounts.User",
+        settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="created_purchases",
     )
@@ -71,6 +72,10 @@ class PurchaseItem(models.Model):
 
     class Meta:
         constraints = [
+            models.UniqueConstraint(
+                fields=("purchase", "product"),
+                name="purchase_item_unique_product",
+            ),
             models.CheckConstraint(
                 condition=Q(quantity__gte=1),
                 name="purchase_item_quantity_positive",
