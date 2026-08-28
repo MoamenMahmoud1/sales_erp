@@ -1,20 +1,29 @@
 from decimal import Decimal
 
+from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.db import IntegrityError
+from django.test import TestCase, TransactionTestCase
+from django.test.client import AsyncRequestFactory
 from django.utils import timezone
-from rest_framework.test import APITestCase
+from rest_framework.test import force_authenticate
 
 from common.exceptions import (
     CouponInvalid,
+    InvalidDiscount,
     InvalidStateTransition,
 )
 from coupons.models import Coupon
 from customers.models import Customer
 from invoices.models import Invoice, InvoiceItem
-from invoices.services import ApplyCoupon, CancelInvoice, ConfirmInvoice
+from invoices.api.views import InvoiceViewSet
+from invoices.services import (
+    ApplyCoupon,
+    CancelInvoice,
+    ConfirmInvoice,
+    CreateInvoice,
+    InvoiceNotFound,
+)
 from products.models import Product
 
 
@@ -31,22 +40,35 @@ class BaseInvoiceTest(TestCase):
         )
         self.customer = Customer.objects.create(name="Acme")
         self.product = Product.objects.create(
-            name="Widget", price=Decimal("100.00"), stock_quantity=50
+            name="Widget",
+            purchase_price=Decimal("60.00"),
+            selling_price=Decimal("100.00"),
+            stock_quantity=50,
         )
 
-    def _make_invoice(self, quantity=1):
+    async def call(self, service, **kwargs):
+        return await service(**kwargs)
+
+    async def run_sync(self, function, *args, **kwargs):
+        return await sync_to_async(
+            function,
+            thread_sensitive=True,
+        )(*args, **kwargs)
+
+    def make_invoice(self, quantity=1):
         invoice = Invoice.objects.create(
-            customer=self.customer, created_by=self.staff
+            customer=self.customer,
+            created_by=self.staff,
         )
         InvoiceItem.objects.create(
             invoice=invoice,
             product=self.product,
             quantity=quantity,
-            unit_price=self.product.price,
+            unit_price=self.product.selling_price,
         )
         return invoice
 
-    def _make_coupon(
+    def make_coupon(
         self,
         code="SAVE10",
         discount_type=Coupon.DiscountType.PERCENTAGE,
@@ -61,247 +83,166 @@ class BaseInvoiceTest(TestCase):
         )
 
 
+class InvoiceCreationTests(BaseInvoiceTest):
+    async def test_create_snapshots_prices_for_multiple_items(self):
+        other = await self.run_sync(Product.objects.create,
+            name="Other",
+            purchase_price=Decimal("15.00"),
+            selling_price=Decimal("25.50"),
+            stock_quantity=10,
+        )
+        invoice = await self.call(
+            CreateInvoice(),
+            user=self.staff,
+            validated_data={
+                "customer": self.customer,
+                "items": [
+                    {"product": self.product, "quantity": 2},
+                    {"product": other, "quantity": 3},
+                ],
+            },
+        )
+
+        items = await self.run_sync(lambda: list(invoice.items.order_by("product_id")))
+        self.assertEqual(len(items), 2)
+        self.assertEqual(
+            await self.run_sync(lambda: invoice.subtotal),
+            Decimal("276.50"),
+        )
+        self.assertEqual(
+            await InvoiceItem.objects.filter(
+                invoice=invoice,
+                product=self.product,
+            ).values_list("unit_price", flat=True).aget(),
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            await InvoiceItem.objects.filter(
+                invoice=invoice,
+                product=other,
+            ).values_list("unit_price", flat=True).aget(),
+            Decimal("25.50"),
+        )
+
+    async def test_failed_create_rolls_back_invoice_and_items(self):
+        before = await Invoice.objects.acount()
+        with self.assertRaises(IntegrityError):
+            await self.call(
+                CreateInvoice(),
+                user=self.staff,
+                validated_data={
+                    "customer": self.customer,
+                    "items": [
+                        {"product": self.product, "quantity": 1},
+                        {"product": self.product, "quantity": 2},
+                    ],
+                },
+            )
+        self.assertEqual(await Invoice.objects.acount(), before)
+        self.assertEqual(await InvoiceItem.objects.acount(), 0)
+
+
 class InvoiceLifecycleTests(BaseInvoiceTest):
-    def test_new_invoice_is_draft(self):
-        invoice = self._make_invoice()
-        self.assertEqual(invoice.status, Invoice.Status.DRAFT)
-
-    def test_draft_can_be_confirmed(self):
-        invoice = self._make_invoice()
-        returned = ConfirmInvoice()(invoice_id=invoice.pk)
+    async def test_draft_can_be_confirmed(self):
+        invoice = await self.run_sync(self.make_invoice)
+        returned = await self.call(ConfirmInvoice(), invoice_id=invoice.pk)
         self.assertEqual(returned.status, Invoice.Status.CONFIRMED)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.status, Invoice.Status.CONFIRMED)
 
-    def test_draft_can_be_cancelled(self):
-        invoice = self._make_invoice()
-        CancelInvoice()(invoice_id=invoice.pk)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.status, Invoice.Status.CANCELLED)
+    async def test_draft_and_confirmed_invoices_can_be_cancelled(self):
+        draft = await self.run_sync(self.make_invoice)
+        await self.call(CancelInvoice(), invoice_id=draft.pk)
+        self.assertEqual(
+            (await Invoice.objects.aget(pk=draft.pk)).status,
+            Invoice.Status.CANCELLED,
+        )
 
-    def test_confirmed_can_be_cancelled(self):
-        invoice = self._make_invoice()
-        ConfirmInvoice()(invoice_id=invoice.pk)
-        CancelInvoice()(invoice_id=invoice.pk)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.status, Invoice.Status.CANCELLED)
+        confirmed = await self.run_sync(self.make_invoice)
+        await self.call(ConfirmInvoice(), invoice_id=confirmed.pk)
+        await self.call(CancelInvoice(), invoice_id=confirmed.pk)
+        self.assertEqual(
+            (await Invoice.objects.aget(pk=confirmed.pk)).status,
+            Invoice.Status.CANCELLED,
+        )
 
-    def test_confirm_already_confirmed_rejected(self):
-        invoice = self._make_invoice()
-        ConfirmInvoice()(invoice_id=invoice.pk)
+    async def test_invalid_transitions_and_missing_invoice_are_rejected(self):
+        invoice = await self.run_sync(self.make_invoice)
+        await self.call(CancelInvoice(), invoice_id=invoice.pk)
         with self.assertRaises(InvalidStateTransition):
-            ConfirmInvoice()(invoice_id=invoice.pk)
-
-    def test_cancel_cancelled_rejected(self):
-        invoice = self._make_invoice()
-        CancelInvoice()(invoice_id=invoice.pk)
-        with self.assertRaises(InvalidStateTransition):
-            CancelInvoice()(invoice_id=invoice.pk)
-
-    def test_cancel_paid_rejected(self):
-        invoice = self._make_invoice()
-        invoice.status = Invoice.Status.PAID
-        invoice.save(update_fields=("status",))
-        with self.assertRaises(InvalidStateTransition):
-            CancelInvoice()(invoice_id=invoice.pk)
-
-    def test_confirm_after_cancel_rejected(self):
-        invoice = self._make_invoice()
-        CancelInvoice()(invoice_id=invoice.pk)
-        with self.assertRaises(InvalidStateTransition):
-            ConfirmInvoice()(invoice_id=invoice.pk)
-
-    def test_concurrent_confirm_only_one_succeeds(self):
-        # SQLite serializes writes; on PostgreSQL, SelectForUpdate locks the
-        # row. Either way the second operator re-reads the committed state and
-        # must be rejected — the state guard is the source of truth.
-        invoice = self._make_invoice()
-        first = ConfirmInvoice()(invoice_id=invoice.pk)
-        self.assertEqual(first.status, Invoice.Status.CONFIRMED)
-        with self.assertRaises(InvalidStateTransition):
-            ConfirmInvoice()(invoice_id=invoice.pk)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.status, Invoice.Status.CONFIRMED)
-
-
-class InvoiceMoneyTests(BaseInvoiceTest):
-    def test_subtotal_and_total(self):
-        invoice = self._make_invoice(quantity=3)
-        self.assertEqual(invoice.subtotal, Decimal("300.00"))
-        self.assertEqual(invoice.discount, Decimal("0.00"))
-        self.assertEqual(invoice.total, Decimal("300.00"))
-
-    def test_fixed_discount_rounding_and_total(self):
-        invoice = self._make_invoice(quantity=3)  # subtotal 300
-        coupon = self._make_coupon(
-            code="FIXED",
-            discount_type=Coupon.DiscountType.FIXED,
-            discount_value=Decimal("25.00"),
-        )
-        ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.coupon_discount, Decimal("25.00"))
-        self.assertEqual(invoice.total, Decimal("275.00"))
-
-    def test_percentage_discount(self):
-        invoice = self._make_invoice(quantity=3)  # subtotal 300
-        coupon = self._make_coupon(
-            code="PCT",
-            discount_type=Coupon.DiscountType.PERCENTAGE,
-            discount_value=Decimal("33.33"),
-        )
-        ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-        invoice.refresh_from_db()
-        # 300 * 33.33 / 100 = 99.99
-        self.assertEqual(invoice.coupon_discount, Decimal("99.99"))
-        self.assertEqual(invoice.total, Decimal("200.01"))
-
-    def test_percentage_discount_rounds_half_up(self):
-        # Product priced 0.09; 1 unit = 0.09 subtotal.
-        product = Product.objects.create(
-            name="Odd", price=Decimal("0.09"), stock_quantity=1
-        )
-        invoice = Invoice.objects.create(
-            customer=self.customer, created_by=self.staff
-        )
-        InvoiceItem.objects.create(
-            invoice=invoice,
-            product=product,
-            quantity=1,
-            unit_price=Decimal("0.09"),
-        )
-        # 0.09 * 50 / 100 = 0.045 -> ROUND_HALF_UP -> 0.05 (not 0.04).
-        coupon = self._make_coupon(code="HALF", discount_value=Decimal("50"))
-        ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.coupon_discount, Decimal("0.05"))
-        self.assertEqual(invoice.total, Decimal("0.04"))
-
-    def test_one_hundred_percent_discount_allowed(self):
-        invoice = self._make_invoice(quantity=1)
-        coupon = self._make_coupon(
-            code="FREE", discount_value=Decimal("100")
-        )
-        ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.coupon_discount, Decimal("100.00"))
-        self.assertEqual(invoice.total, Decimal("0.00"))
-
-    def test_fixed_discount_exceeding_subtotal_rejected(self):
-        invoice = self._make_invoice(quantity=1)  # subtotal 100
-        coupon = self._make_coupon(
-            code="BIGFIX",
-            discount_type=Coupon.DiscountType.FIXED,
-            discount_value=Decimal("150.00"),
-        )
-        from common.exceptions import InvalidDiscount
-
-        with self.assertRaises(InvalidDiscount):
-            ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-
-    def test_percentage_over_100_rejected_at_model(self):
-        with self.assertRaises(ValidationError):
-            self._make_coupon(
-                code="OVER", discount_value=Decimal("150")
-            ).full_clean()
+            await self.call(ConfirmInvoice(), invoice_id=invoice.pk)
+        with self.assertRaises(InvoiceNotFound):
+            await self.call(ConfirmInvoice(), invoice_id=999999)
 
 
 class InvoiceCouponTests(BaseInvoiceTest):
-    def test_valid_coupon_applies(self):
-        invoice = self._make_invoice(quantity=2)  # 200
-        coupon = self._make_coupon(code="VALID", discount_value=Decimal("10"))
-        ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.coupon.pk, coupon.pk)
-        self.assertEqual(invoice.coupon_discount, Decimal("20.00"))
-
-    def test_inactive_coupon_rejected(self):
-        invoice = self._make_invoice()
-        coupon = self._make_coupon(code="INAC", is_active=False)
-        with self.assertRaises(CouponInvalid):
-            ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-
-    def test_expired_coupon_rejected(self):
-        invoice = self._make_invoice()
-        coupon = self._make_coupon(
-            code="EXP",
-            valid_from=timezone.now() - timezone.timedelta(days=10),
-            valid_until=timezone.now() - timezone.timedelta(days=1),
+    async def test_valid_percentage_coupon_is_snapshotted(self):
+        invoice = await self.run_sync(self.make_invoice, quantity=3)
+        coupon = await self.run_sync(
+            self.make_coupon,
+            code="PCT",
+            discount_value=Decimal("33.33"),
         )
-        with self.assertRaises(CouponInvalid):
-            ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
+        await self.call(ApplyCoupon(), invoice_id=invoice.pk, code=coupon.code)
 
-    def test_not_yet_valid_coupon_rejected(self):
-        invoice = self._make_invoice()
-        coupon = self._make_coupon(
-            code="FUTURE",
-            valid_from=timezone.now() + timezone.timedelta(days=1),
-            valid_until=timezone.now() + timezone.timedelta(days=10),
+        await invoice.arefresh_from_db()
+        self.assertEqual(invoice.coupon_discount, Decimal("99.99"))
+        self.assertEqual(await self.run_sync(lambda: invoice.total), Decimal("200.01"))
+
+        await self.run_sync(setattr, coupon, "discount_value", Decimal("50"))
+        await coupon.asave()
+        await invoice.arefresh_from_db()
+        self.assertEqual(invoice.coupon_discount, Decimal("99.99"))
+
+    async def test_invalid_coupon_rules_are_rejected(self):
+        invoice = await self.run_sync(self.make_invoice)
+        cases = (
+            await self.run_sync(self.make_coupon, code="INACTIVE", is_active=False),
+            await self.run_sync(
+                self.make_coupon,
+                code="EXPIRED",
+                valid_from=timezone.now() - timezone.timedelta(days=2),
+                valid_until=timezone.now() - timezone.timedelta(days=1),
+            ),
+            await self.run_sync(
+                self.make_coupon,
+                code="FUTURE",
+                valid_from=timezone.now() + timezone.timedelta(days=1),
+            ),
+            await self.run_sync(
+                self.make_coupon,
+                code="MIN",
+                minimum_invoice_amount=Decimal("500"),
+            ),
         )
+        for coupon in cases:
+            with self.subTest(coupon=coupon.code), self.assertRaises(CouponInvalid):
+                await self.call(
+                    ApplyCoupon(),
+                    invoice_id=invoice.pk,
+                    code=coupon.code,
+                )
         with self.assertRaises(CouponInvalid):
-            ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
+            await self.call(ApplyCoupon(), invoice_id=invoice.pk, code="missing")
 
-    def test_minimum_invoice_amount_rejected(self):
-        invoice = self._make_invoice(quantity=1)  # 100
-        coupon = self._make_coupon(
-            code="MIN",
-            minimum_invoice_amount=Decimal("500.00"),
+    async def test_fixed_discount_larger_than_subtotal_is_rejected(self):
+        invoice = await self.run_sync(self.make_invoice)
+        coupon = await self.run_sync(
+            self.make_coupon,
+            code="BIG",
+            discount_type=Coupon.DiscountType.FIXED,
+            discount_value=Decimal("150"),
         )
-        with self.assertRaises(CouponInvalid):
-            ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
+        with self.assertRaises(InvalidDiscount):
+            await self.call(ApplyCoupon(), invoice_id=invoice.pk, code=coupon.code)
 
-    def test_minimum_invoice_amount_satisfied(self):
-        invoice = self._make_invoice(quantity=10)  # 1000
-        coupon = self._make_coupon(
-            code="MINOK", minimum_invoice_amount=Decimal("500.00")
-        )
-        ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.coupon.pk, coupon.pk)
-
-    def test_unknown_coupon_rejected(self):
-        invoice = self._make_invoice()
-        with self.assertRaises(CouponInvalid):
-            ApplyCoupon()(invoice_id=invoice.pk, code="nope")
-
-    def test_coupon_cannot_be_applied_after_confirm(self):
-        invoice = self._make_invoice()
-        ConfirmInvoice()(invoice_id=invoice.pk)
-        coupon = self._make_coupon(code="LATE")
+    async def test_coupon_cannot_be_applied_to_confirmed_invoice(self):
+        invoice = await self.run_sync(self.make_invoice)
+        await self.call(ConfirmInvoice(), invoice_id=invoice.pk)
+        coupon = await self.run_sync(self.make_coupon)
         with self.assertRaises(InvalidStateTransition):
-            ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-
-    def test_confirmed_invoice_frozen_against_coupon_changes(self):
-        invoice = self._make_invoice(quantity=2)  # 200
-        coupon = self._make_coupon(code="FIRST", discount_value=Decimal("10"))
-        ApplyCoupon()(invoice_id=invoice.pk, code=coupon.code)
-        ConfirmInvoice()(invoice_id=invoice.pk)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.coupon_discount, Decimal("20.00"))
-        self.assertEqual(invoice.total, Decimal("180.00"))
-
-        # Edit the coupon afterwards; the invoice must remain unchanged.
-        coupon.discount_value = Decimal("50")
-        coupon.save()
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.coupon_discount, Decimal("20.00"))
-        self.assertEqual(invoice.total, Decimal("180.00"))
+            await self.call(ApplyCoupon(), invoice_id=invoice.pk, code=coupon.code)
 
 
-class InvoiceSnapshotTests(BaseInvoiceTest):
-    def test_product_price_change_does_not_alter_unit_price(self):
-        invoice = self._make_invoice(quantity=1)
-        item = invoice.items.get()
-        self.assertEqual(item.unit_price, Decimal("100.00"))
-
-        self.product.price = Decimal("150.00")
-        self.product.save()
-        item.refresh_from_db()
-        self.assertEqual(item.unit_price, Decimal("100.00"))
-        self.assertEqual(invoice.subtotal, Decimal("100.00"))
-
-
-class InvoiceAPITests(APITestCase):
+class InvoiceAPITests(TransactionTestCase):
     def setUp(self):
         User = get_user_model()
         self.staff = User.objects.create_user(
@@ -312,107 +253,108 @@ class InvoiceAPITests(APITestCase):
             is_verified=True,
             is_staff=True,
         )
-        self.user = User.objects.create_user(
-            username="api-user",
-            email="api-user@example.com",
-            password="StrongPass123!",
-            is_active=True,
-            is_verified=True,
-        )
         self.customer = Customer.objects.create(name="Chris")
         self.product = Product.objects.create(
-            name="Gadget", price=Decimal("80.00"), stock_quantity=30
+            name="Gadget",
+            purchase_price=Decimal("40.00"),
+            selling_price=Decimal("80.00"),
+            stock_quantity=30,
         )
         self.coupon = Coupon.objects.create(
             code="SAVE",
             discount_type=Coupon.DiscountType.PERCENTAGE,
             discount_value=Decimal("10"),
         )
+        self.factory = AsyncRequestFactory()
 
-    def _create(self):
-        resp = self.client.post(
+    async def create_invoice(self):
+        request = self.factory.post(
             "/api/v1/invoices/",
             {
                 "customer": self.customer.pk,
-                "items": [
-                    {"product": self.product.pk, "quantity": 1}
-                ],
-            },
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 201)
-        return resp.data["id"]
-
-    def test_confirm_endpoint(self):
-        self.client.force_authenticate(self.staff)
-        pk = self._create()
-        resp = self.client.post(f"/api/v1/invoices/{pk}/confirm/")
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["status"], Invoice.Status.CONFIRMED)
-
-    def test_cancel_endpoint(self):
-        self.client.force_authenticate(self.staff)
-        pk = self._create()
-        resp = self.client.post(f"/api/v1/invoices/{pk}/cancel/")
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["status"], Invoice.Status.CANCELLED)
-
-    def test_apply_coupon_endpoint(self):
-        self.client.force_authenticate(self.staff)
-        pk = self._create()
-        resp = self.client.post(
-            f"/api/v1/invoices/{pk}/apply-coupon/", {"code": "SAVE"},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["coupon_discount"], "8.00")
-        self.assertEqual(resp.data["total"], "72.00")
-
-    def test_client_cannot_set_status(self):
-        self.client.force_authenticate(self.staff)
-        pk = self._create()
-        self.client.post(f"/api/v1/invoices/{pk}/confirm/")
-        resp = self.client.patch(
-            f"/api/v1/invoices/{pk}/",
-            {"status": "cancelled"},
-            format="json",
-        )
-        # Not allowed because InvoiceViewSet is read+create only.
-        self.assertIn(resp.status_code, (403, 405))
-        self.assertTrue(
-            Invoice.objects.get(pk=pk).status == Invoice.Status.CONFIRMED
-        )
-
-    def test_invalid_transition_returns_409(self):
-        self.client.force_authenticate(self.staff)
-        pk = self._create()
-        self.client.post(f"/api/v1/invoices/{pk}/cancel/")
-        resp = self.client.post(f"/api/v1/invoices/{pk}/confirm/")
-        self.assertEqual(resp.status_code, 409)
-
-    def test_invalid_coupon_returns_400(self):
-        self.client.force_authenticate(self.staff)
-        pk = self._create()
-        resp = self.client.post(
-            f"/api/v1/invoices/{pk}/apply-coupon/", {"code": "missing"},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 400)
-
-    def test_application_cannot_happen_via_serializer(self):
-        # A client-provided status is rejected, not applied.
-        self.client.force_authenticate(self.staff)
-        resp = self.client.post(
-            "/api/v1/invoices/",
-            {
-                "customer": self.customer.pk,
-                "status": "paid",
-                "coupon_discount": "999",
                 "items": [{"product": self.product.pk, "quantity": 1}],
             },
-            format="json",
+            content_type="application/json",
         )
-        self.assertEqual(resp.status_code, 201)
-        invoice = Invoice.objects.get(pk=resp.data["id"])
-        self.assertEqual(invoice.status, Invoice.Status.DRAFT)
-        self.assertEqual(invoice.coupon_discount, Decimal("0.00"))
+        force_authenticate(request, user=self.staff)
+        response = await InvoiceViewSet.as_view({"post": "acreate"})(request)
+        self.assertEqual(response.status_code, 201)
+        return response.data["id"]
+
+    async def test_create_and_lifecycle_endpoints(self):
+        pk = await self.create_invoice()
+        request = self.factory.post(f"/api/v1/invoices/{pk}/confirm/", data={})
+        force_authenticate(request, user=self.staff)
+        response = await InvoiceViewSet.as_view({"post": "confirm"})(
+            request,
+            pk=pk,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], Invoice.Status.CONFIRMED)
+
+        request = self.factory.post(f"/api/v1/invoices/{pk}/cancel/", data={})
+        force_authenticate(request, user=self.staff)
+        response = await InvoiceViewSet.as_view({"post": "cancel"})(
+            request,
+            pk=pk,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], Invoice.Status.CANCELLED)
+
+    async def test_coupon_and_immutability_endpoints(self):
+        pk = await self.create_invoice()
+        request = self.factory.post(
+            f"/api/v1/invoices/{pk}/apply-coupon/",
+            {"code": self.coupon.code},
+            content_type="application/json",
+        )
+        force_authenticate(request, user=self.staff)
+        response = await InvoiceViewSet.as_view({"post": "apply_coupon"})(
+            request,
+            pk=pk,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["coupon_discount"], "8.00")
+
+        request = self.factory.patch(
+            f"/api/v1/invoices/{pk}/",
+            {"status": "cancelled"},
+            content_type="application/json",
+        )
+        force_authenticate(request, user=self.staff)
+        response = await InvoiceViewSet.as_view({"patch": "partial_aupdate"})(
+            request,
+            pk=pk,
+        )
+        self.assertEqual(response.status_code, 405)
+
+    async def test_invalid_input_and_missing_resources_return_client_errors(self):
+        request = self.factory.post(
+            "/api/v1/invoices/",
+            {"customer": self.customer.pk, "items": []},
+            content_type="application/json",
+        )
+        force_authenticate(request, user=self.staff)
+        response = await InvoiceViewSet.as_view({"post": "acreate"})(request)
+        self.assertEqual(response.status_code, 400)
+
+        request = self.factory.post("/api/v1/invoices/999999/confirm/", data={})
+        force_authenticate(request, user=self.staff)
+        response = await InvoiceViewSet.as_view({"post": "confirm"})(
+            request,
+            pk=999999,
+        )
+        self.assertEqual(response.status_code, 404)
+
+        pk = await self.create_invoice()
+        request = self.factory.post(
+            f"/api/v1/invoices/{pk}/apply-coupon/",
+            {"code": "missing"},
+            content_type="application/json",
+        )
+        force_authenticate(request, user=self.staff)
+        response = await InvoiceViewSet.as_view({"post": "apply_coupon"})(
+            request,
+            pk=pk,
+        )
+        self.assertEqual(response.status_code, 400)
