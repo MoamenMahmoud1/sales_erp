@@ -1,16 +1,19 @@
 import json
 from decimal import Decimal
 
+from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.test.client import AsyncRequestFactory
-from django.urls import reverse
+from django.urls import resolve, reverse
 from rest_framework.test import force_authenticate
 
 from coupons.api.views import CouponViewSet
 from coupons.models import Coupon
+from customers.models import Customer
+from invoices.models import Invoice
 
 
 class CouponModelTests(TestCase):
@@ -85,7 +88,7 @@ class CouponModelTests(TestCase):
                 )
 
 
-class CouponAsyncViewsTests(TestCase):
+class CouponAsyncViewsTests(TransactionTestCase):
     def setUp(self):
         User = get_user_model()
 
@@ -465,3 +468,63 @@ class CouponAsyncViewsTests(TestCase):
             response.data["count"],
             1,
         )
+
+    async def test_router_binds_async_lifecycle_actions(self):
+        list_view = resolve(reverse("coupons:coupon-list")).func
+        detail_view = resolve(
+            reverse("coupons:coupon-detail", kwargs={"pk": self.coupon.pk})
+        ).func
+
+        self.assertEqual(list_view.actions["get"], "alist")
+        self.assertEqual(list_view.actions["post"], "acreate")
+        self.assertEqual(detail_view.actions["get"], "aretrieve")
+        self.assertEqual(detail_view.actions["put"], "aupdate")
+        self.assertEqual(detail_view.actions["patch"], "partial_aupdate")
+        self.assertEqual(detail_view.actions["delete"], "adestroy")
+
+    async def test_routed_staff_can_create_coupon(self):
+        payload = {
+            "code": "ROUTED10",
+            "discount_type": Coupon.DiscountType.PERCENTAGE,
+            "discount_value": "10.00",
+        }
+        request = self.factory.post(
+            reverse("coupons:coupon-list"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        force_authenticate(request, user=self.staff_user)
+
+        response = await resolve(reverse("coupons:coupon-list")).func(request)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            await Coupon.objects.filter(code="ROUTED10").aexists(),
+        )
+
+    async def test_routed_delete_returns_controlled_error_for_invoice_coupon(self):
+        customer = await sync_to_async(
+            Customer.objects.create,
+            thread_sensitive=True,
+        )(name="Coupon Customer")
+        await sync_to_async(
+            Invoice.objects.create,
+            thread_sensitive=True,
+        )(
+            customer=customer,
+            created_by=self.staff_user,
+            coupon=self.coupon,
+        )
+
+        request = self.factory.delete(
+            reverse("coupons:coupon-detail", kwargs={"pk": self.coupon.pk}),
+        )
+        force_authenticate(request, user=self.staff_user)
+
+        response = await resolve(
+            reverse("coupons:coupon-detail", kwargs={"pk": self.coupon.pk})
+        ).func(request, pk=self.coupon.pk)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "coupon_in_use")
+        self.assertTrue(await Coupon.objects.filter(pk=self.coupon.pk).aexists())

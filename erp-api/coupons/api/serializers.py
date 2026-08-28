@@ -1,7 +1,10 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
-from rest_framework import serializers
+from adrf import serializers
 
 from coupons.models import Coupon
+from coupons.services import CreateCoupon, UpdateCoupon
+from coupons.services.create import create_coupon_sync
+from coupons.services.update import update_coupon_sync
 
 
 class CouponSerializer(serializers.ModelSerializer):
@@ -17,7 +20,7 @@ class CouponSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         try:
-            return super().create(validated_data)
+            return create_coupon_sync(validated_data)
         except DjangoValidationError as exc:
             raise serializers.ValidationError(
                 exc.message_dict
@@ -25,11 +28,23 @@ class CouponSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         try:
-            return super().update(
-                instance,
-                validated_data,
-            )
+            return update_coupon_sync(instance, validated_data)
         except DjangoValidationError as exc:
             raise serializers.ValidationError(
                 exc.message_dict
             ) from exc
+
+    async def acreate(self, validated_data):
+        try:
+            return await CreateCoupon()(validated_data=validated_data)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict) from exc
+
+    async def aupdate(self, instance, validated_data):
+        try:
+            return await UpdateCoupon()(
+                instance=instance,
+                validated_data=validated_data,
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict) from exc

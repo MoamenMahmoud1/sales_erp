@@ -1,4 +1,4 @@
-from rest_framework.routers import SimpleRouter
+from adrf.routers import SimpleRouter
 
 from .api.views import CouponViewSet
 
