@@ -9,7 +9,7 @@ class SupplierQuerySet(models.QuerySet):
         return self.only(
             "id",
             "name",
-            "phone_number",
+            "phone",
             "email",
             "is_active",
             "created_at",
