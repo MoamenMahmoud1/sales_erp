@@ -1,10 +1,10 @@
-from rest_framework.viewsets import ModelViewSet
+from adrf import viewsets
 from accounts.api.serializers import EmployeeSerializer
 from accounts.models import Employee
 from accounts.permissions import EmployeeAccessPermission
 
 
-class EmployeeViewSet(ModelViewSet):
+class EmployeeViewSet(viewsets.ModelViewSet):
     serializer_class = EmployeeSerializer
     permission_classes = (EmployeeAccessPermission,)
 

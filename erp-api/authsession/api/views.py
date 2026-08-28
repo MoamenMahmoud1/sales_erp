@@ -1,6 +1,8 @@
 from django.conf import settings
+from asgiref.sync import sync_to_async
 from django.utils import timezone
-from rest_framework import mixins, status, viewsets
+from adrf import mixins, viewsets
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -89,13 +91,16 @@ class AuthSessionViewSet(
             expires_at__gt=timezone.now(),
         ).order_by("-last_refreshed_at")
 
-    def destroy(self, request, *args, **kwargs):
-        auth_session = self.get_object()
+    async def adestroy(self, request, *args, **kwargs):
+        auth_session = await self.aget_object()
         is_current = get_device_id(request) == auth_session.device_id
-        AuthSession.objects.filter(
-            pk=auth_session.pk,
-            revoked_at__isnull=True,
-        ).update(revoked_at=timezone.now())
+        await sync_to_async(
+            AuthSession.objects.filter(
+                pk=auth_session.pk,
+                revoked_at__isnull=True,
+            ).update,
+            thread_sensitive=True,
+        )(revoked_at=timezone.now())
 
         response = Response(status=status.HTTP_204_NO_CONTENT)
         if is_current:
