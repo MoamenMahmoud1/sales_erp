@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../security/biometric_auth.dart';
+import '../theme/app_colors.dart';
 
 /// The current lock phase shown on the screen.
 enum _LockPhase { scanning, success, failure }
@@ -42,7 +43,6 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
   /// The device's strongest biometric capability, resolved at startup so the
   /// UI reflects the real method instead of hardcoding "Face ID".
   _BioCapability _capability = _BioCapability.generic;
-  bool _autoAttempted = false;
 
   @override
   void initState() {
@@ -73,13 +73,46 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
   }
 
   /// One automatic biometric attempt per presentation, triggered after the
-  /// screen is mounted & rendered — never during build(), never on rebuilds.
+  /// screen is mounted, rendered AND the app is in the resumed lifecycle
+  /// state — never during build(), never on rebuilds.
+  ///
+  /// Platform note: on Android, BiometricPrompt cannot display while the
+  /// window is still regaining focus right after the app returns from the
+  /// background. If the auto attempt fails before the user interacts, we
+  /// retry a few times with short gaps until the window can actually show
+  /// the prompt. This is a genuine platform focus constraint, not a delay
+  /// used to mask a lifecycle bug.
+  static const int _maxAutoRetries = 3;
+  static const Duration _autoRetryGap = Duration(milliseconds: 700);
+  int _autoRetries = 0;
+  bool _userInteracted = false;
+
   Future<void> _start() async {
-    if (_autoAttempted) return;
-    _autoAttempted = true;
-    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (_autoRetries > 0 || _userInteracted) return;
+    // Wait for the first frame so the screen is actually mounted & visible.
+    await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
+    await _autoAttempt();
+  }
+
+  Future<void> _autoAttempt() async {
+    final sw = Stopwatch()..start();
     await _attempt();
+    sw.stop();
+    if (!mounted || _userInteracted) return;
+    if (_phase == _LockPhase.success) return;
+
+    // A healthy prompt blocks for seconds. If authenticate() returned almost
+    // instantly, the native prompt never actually appeared (window focus not
+    // regained yet) → retry while the user has not interacted.
+    final promptNeverAppeared =
+        sw.elapsedMilliseconds < 400 && _phase == _LockPhase.failure;
+    if (promptNeverAppeared && _autoRetries < _maxAutoRetries) {
+      _autoRetries++;
+      await Future<void>.delayed(_autoRetryGap);
+      if (!mounted || _userInteracted) return;
+      await _autoAttempt();
+    }
   }
 
   Future<void> _attempt() async {
@@ -104,18 +137,20 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
   }
 
   void _retry() {
+    _userInteracted = true;
     _attempt();
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final colors = AppColors.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1118),
+      backgroundColor: colors.background,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          const _BackgroundGlow(),
+          _BackgroundGlow(colors: colors),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -131,10 +166,10 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                         progress: _scanController.value,
                         phase: _phase,
                         child: child ??
-                            const Icon(
+                            Icon(
                               Icons.fingerprint_rounded,
                               size: 92,
-                              color: Colors.white,
+                              color: colors.textPrimary,
                             ),
                       ),
                     ),
@@ -143,18 +178,18 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                   Text(
                     'Sales ERP',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.5,
-                      color: Colors.white,
+                      color: colors.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     _message,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white.withValues(alpha: .7)),
+                    style: TextStyle(color: colors.textSecondary),
                   ),
                   const SizedBox(height: 40),
                   if (_phase == _LockPhase.failure)
@@ -173,8 +208,8 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                   else
                     Text(
                       _capabilityLabel,
-                      style: const TextStyle(
-                        color: Color(0x8CFFFFFF),
+                      style: TextStyle(
+                        color: colors.textMuted,
                         fontSize: 12,
                         letterSpacing: 0.4,
                       ),
@@ -184,7 +219,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                     TextButton(
                       onPressed: widget.onBypass,
                       style: TextButton.styleFrom(
-                        foregroundColor: Colors.white.withValues(alpha: .7),
+                        foregroundColor: colors.textSecondary,
                       ),
                       child: Text(widget.bypassLabel!),
                     ),
@@ -246,8 +281,9 @@ class _BioRing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return CustomPaint(
-      painter: _BioRingPainter(progress, phase),
+      painter: _BioRingPainter(progress, phase, colors),
       child: SizedBox(width: 180, height: 180, child: Center(child: child)),
     );
   }
@@ -256,8 +292,9 @@ class _BioRing extends StatelessWidget {
 class _BioRingPainter extends CustomPainter {
   final double progress;
   final _LockPhase phase;
+  final AppColors colors;
 
-  _BioRingPainter(this.progress, this.phase);
+  _BioRingPainter(this.progress, this.phase, this.colors);
 
   double get _sweep =>
       phase == _LockPhase.success ? math.pi * 2 : 0.6 + progress * 0.4;
@@ -270,7 +307,7 @@ class _BioRingPainter extends CustomPainter {
     final back = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3
-      ..color = Colors.white.withValues(alpha: .15);
+      ..color = colors.textPrimary.withValues(alpha: .15);
     canvas.drawCircle(center, radius, back);
 
     final progressPaint = Paint()
@@ -281,8 +318,8 @@ class _BioRingPainter extends CustomPainter {
         startAngle: -math.pi / 2,
         endAngle: math.pi * 1.5,
         colors: [
-          Colors.white.withValues(alpha: .2),
-          Colors.white,
+          colors.primary.withValues(alpha: .2),
+          colors.primary,
         ],
       ).createShader(Rect.fromCircle(center: center, radius: radius));
 
@@ -304,11 +341,13 @@ class _BioRingPainter extends CustomPainter {
 /// Deep-space gradient background.
 
 class _BackgroundGlow extends StatelessWidget {
-  const _BackgroundGlow();
+  final AppColors colors;
+
+  const _BackgroundGlow({required this.colors});
 
   @override
   Widget build(BuildContext context) {
-    return const Stack(
+    return Stack(
       fit: StackFit.expand,
       children: [
         DecoratedBox(
@@ -317,21 +356,21 @@ class _BackgroundGlow extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                Color(0xFF0F1118),
-                Color(0xFF131624),
-                Color(0xFF1A1F3A),
+                colors.background,
+                colors.surfaceElevated,
+                Color.lerp(colors.background, colors.primary, 0.14)!,
               ],
             ),
           ),
         ),
         _RadialBlob(
           alignment: Alignment(-0.9, -0.9),
-          color: Color(0x33344B8E),
+          color: colors.primary.withValues(alpha: 0.20),
           size: 260,
         ),
         _RadialBlob(
           alignment: Alignment(1.0, 1.0),
-          color: Color(0x2E625A86),
+          color: colors.secondary.withValues(alpha: 0.18),
           size: 300,
         ),
       ],
@@ -381,8 +420,9 @@ class _ScanFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return CustomPaint(
-      painter: _ScanFramePainter(progress, phase),
+      painter: _ScanFramePainter(progress, phase, colors),
       child: child,
     );
   }
@@ -391,8 +431,9 @@ class _ScanFrame extends StatelessWidget {
 class _ScanFramePainter extends CustomPainter {
   final double progress;
   final _LockPhase phase;
+  final AppColors colors;
 
-  _ScanFramePainter(this.progress, this.phase);
+  _ScanFramePainter(this.progress, this.phase, this.colors);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -402,7 +443,7 @@ class _ScanFramePainter extends CustomPainter {
     final bottom = size.height - 14;
     final bracket = 22.0;
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.55)
+      ..color = colors.textPrimary.withValues(alpha: 0.55)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
       ..strokeCap = StrokeCap.round;
@@ -427,9 +468,9 @@ class _ScanFramePainter extends CustomPainter {
       final linePaint = Paint()
         ..shader = LinearGradient(
           colors: [
-            Colors.white.withValues(alpha: 0),
-            Color(0xFF7185D1).withValues(alpha: 0.9),
-            Colors.white.withValues(alpha: 0),
+            colors.textPrimary.withValues(alpha: 0),
+            colors.primary.withValues(alpha: 0.9),
+            colors.textPrimary.withValues(alpha: 0),
           ],
         ).createShader(Rect.fromLTRB(left, 0, right, 0))
         ..strokeWidth = 1.6;
@@ -438,7 +479,7 @@ class _ScanFramePainter extends CustomPainter {
       final ringPaint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3
-        ..color = Color(0xFF619A7D).withValues(alpha: 0.9);
+        ..color = colors.success.withValues(alpha: 0.9);
       canvas.drawCircle(
         size.center(Offset.zero),
         size.shortestSide / 2 - 10,

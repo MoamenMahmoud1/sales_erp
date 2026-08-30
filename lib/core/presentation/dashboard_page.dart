@@ -241,41 +241,49 @@ class _DashboardPageState extends State<DashboardPage> {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.xl),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [colors.primary, Color.lerp(colors.primary, colors.accent, 0.35)!],
-        ),
+        color: colors.primary,
         borderRadius: AppRadius.xxlAll,
         boxShadow: [
           BoxShadow(color: colors.primary.withValues(alpha: 0.35), blurRadius: 20, offset: const Offset(0, 10)),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
         children: [
-          Row(
+          // Layered organic color treatment: a darker region and a lighter
+          // region overlap the primary base with curved, organic boundaries.
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _HeroLayerPainter(colors: colors),
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Total Revenue', style: TextStyle(color: colors.onPrimary.withValues(alpha: 0.85), fontSize: 14, fontWeight: FontWeight.w600)),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(color: colors.onPrimary.withValues(alpha: 0.16), borderRadius: AppRadius.xlAll),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(up ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 14, color: colors.onPrimary),
-                    const SizedBox(width: 3),
-                    Text('${up ? '+' : ''}${trend.toStringAsFixed(1)}%', style: TextStyle(color: colors.onPrimary, fontWeight: FontWeight.w700, fontSize: 12)),
-                  ],
-                ),
+              Row(
+                children: [
+                  Text('Total Revenue', style: TextStyle(color: colors.onPrimary.withValues(alpha: 0.85), fontSize: 14, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(color: colors.onPrimary.withValues(alpha: 0.16), borderRadius: AppRadius.xlAll),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(up ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 14, color: colors.onPrimary),
+                        const SizedBox(width: 3),
+                        Text('${up ? '+' : ''}${trend.toStringAsFixed(1)}%', style: TextStyle(color: colors.onPrimary, fontWeight: FontWeight.w700, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ],
               ),
+              const SizedBox(height: AppSpacing.md),
+              Text(_money(_totalRevenue, 2), style: TextStyle(color: colors.onPrimary, fontSize: 34, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+              const SizedBox(height: AppSpacing.sm),
+              Text('$_invoices invoices - $_todayRevenue today', style: TextStyle(color: colors.onPrimary.withValues(alpha: 0.85), fontSize: 13)),
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          Text(_money(_totalRevenue, 2), style: TextStyle(color: colors.onPrimary, fontSize: 34, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-          const SizedBox(height: AppSpacing.sm),
-          Text('$_invoices invoices - $_todayRevenue today', style: TextStyle(color: colors.onPrimary.withValues(alpha: 0.85), fontSize: 13)),
         ],
       ),
     );
@@ -549,4 +557,59 @@ class _RecentTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Paints the layered organic color treatment of the revenue hero:
+/// a dark region and a light region overlap the primary base with
+/// curved, organic boundaries (not a straight split gradient).
+/// Colors come from the active theme, so the treatment follows
+/// Light (green) / Mid (purple) / Dark (navy) identities.
+class _HeroLayerPainter extends CustomPainter {
+  final AppColors colors;
+  _HeroLayerPainter({required this.colors});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // Dark region: sweeping organic curve rising from the bottom-left,
+    // overlapping the base well past the middle of the card.
+    final darkPath = Path()
+      ..moveTo(0, h)
+      ..lineTo(0, h * 0.42)
+      ..quadraticBezierTo(w * 0.30, h * 0.18, w * 0.62, h * 0.52)
+      ..quadraticBezierTo(w * 0.86, h * 0.80, w, h * 0.66)
+      ..lineTo(w, h)
+      ..close();
+    canvas.drawPath(darkPath, Paint()..color = colors.primaryDark);
+
+    // Light region: an overlapping curved band across the upper-right,
+    // partially covering the dark region to create layered depth.
+    final lightPath = Path()
+      ..moveTo(w * 0.44, 0)
+      ..quadraticBezierTo(w * 0.72, h * 0.10, w * 0.78, h * 0.44)
+      ..quadraticBezierTo(w * 0.84, h * 0.72, w, h * 0.62)
+      ..lineTo(w, 0)
+      ..close();
+    canvas.drawPath(
+      lightPath,
+      Paint()..color = colors.primaryLight.withValues(alpha: 0.55),
+    );
+
+    // Subtle third overlap: a soft glow bridge where the two regions meet.
+    final bridgePath = Path()
+      ..moveTo(w * 0.18, h)
+      ..quadraticBezierTo(w * 0.52, h * 0.34, w * 0.96, h * 0.48)
+      ..quadraticBezierTo(w * 0.62, h * 0.62, w * 0.34, h)
+      ..close();
+    canvas.drawPath(
+      bridgePath,
+      Paint()..color = colors.primaryLight.withValues(alpha: 0.14),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _HeroLayerPainter oldDelegate) =>
+      oldDelegate.colors != colors;
 }
