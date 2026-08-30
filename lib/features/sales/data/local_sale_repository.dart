@@ -37,6 +37,44 @@ class LocalSaleRepository {
     ''', [customerId]);
   }
 
+  /// يجيب رأس الفاتورة كامل (خالص/مستحق/طريقة الدفع/بيانات العميل)
+  /// مع عناصرها بأسماء المنتجات، جاهز للعرض أو المشاركة.
+  Future<Map<String, Object?>?> getInvoiceWithItems(int invoiceId) async {
+    final database = await _database;
+
+    final headers = await database.rawQuery('''
+      SELECT i.id, i.customer_id, c.name AS customer_name,
+             c.phone AS customer_phone,
+             i.created_at, i.updated_at, i.subtotal,
+             i.coupon_discount, i.total,
+             p.amount AS paid_amount,
+             p.method AS payment_method,
+             p.status AS payment_status
+      FROM invoices i
+      INNER JOIN customers c ON c.id = i.customer_id
+      LEFT JOIN payments p
+        ON p.invoice_id = i.id
+        AND p.id = (
+          SELECT MIN(id) FROM payments WHERE invoice_id = i.id
+        )
+      WHERE i.id = ?
+    ''', [invoiceId]);
+
+    if (headers.isEmpty) return null;
+    final header = headers.first;
+
+    final items = await database.rawQuery('''
+      SELECT ii.product_id, pr.name AS product_name,
+             ii.quantity, ii.unit_price
+      FROM invoice_items ii
+      INNER JOIN products pr ON pr.id = ii.product_id
+      WHERE ii.invoice_id = ?
+      ORDER BY ii.id ASC
+    ''', [invoiceId]);
+
+    return {...header, 'items': items};
+  }
+
   Future<int> createInvoice({
     required int customerId,
     required Map<int, int> products,

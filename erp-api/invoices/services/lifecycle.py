@@ -15,7 +15,7 @@ def load_invoice_for_update_sync(invoice_id):
     """Load a lifecycle target; callers must hold ``transaction.atomic()``."""
     try:
         return (
-            Invoice.objects.select_for_update()
+            Invoice.objects.select_for_update(of=("self",))
             .select_related("customer", "coupon", "created_by")
             .prefetch_related("items__product")
             .get(pk=invoice_id)

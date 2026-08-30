@@ -26,6 +26,8 @@ class EmployeeAccessPermission(BasePermission):
         if request.user.is_superuser:
             return True
 
+        request._employee_role_level = Role.level_for_user(request.user)
+
         codename = self.permission_map.get(getattr(view, "action", None))
         if not codename:
             return False

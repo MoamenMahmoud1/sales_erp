@@ -10,7 +10,10 @@ class EmployeeViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return (
-            Employee.objects.visible_to(self.request.user)
+            Employee.objects.visible_to(
+                self.request.user,
+                role_level=getattr(self.request, "_employee_role_level", None),
+            )
             .select_related("user")
             .order_by("pk")
         )

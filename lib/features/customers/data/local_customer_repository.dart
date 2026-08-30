@@ -3,6 +3,7 @@ import '../domain/customer.dart';
 import '../domain/customer_repository.dart';
 
 class LocalCustomerRepository implements CustomerRepository {
+  @override
   Future<List<Customer>> getCustomers() async {
     final database = await AppDatabase.database;
 
@@ -16,6 +17,7 @@ class LocalCustomerRepository implements CustomerRepository {
         .toList();
   }
 
+  @override
   Future<Customer?> getCustomerById(
     int customerId,
   ) async {
@@ -35,6 +37,7 @@ class LocalCustomerRepository implements CustomerRepository {
     return Customer.fromMap(rows.first);
   }
 
+  @override
   Future<int> createCustomer(
     Customer customer,
   ) async {
@@ -55,6 +58,7 @@ class LocalCustomerRepository implements CustomerRepository {
     );
   }
 
+  @override
   Future<int> updateCustomer(
     Customer customer,
   ) async {
@@ -77,6 +81,7 @@ class LocalCustomerRepository implements CustomerRepository {
     );
   }
 
+  @override
   Future<int> deleteCustomer(
     int customerId,
   ) async {
@@ -89,6 +94,7 @@ class LocalCustomerRepository implements CustomerRepository {
     );
   }
 
+  @override
   Future<List<Customer>> searchCustomers(
     String query,
   ) async {

@@ -20,9 +20,11 @@ urlpatterns = [
     path("api/v1/purchases/",include("purchases.urls"),),
     path("api/v1/suppliers/",include("suppliers.urls"),),
     path("admin/", admin.site.urls),
+    #path("__debug__/", include("debug_toolbar.urls")),
 ]
 
 if settings.DEBUG:
     if "silk" in settings.INSTALLED_APPS:
         urlpatterns.append(path("silk/", include("silk.urls", namespace="silk")))
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL,document_root=settings.STATIC_ROOT,)

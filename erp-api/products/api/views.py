@@ -1,4 +1,6 @@
 from adrf import viewsets
+from django.db.models import Sum, Value
+from django.db.models.functions import Coalesce
 from rest_framework import filters
 
 from common.pagination import StandardPagination
@@ -9,7 +11,6 @@ from products.api.serializers import (
     ProductSerializer,
 )
 from products.models import CartonPricing, Product
-
 
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
@@ -42,7 +43,12 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
 
     def get_queryset(self):
-        return Product.objects.all()
+        return Product.objects.annotate(
+            _sold_quantity=Coalesce(
+                Sum("invoice_items__quantity"),
+                Value(0),
+            ),
+        )
 
 
 class CartonPricingViewSet(viewsets.ModelViewSet):

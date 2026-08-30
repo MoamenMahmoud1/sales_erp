@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/repositories/app_services.dart';
 import 'auth_controller.dart';
 
 class LoginPage extends StatefulWidget {
@@ -51,8 +52,13 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  void _enterOffline() {
+    widget.controller.markAuthenticated();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final offlineAllowed = widget.controller.canAccessOffline;
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
@@ -89,6 +95,21 @@ class _LoginPageState extends State<LoginPage> {
                     onPressed: _loading ? null : _login,
                     child: Text(_loading ? 'Signing in...' : 'Sign in'),
                   ),
+                  if (offlineAllowed) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _loading ? null : _enterOffline,
+                      icon: const Icon(Icons.offline_pin_outlined),
+                      label: const Text('Continue locally (offline)'),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Current mode: ${AppServices.instance.mode.name.toUpperCase()} — '
+                      'using local device data.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ],
               ),
             ),

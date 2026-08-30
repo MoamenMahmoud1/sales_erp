@@ -22,7 +22,7 @@ class AuthSessionSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
-    def get_is_current(self, auth_session):
+    async def get_is_current(self, auth_session):
         request = self.context.get("request")
         return bool(
             request

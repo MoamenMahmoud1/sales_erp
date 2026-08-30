@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/presentation/dashboard_page.dart';
+import '../../../core/repositories/app_services.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../products/domain/product_repository.dart';
 import 'auth_controller.dart';
@@ -27,17 +28,25 @@ class _AuthGateState extends State<AuthGate> {
   void initState() {
     super.initState();
     widget.controller.addListener(_refresh);
+    // لما الوضع يتغير بنعيد تقييم الجلسة تاني.
+    AppServices.instance.dataMode.addListener(_onDataModeChanged);
     widget.controller.restoreSession();
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_refresh);
+    AppServices.instance.dataMode.removeListener(_onDataModeChanged);
     super.dispose();
   }
 
   void _refresh() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _onDataModeChanged() async {
+    await widget.controller.handleModeChanged();
+    await widget.controller.restoreSession();
   }
 
   @override
@@ -49,9 +58,8 @@ class _AuthGateState extends State<AuthGate> {
         );
       case AuthStatus.authenticated:
         return DashboardPage(
-          onLogout: widget.controller.logout,
+          onNavigateTo: (_) {},
           themeController: widget.themeController,
-          productRepository: widget.productRepository,
         );
       case AuthStatus.unauthenticated:
         return LoginPage(controller: widget.controller);

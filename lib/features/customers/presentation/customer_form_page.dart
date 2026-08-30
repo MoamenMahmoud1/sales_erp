@@ -124,11 +124,11 @@ class _CustomerFormPageState
 
     try {
       if (widget.isEditing) {
-        await _repository.updateCustomer(
+        await _dataSource.updateCustomer(
           customer,
         );
       } else {
-        await _repository.createCustomer(
+        await _dataSource.createCustomer(
           customer,
         );
       }
