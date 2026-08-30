@@ -7,6 +7,7 @@ import 'core/repositories/app_services.dart';
 import 'core/security/app_lock_controller.dart';
 import 'core/security/biometric_auth.dart';
 import 'core/security/local_session.dart';
+import 'core/security/pin_service.dart';
 import 'core/theme/app_theme.dart';
 
 /// Local-only startup.
@@ -55,6 +56,7 @@ class SalesErpApp extends StatefulWidget {
 class _SalesErpAppState extends State<SalesErpApp> {
   late final AppThemeController _themeController;
   late final BiometricAuth _biometricAuth = BiometricAuth();
+  late final PinService _pinService = PinService();
   late bool _showWelcomeGate;
 
   @override
@@ -107,6 +109,7 @@ class _SalesErpAppState extends State<SalesErpApp> {
         onUnlocked: () => _onWelcomeUnlocked(),
         bypassLabel: 'Continue locally',
         onBypass: () => _onWelcomeUnlocked(viaBiometrics: false),
+        bypassRequiresPin: false,
       );
     }
 
@@ -115,7 +118,7 @@ class _SalesErpAppState extends State<SalesErpApp> {
         auth: _biometricAuth,
         onUnlocked: lock.unlock,
         bypassLabel: 'Enter with PIN',
-        onBypass: lock.unlock,
+        pinService: _pinService,
       );
     }
 

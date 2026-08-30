@@ -6,25 +6,26 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// حالة قفل التطبيق.
 enum LockStatus { unlocked, locked }
 
-/// مسؤول عن حبس التطبيق فور الإغلاق/العدول والمحافظة على إيقاع
-/// القفل حسب مدة النشاط المحددة.
+/// مسؤول عن جدولة فحص المصادقة (auth check) عند الإقلاع/العودة.
 ///
-/// - عند دخول التطبيق في الخلفية (paused/inactive) بنسجّل وقت الخروج.
-/// - عند العودة (resumed) لو مرت مدة أكبر من [timeout] (افتراضي 10 دقائق)
-///   نتفعّل القفل ونتطلب الاستفتاح بالـ biometric.
-///
-/// ملاحظة: مدة القفل ثابتة (10 دقائق) كما طُلب، ويمكن لاحقًا جعلها
-/// قابلة للتكوين برفق.
+/// القاعدة: الفحص بيحصل مرة واحدة عند أول تشغيل، وبعدها فقط لو مضى
+/// [checkInterval] (5 دقائق) منذ آخر فحص **ناجح**. الطابع الزمني محفوظ
+/// في FlutterSecureStorage فبيدوم عبر إغلاق التطبيق بالكامل.
+/// الفحص الفاشل/الملغي لا يحدّث الطابع الزمني.
 class AppLockController extends ChangeNotifier
     with WidgetsBindingObserver {
-  static const Duration timeout = Duration(minutes: 10);
+  /// الحد الأدنى بين فحصي مصادقة ناجحين.
+  static const Duration checkInterval = Duration(minutes: 5);
 
-  static const String _lastActiveKey = 'app_lock_last_active';
+  static const String _lastCheckKey = 'app_lock_last_auth_check';
 
   final FlutterSecureStorage _storage;
   final DateTime Function() _now;
 
   AppStatus status = AppStatus.unlocked;
+
+  /// حارس يمنع أي فحص مكرر في نفس اللحظة (rebuild / lifecycle / ...).
+  bool _checkInFlight = false;
 
   AppLockController({
     FlutterSecureStorage? storage,
@@ -34,52 +35,66 @@ class AppLockController extends ChangeNotifier
 
   bool _lifecycleObserverAttached = false;
 
-  /// يقرأ آخر وقت نشاط محفوظ (يمنع القفل بعد كل تشغيل جديد فورًا).
+  /// يقرأ آخر فحص ناجح محفوظ ويقرر هل نطلب المصادقة الآن:
+  /// - لا يوجد طابع زمني → فحص (أول تشغيل).
+  /// - مضى >= [checkInterval] منذ آخر فحص ناجح → فحص.
+  /// - غير ذلك → تخطي.
   Future<void> init() async {
     WidgetsBinding.instance.addObserver(this);
     _lifecycleObserverAttached = true;
-
-    // نبدأ النافذة من الساعة الحالية حتى لا يقفل لحظيًا عند الإقلاع.
-    await _storage.write(
-      key: _lastActiveKey,
-      value: _now().toUtc().toIso8601String(),
-    );
+    if (await _shouldCheckAuth()) {
+      status = AppStatus.locked;
+      notifyListeners();
+    }
   }
 
-  /// يسجّل لحظة استخدام داخل التطبيق (بتتندى من الصفحات الرئيسية).
-  Future<void> registerActivity() async {
-    await _storage.write(
-      key: _lastActiveKey,
-      value: _now().toUtc().toIso8601String(),
-    );
+  /// هل نطلب فحص مصادقة الآن؟ (حسب آخر فحص ناجح محفوظ).
+  Future<bool> _shouldCheckAuth() async {
+    final last = await _lastCheck();
+    if (last == null) return true;
+    return _now().difference(last) >= checkInterval;
   }
 
-  Future<DateTime?> _lastActive() async {
-    final raw = await _storage.read(key: _lastActiveKey);
+  Future<DateTime?> _lastCheck() async {
+    final raw = await _storage.read(key: _lastCheckKey);
     if (raw == null) return null;
     return DateTime.tryParse(raw)?.toLocal();
   }
 
-  /// يفحص إن مرّت مدة [timeout] من آخر نشاط.
-  Future<bool> shouldLock() async {
-    final last = await _lastActive();
-    if (last == null) return false;
-    return _now().difference(last) >= timeout;
+  /// يحدّث توقيت آخر فحص ناجح — يُستدعى فقط بعد مصادقة ناجحة.
+  Future<void> recordSuccessfulAuth() async {
+    await _storage.write(
+      key: _lastCheckKey,
+      value: _now().toUtc().toIso8601String(),
+    );
   }
 
+  /// عند نجاح المصادقة: نسجل التوقيت ونفك القفل.
+  Future<void> unlock() async {
+    await recordSuccessfulAuth();
+    status = AppStatus.unlocked;
+    notifyListeners();
+  }
+
+  /// عند فشل/إلغاء المصادقة: لا نحدّث الطابع الزمني.
   void lock() {
     status = AppStatus.locked;
     notifyListeners();
   }
 
-  void unlock() {
-    status = AppStatus.unlocked;
-    // تحديث آخر نشاط ليبدأ العد من جديد.
-    _storage.write(
-      key: _lastActiveKey,
-      value: _now().toUtc().toIso8601String(),
-    );
-    notifyListeners();
+  /// يقرر القفل عند رجوع التطبيق من الخلفية (نفس قاعدة الـ 5 دقائق).
+  Future<bool> _maybeLockOnResume() async {
+    if (_checkInFlight) return false;
+    _checkInFlight = true;
+    try {
+      if (await _shouldCheckAuth()) {
+        lock();
+        return true;
+      }
+      return false;
+    } finally {
+      _checkInFlight = false;
+    }
   }
 
   @override
@@ -87,30 +102,13 @@ class AppLockController extends ChangeNotifier
     switch (state) {
       case AppLifecycleState.resumed:
         // عند العودة: لو مرت مدة كافية → قفل.
-        _maybeLockAfterBackgroundRestore();
+        _maybeLockOnResume();
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
-        // الدخول في الخلفية — نسجّل وقت الخروج الآن.
-        _registerLastActive();
         break;
     }
-  }
-
-  Future<void> _maybeLockAfterBackgroundRestore() async {
-    if (await shouldLock()) {
-      lock();
-    } else {
-      await registerActivity();
-    }
-  }
-
-  Future<void> _registerLastActive() async {
-    await _storage.write(
-      key: _lastActiveKey,
-      value: _now().toUtc().toIso8601String(),
-    );
   }
 
   @override

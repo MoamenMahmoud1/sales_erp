@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../security/biometric_auth.dart';
+import '../security/pin_service.dart';
 import '../theme/app_colors.dart';
 
 /// The current lock phase shown on the screen.
@@ -19,9 +20,20 @@ class BiometricLockScreen extends StatefulWidget {
   final BiometricAuth auth;
   final VoidCallback onUnlocked;
 
-  /// Optional development bypass shown when biometrics are unavailable or fail.
+  /// Optional bypass shown when biometrics are unavailable or fail. When this
+  /// is 'Enter with PIN' the button reveals a PIN entry sheet and validates
+  /// the entered PIN before invoking [onUnlocked].
   final String? bypassLabel;
   final VoidCallback? onBypass;
+
+  /// Service used to validate the bypass PIN. Falls back to a default
+  /// instance when not supplied.
+  final PinService? pinService;
+
+  /// When true the bypass button reveals the PIN entry sheet and validates
+  /// the PIN before invoking [onUnlocked]. When false the bypass button
+  /// invokes [onBypass] directly (e.g. first-run "Continue locally").
+  final bool bypassRequiresPin;
 
   const BiometricLockScreen({
     super.key,
@@ -29,6 +41,8 @@ class BiometricLockScreen extends StatefulWidget {
     required this.onUnlocked,
     this.bypassLabel,
     this.onBypass,
+    this.pinService,
+    this.bypassRequiresPin = true,
   });
 
   @override
@@ -38,6 +52,7 @@ class BiometricLockScreen extends StatefulWidget {
 class _BiometricLockScreenState extends State<BiometricLockScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _scanController;
+  late final PinService _pinService;
   _LockPhase _phase = _LockPhase.scanning;
 
   /// The device's strongest biometric capability, resolved at startup so the
@@ -47,6 +62,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
   @override
   void initState() {
     super.initState();
+    _pinService = widget.pinService ?? PinService();
     _scanController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2600),
@@ -70,6 +86,31 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
   void dispose() {
     _scanController.dispose();
     super.dispose();
+  }
+
+  /// Handles the bypass button tap. When [bypassRequiresPin] is false this
+  /// invokes [widget.onBypass] directly (first-run flow). Otherwise it
+  /// reveals the PIN entry sheet and validates the entered PIN — only a
+  /// correct PIN invokes [widget.onUnlocked]; an incorrect or cancelled
+  /// attempt leaves the user on the authentication screen.
+  Future<void> _requestPin() async {
+    if (!widget.bypassRequiresPin) {
+      widget.onBypass?.call();
+      return;
+    }
+    final pin = await _PinEntrySheet.show(context, _pinService);
+    if (pin == null) return; // cancelled
+    final ok = await _pinService.validate(pin);
+    if (!mounted) return;
+    if (ok) {
+      widget.onUnlocked();
+    } else {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(content: Text('Incorrect PIN. Please try again.')),
+        );
+    }
   }
 
   /// One automatic biometric attempt per presentation, triggered after the
@@ -166,10 +207,16 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                         progress: _scanController.value,
                         phase: _phase,
                         child: child ??
-                            Icon(
-                              Icons.fingerprint_rounded,
-                              size: 92,
-                              color: colors.textPrimary,
+                            Image.asset(
+                              'assets/images/sales_erp_logo.png',
+                              width: 92,
+                              height: 92,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) => Icon(
+                                Icons.fingerprint_rounded,
+                                size: 92,
+                                color: colors.textPrimary,
+                              ),
                             ),
                       ),
                     ),
@@ -217,7 +264,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                   if (widget.bypassLabel != null && widget.onBypass != null) ...[
                     const SizedBox(height: 12),
                     TextButton(
-                      onPressed: widget.onBypass,
+                      onPressed: _requestPin,
                       style: TextButton.styleFrom(
                         foregroundColor: colors.textSecondary,
                       ),
@@ -491,4 +538,149 @@ class _ScanFramePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _ScanFramePainter oldDelegate) =>
       oldDelegate.progress != progress || oldDelegate.phase != phase;
+}
+
+/// A lightweight modal bottom sheet that captures a 4–6 digit PIN. Returns the
+/// entered PIN on confirm, or null when the user dismisses the sheet.
+class _PinEntrySheet {
+  static Future<String?> show(BuildContext context, PinService pinService) {
+    final colors = AppColors.of(context);
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: colors.surfaceElevated,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => _PinEntryBody(colors: colors),
+    );
+  }
+}
+
+class _PinEntryBody extends StatefulWidget {
+  final AppColors colors;
+
+  const _PinEntryBody({required this.colors});
+
+  @override
+  State<_PinEntryBody> createState() => _PinEntryBodyState();
+}
+
+class _PinEntryBodyState extends State<_PinEntryBody> {
+  final TextEditingController _controller = TextEditingController();
+  bool _obscured = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final value = _controller.text.trim();
+    Navigator.of(context).pop(value.isEmpty ? null : value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final colors = widget.colors;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(24, 20, 24, 20 + bottomInset),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: colors.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Enter PIN',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: colors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Enter your device PIN to unlock.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: colors.textSecondary, fontSize: 13),
+          ),
+          const SizedBox(height: 20),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            obscureText: _obscured,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            maxLength: 6,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 6,
+              color: colors.textPrimary,
+            ),
+            decoration: InputDecoration(
+              counterText: '',
+              filled: true,
+              fillColor: colors.surfaceMuted,
+              hintText: '••••',
+              hintStyle: TextStyle(
+                color: colors.textMuted,
+                letterSpacing: 6,
+              ),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscured ? Icons.visibility_off : Icons.visibility,
+                  color: colors.textMuted,
+                ),
+                onPressed: () => setState(() => _obscured = !_obscured),
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: colors.border),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: colors.primary, width: 1.5),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: _submit,
+            style: FilledButton.styleFrom(
+              backgroundColor: colors.primary,
+              foregroundColor: colors.surface,
+              minimumSize: const Size.fromHeight(50),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: const Text(
+              'Unlock',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom(foregroundColor: colors.textSecondary),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
 }
