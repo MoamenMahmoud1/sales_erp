@@ -142,13 +142,15 @@ class _SalesErpAppState extends State<SalesErpApp> {
           title: 'Sales ERP',
           debugShowCheckedModeBanner: false,
           theme: SmoothTheme.of(context),
-          home: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 380),
-            switchInCurve: Curves.easeOut,
-            switchOutCurve: Curves.easeIn,
-            child: KeyedSubtree(
-              key: ValueKey(_buildHomeBuildKey()),
-              child: _buildHome(),
+          home: StartupIntro(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 380),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              child: KeyedSubtree(
+                key: ValueKey(_buildHomeBuildKey()),
+                child: _buildHome(),
+              ),
             ),
           ),
         ),
@@ -239,4 +241,129 @@ class _SmoothThemeScope extends InheritedWidget {
   @override
   bool updateShouldNotify(_SmoothThemeScope oldWidget) =>
       theme != oldWidget.theme;
+}
+
+/// Premium, lightweight one-shot startup entrance animation (~700ms).
+///
+/// Performance-first design:
+/// - ONE AnimationController, composited via FadeTransition/ScaleTransition
+///   (opacity/transform run on the compositor — no per-frame widget rebuilds
+///   of the content tree).
+/// - Theme-aware: only uses the active ThemeData (no new colors).
+/// - Purely visual overlay with IgnorePointer: it NEVER blocks interaction,
+///   and the child (including the biometric screen and its automatic
+///   authentication attempt) mounts and runs immediately beneath it.
+/// - After completion the brand overlay is removed entirely; the retained
+///   transitions sit at identity values and cost nothing.
+class StartupIntro extends StatefulWidget {
+  final Widget child;
+
+  const StartupIntro({super.key, required this.child});
+
+  @override
+  State<StartupIntro> createState() => _StartupIntroState();
+}
+
+class _StartupIntroState extends State<StartupIntro>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  );
+
+  // Content: subtle scale (0.985 → 1.0) + fade-in with easeOutCubic.
+  late final Animation<double> _contentFade = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOutCubic,
+  );
+  late final Animation<double> _contentScale = Tween<double>(
+    begin: 0.985,
+    end: 1.0,
+  ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+
+  // Brand mark: visible briefly, then fades away during the second half.
+  late final Animation<double> _brandFade = Tween<double>(begin: 1, end: 0)
+      .animate(
+        CurvedAnimation(
+          parent: _controller,
+          curve: const Interval(0.45, 1.0, curve: Curves.easeIn),
+        ),
+      );
+
+  bool _brandRemoved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.forward();
+    _controller.addStatusListener(_onStatus);
+  }
+
+  void _onStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed && !_brandRemoved && mounted) {
+      setState(() => _brandRemoved = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.removeStatusListener(_onStatus);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Stack(
+      children: [
+        // The real app — mounted immediately so authentication/biometric
+        // behaviour is never delayed by the intro.
+        FadeTransition(
+          opacity: _contentFade,
+          child: ScaleTransition(
+            scale: _contentScale,
+            child: widget.child,
+          ),
+        ),
+        if (!_brandRemoved)
+          IgnorePointer(
+            child: FadeTransition(
+              opacity: _brandFade,
+              child: ColoredBox(
+                color: theme.colorScheme.surface,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.point_of_sale_rounded,
+                          size: 44,
+                          color: theme.colorScheme.onPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        'Sales ERP',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.4,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }

@@ -560,8 +560,9 @@ class _RecentTile extends StatelessWidget {
 }
 
 /// Paints the layered organic color treatment of the revenue hero:
-/// a dark region and a light region overlap the primary base with
-/// curved, organic boundaries (not a straight split gradient).
+/// ONE card — a deep rich base with a soft lighter same-family color that
+/// emerges and fades naturally into it (gradual radial blending, no hard
+/// boundaries, no inner panel, no straight split gradient).
 /// Colors come from the active theme, so the treatment follows
 /// Light (green) / Mid (purple) / Dark (navy) identities.
 class _HeroLayerPainter extends CustomPainter {
@@ -573,39 +574,56 @@ class _HeroLayerPainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
 
-    // Dark region: sweeping organic curve rising from the bottom-left,
-    // overlapping the base well past the middle of the card.
-    final darkPath = Path()
-      ..moveTo(0, h)
-      ..lineTo(0, h * 0.42)
-      ..quadraticBezierTo(w * 0.30, h * 0.18, w * 0.62, h * 0.52)
-      ..quadraticBezierTo(w * 0.86, h * 0.80, w, h * 0.66)
-      ..lineTo(w, h)
-      ..close();
-    canvas.drawPath(darkPath, Paint()..color = colors.primaryDark);
-
-    // Light region: an overlapping curved band across the upper-right,
-    // partially covering the dark region to create layered depth.
-    final lightPath = Path()
-      ..moveTo(w * 0.44, 0)
-      ..quadraticBezierTo(w * 0.72, h * 0.10, w * 0.78, h * 0.44)
-      ..quadraticBezierTo(w * 0.84, h * 0.72, w, h * 0.62)
-      ..lineTo(w, 0)
-      ..close();
-    canvas.drawPath(
-      lightPath,
-      Paint()..color = colors.primaryLight.withValues(alpha: 0.55),
+    // Lighter region emerging from the upper-right: a radial gradient that
+    // fades smoothly to transparent — no visible boundary at all.
+    final lightCenter = Offset(w * 0.86, h * 0.06);
+    final lightRadius = w * 1.05;
+    canvas.drawCircle(
+      lightCenter,
+      lightRadius,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            colors.primaryLight.withValues(alpha: 0.60),
+            colors.primaryLight.withValues(alpha: 0.28),
+            colors.primaryLight.withValues(alpha: 0.0),
+          ],
+          stops: const [0.0, 0.45, 1.0],
+        ).createShader(Rect.fromCircle(center: lightCenter, radius: lightRadius)),
     );
 
-    // Subtle third overlap: a soft glow bridge where the two regions meet.
-    final bridgePath = Path()
-      ..moveTo(w * 0.18, h)
-      ..quadraticBezierTo(w * 0.52, h * 0.34, w * 0.96, h * 0.48)
-      ..quadraticBezierTo(w * 0.62, h * 0.62, w * 0.34, h)
-      ..close();
-    canvas.drawPath(
-      bridgePath,
-      Paint()..color = colors.primaryLight.withValues(alpha: 0.14),
+    // Deep rich base shading emerging from the bottom-left, also fully
+    // feathered so it blends organically into the main color.
+    final darkCenter = Offset(w * 0.06, h * 1.08);
+    final darkRadius = w * 1.15;
+    canvas.drawCircle(
+      darkCenter,
+      darkRadius,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            colors.primaryDark.withValues(alpha: 0.85),
+            colors.primaryDark.withValues(alpha: 0.35),
+            colors.primaryDark.withValues(alpha: 0.0),
+          ],
+          stops: const [0.0, 0.5, 1.0],
+        ).createShader(Rect.fromCircle(center: darkCenter, radius: darkRadius)),
+    );
+
+    // Subtle warm glow bridge where the two regions meet — one more soft
+    // radial so the overlap feels layered rather than split.
+    final bridgeCenter = Offset(w * 0.62, h * 0.62);
+    final bridgeRadius = w * 0.75;
+    canvas.drawCircle(
+      bridgeCenter,
+      bridgeRadius,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            colors.primaryLight.withValues(alpha: 0.14),
+            colors.primaryLight.withValues(alpha: 0.0),
+          ],
+        ).createShader(Rect.fromCircle(center: bridgeCenter, radius: bridgeRadius)),
     );
   }
 

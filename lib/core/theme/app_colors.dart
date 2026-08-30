@@ -285,6 +285,9 @@ class AppColors {
 
 /// Bridges the [AppColors] palette into Flutter's [ThemeExtension] system so
 /// screens can resolve semantic colors without hardcoding values.
+/// This is the SINGLE authoritative extension — its lerp performs real
+/// per-color interpolation so theme transitions pass through intermediate
+/// colors instead of snapping.
 class AppThemeExtension extends ThemeExtension<AppThemeExtension> {
   const AppThemeExtension(this.colors);
 
@@ -297,6 +300,6 @@ class AppThemeExtension extends ThemeExtension<AppThemeExtension> {
   @override
   AppThemeExtension lerp(AppThemeExtension? other, double t) {
     if (other == null) return this;
-    return t < 0.5 ? this : other;
+    return AppThemeExtension(AppColors.lerp(colors, other.colors, t));
   }
 }

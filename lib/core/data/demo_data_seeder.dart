@@ -49,15 +49,9 @@ class DemoDataSeeder {
     await database.transaction((txn) async {
       final now = DateTime.now();
 
+      // Single demo/test customer (Joe only — no other fake customers).
       const customers = [
-        ['Karim El-Sayed', '+20 100 123 4567', '12 El Tahrir St, Cairo', 'cash'],
-        ['Sara Hassan', '+20 122 234 5678', '45 Nasr City, Cairo', 'bank_transfer'],
-        ['Omar Abdelrahman', '+20 111 987 6543', '8 Zayed City, Giza', 'cash'],
-        ['Nour El-Din Markets', '+20 103 456 7890', '22 Suez Rd, Maadi', 'transfer'],
-        ['Amr Fathy', '+20 115 321 8901', '60 Alex Rd, Alexandria', 'cash'],
-        ['Layla Mansour', '+20 099 765 4321', '4 Corniche, Alexandria', 'transfer'],
-        ['Tarek Mahmoud', '+20 101 222 3344', '31 Downtown, Mansoura', 'cash'],
-        ['Yassmina Ismail', '+20 107 888 9900', '9 Heliopolis, Cairo', 'transfer'],
+        ['Joe', '01127393863', '', 'cash'],
       ];
 
       final customerIds = <int>[];

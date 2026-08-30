@@ -3,26 +3,10 @@ import 'package:flutter/material.dart';
 import 'app_colors.dart';
 import 'app_tokens.dart';
 
-/// Surfaces the active [AppColors] palette through the theme so any widget
-/// can resolve semantic colors via `AppColors.of(context)`.
-class AppThemeExtension extends ThemeExtension<AppThemeExtension> {
-  final AppColors colors;
-  const AppThemeExtension(this.colors);
-
-  @override
-  AppThemeExtension copyWith({AppColors? colors}) {
-    return AppThemeExtension(colors ?? this.colors);
-  }
-
-  @override
-  AppThemeExtension lerp(covariant AppThemeExtension? other, double t) {
-    if (other == null) return this;
-    return AppThemeExtension(AppColors.lerp(colors, other.colors, t));
-  }
-}
-
 /// Builds the three visual modes (light / mid / dark) on top of the semantic
-/// [AppColors] palettes and shared design tokens.
+/// [AppColors] palettes and shared design tokens. Registers the single
+/// authoritative [AppThemeExtension] (defined in app_colors.dart) so
+/// `AppColors.of(context)` resolves the ACTIVE palette in every theme.
 class AppTheme {
   static ThemeData light() => _build(AppColors.light, Brightness.light);
   static ThemeData mid() => _build(AppColors.mid, Brightness.dark);
