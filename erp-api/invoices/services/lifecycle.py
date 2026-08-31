@@ -1,52 +1,84 @@
+"""Locked invoice lifecycle transitions."""
+
 from asgiref.sync import sync_to_async
 from django.db import transaction
 
-from common.observability import log_operation
-from inventory.models import StockMovement, StockMovementItem
-from inventory.services import StockBalanceService, sales_source_location_sync
-from invoices.exceptions import (
+from common.exceptions import (
+    InsufficientStock,
     InvalidBusinessOperation,
     InvalidStateTransition,
 )
+from common.observability import log_operation
+from inventory.models import StockLocation, StockMovement, StockMovementItem
+from inventory.services.stock_balance import StockBalanceService
 from invoices.models import Invoice
 
 
-def _load_invoice_for_update_sync(invoice_id):
+class InvoiceNotFound(InvalidBusinessOperation):
+    """Raised when a requested invoice does not exist."""
+
+
+def load_invoice_for_update_sync(invoice_id):
+    """Load a lifecycle target; callers must hold ``transaction.atomic()``."""
     try:
         return (
-            Invoice.objects.select_for_update()
+            Invoice.objects.select_for_update(of=("self",))
+            .select_related("customer", "coupon", "created_by")
             .prefetch_related("items__product")
             .get(pk=invoice_id)
         )
-    except Invoice.DoesNotExist as error:
-        raise InvalidBusinessOperation("Invoice not found.") from error
+    except Invoice.DoesNotExist as exc:
+        raise InvoiceNotFound("Invoice not found.") from exc
+
+
+def sales_source_location_sync(user):
+    """Return the active SALES_VEHICLE location bound to ``user``."""
+    return (
+        StockLocation.objects.filter(
+            employee=user,
+            location_type=StockLocation.LocationType.SALES_VEHICLE,
+            is_active=True,
+        )
+        .select_for_update()
+        .first()
+    )
 
 
 def _record_sale_movement_sync(invoice, source_location):
+    """Decrease stock and create the SALE ledger rows inside the open transaction."""
     movement = StockMovement.objects.create(
         movement_type=StockMovement.MovementType.SALE,
         source_location=source_location,
         created_by=invoice.created_by,
         reference=f"Invoice #{invoice.pk}",
     )
-    for item in invoice.items.all():
-        StockBalanceService.decrease(
-            location=source_location,
-            product=item.product,
-            quantity=item.quantity,
-        )
+
+    for item in invoice.items.select_related("product").all():
+        try:
+            StockBalanceService.decrease(
+                location=source_location,
+                product=item.product,
+                quantity=item.quantity,
+            )
+        except ValueError as exc:
+            raise InsufficientStock(
+                f"Insufficient stock for {item.product.name} in "
+                f"{source_location.name}."
+            ) from exc
+
         StockMovementItem.objects.create(
             movement=movement,
             product=item.product,
             quantity=item.quantity,
         )
+
     return movement
 
 
 def _confirm_invoice_sync(invoice_id):
-    """Keep transaction, row locks, stock and status change atomic."""
+    """Keep transaction, row locks, validation, stock and status change atomic."""
     with transaction.atomic():
-        invoice = _load_invoice_for_update_sync(invoice_id)
+        invoice = load_invoice_for_update_sync(invoice_id)
         if invoice.status != Invoice.Status.DRAFT:
             raise InvalidStateTransition("Only a draft invoice can be confirmed.")
 
@@ -70,7 +102,7 @@ def _confirm_invoice_sync(invoice_id):
 
 
 def _find_original_sale_location_sync(invoice):
-    """Return the source location of the immutable original SALE movement."""
+    """Return the source location from the immutable SALE movement for this invoice."""
     sale = (
         StockMovement.objects.filter(
             reference=f"Invoice #{invoice.pk}",
@@ -79,7 +111,7 @@ def _find_original_sale_location_sync(invoice):
         .select_related("source_location")
         .first()
     )
-    if sale is None:
+    if sale is None or sale.source_location is None:
         raise InvalidBusinessOperation(
             "Cannot reverse sale: no original SALE movement found for this invoice."
         )
@@ -87,7 +119,7 @@ def _find_original_sale_location_sync(invoice):
 
 
 def _reverse_sale_movement_sync(invoice):
-    """Create a compensating return movement at the original SALE location."""
+    """Create a compensating SALEABLE_RETURN at the original SALE location."""
     source_location = _find_original_sale_location_sync(invoice)
 
     movement = StockMovement.objects.create(
@@ -97,7 +129,7 @@ def _reverse_sale_movement_sync(invoice):
         reference=f"Cancel Invoice #{invoice.pk}",
     )
 
-    for item in invoice.items.all():
+    for item in invoice.items.select_related("product").all():
         StockBalanceService.increase(
             location=source_location,
             product=item.product,
@@ -113,7 +145,7 @@ def _reverse_sale_movement_sync(invoice):
 def _cancel_invoice_sync(invoice_id):
     """Cancel an invoice and atomically reverse stock for confirmed invoices."""
     with transaction.atomic():
-        invoice = _load_invoice_for_update_sync(invoice_id)
+        invoice = load_invoice_for_update_sync(invoice_id)
         if invoice.status not in (Invoice.Status.DRAFT, Invoice.Status.CONFIRMED):
             raise InvalidStateTransition(
                 f"Cannot cancel an invoice in state {invoice.status}."
@@ -135,16 +167,20 @@ def _cancel_invoice_sync(invoice_id):
 
 
 class ConfirmInvoice:
-    async def __call__(self, *, invoice_id):
+    """Transition DRAFT to CONFIRMED atomically, including the sale inventory move."""
+
+    async def __call__(self, invoice_id):
         return await sync_to_async(
             _confirm_invoice_sync,
             thread_sensitive=True,
-        )(invoice_id=invoice_id)
+        )(invoice_id)
 
 
 class CancelInvoice:
-    async def __call__(self, *, invoice_id):
+    """Transition DRAFT or CONFIRMED to CANCELLED atomically."""
+
+    async def __call__(self, invoice_id):
         return await sync_to_async(
             _cancel_invoice_sync,
             thread_sensitive=True,
-        )(invoice_id=invoice_id)
+        )(invoice_id)
