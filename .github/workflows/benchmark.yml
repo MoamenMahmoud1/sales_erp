@@ -74,8 +74,18 @@ jobs:
           cache: pip
           cache-dependency-path: erp-api/requirements.txt
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Install Bombardier
+        run: |
+          go install github.com/codesenberg/bombardier@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Migrate
         run: python manage.py migrate --noinput
@@ -130,9 +140,17 @@ jobs:
               ignore_conflicts=True,
           )
 
-          with open("bench_tokens.json", "w", encoding="utf-8") as output:
-              json.dump([str(AccessToken.for_user(user)) for user in users], output)
+          with open("bench_token.txt", "w", encoding="utf-8") as output:
+              output.write(str(AccessToken.for_user(users[0])))
           PY
+
+      - name: Record runner capacity
+        run: |
+          echo "=== CPU ==="
+          nproc
+          lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket' || true
+          echo "=== MEMORY ==="
+          free -h
 
       - name: Start server and benchmark
         run: |
@@ -143,7 +161,7 @@ jobs:
             --worker-class uvicorn_worker.UvicornWorker \
             --timeout 30 \
             --access-logfile /dev/null \
-            --error-logfile /dev/null \
+            --error-logfile /tmp/gunicorn-error.log \
             --log-level warning &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" || true' EXIT
@@ -156,15 +174,47 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null
 
-          BENCH_REQUESTS=500 \
-          BENCH_WARMUP=50 \
-          BENCH_CONCURRENCIES="1,10,25,50,100" \
-          TOKEN_FILE="bench_tokens.json" \
-          python ../benchmarks/http_benchmark.py
+          TOKEN="$(cat bench_token.txt)"
+          BASE="http://127.0.0.1:8000"
+          declare -A ENDPOINTS=(
+            [health]="/health/live/"
+            [products]="/api/v1/products/?page=1&page_size=20"
+            [me]="/api/v1/auth/me/"
+          )
 
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-http-benchmark
-          path: erp-api/benchmark-results.json
-          retention-days: 7
+          for endpoint_name in health products me; do
+            echo ""
+            echo "===== ${endpoint_name} ====="
+            for concurrency in 1 10 25 50 100; do
+              echo "--- concurrency=${concurrency} duration=10s ---"
+              if [[ "$endpoint_name" == "health" ]]; then
+                bombardier \
+                  --connections="$concurrency" \
+                  --duration=10s \
+                  --timeout=30s \
+                  --latencies \
+                  --http1 \
+                  "${BASE}${ENDPOINTS[$endpoint_name]}"
+              else
+                bombardier \
+                  --connections="$concurrency" \
+                  --duration=10s \
+                  --timeout=30s \
+                  --latencies \
+                  --http1 \
+                  --header="Authorization: Bearer ${TOKEN}" \
+                  "${BASE}${ENDPOINTS[$endpoint_name]}"
+              fi
+            done
+          done
+
+          echo "=== SERVER ERRORS ==="
+          if [[ -s /tmp/gunicorn-error.log ]]; then
+            cat /tmp/gunicorn-error.log
+          else
+            echo "none"
+          fi
+
+      - name: Cleanup benchmark secret
+        if: always()
+        run: rm -f bench_token.txt
