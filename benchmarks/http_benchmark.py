@@ -5,7 +5,6 @@ from __future__ import annotations
 import http.client
 import json
 import os
-import statistics
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -22,7 +21,7 @@ CONCURRENCIES = tuple(
 )
 PATHS = {
     "health": "/health/live/",
-    "products": "/api/v1/products/products/?page=1&page_size=20",
+    "products": "/api/v1/products/?page=1&page_size=20",
     "me": "/api/v1/auth/me/",
 }
 
@@ -41,7 +40,6 @@ class Result:
     max_ms: float
 
 
-
 def percentile(values: list[float], percentile_value: float) -> float:
     ordered = sorted(values)
     if not ordered:
@@ -53,7 +51,11 @@ def percentile(values: list[float], percentile_value: float) -> float:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
-def request_once(connection: http.client.HTTPConnection, path: str, token: str | None) -> tuple[bool, float, int]:
+def request_once(
+    connection: http.client.HTTPConnection,
+    path: str,
+    token: str | None,
+) -> tuple[bool, float, int]:
     headers = {"Connection": "keep-alive"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -74,11 +76,10 @@ def request_once(connection: http.client.HTTPConnection, path: str, token: str |
 
 
 def warmup(path: str, tokens: list[str]) -> None:
-    host = urlsplit(BASE_URL).netloc
-    scheme = urlsplit(BASE_URL).scheme
-    if scheme != "http":
+    parsed = urlsplit(BASE_URL)
+    if parsed.scheme != "http":
         raise RuntimeError("The benchmark currently expects an HTTP BASE_URL")
-    connection = http.client.HTTPConnection(host, timeout=10)
+    connection = http.client.HTTPConnection(parsed.netloc, timeout=10)
     try:
         for index in range(WARMUP_REQUESTS):
             token = tokens[index % len(tokens)] if tokens else None
@@ -90,7 +91,7 @@ def warmup(path: str, tokens: list[str]) -> None:
 
 
 def run_level(path_name: str, path: str, concurrency: int, tokens: list[str]) -> Result:
-    host = urlsplit(BASE_URL).netloc
+    parsed = urlsplit(BASE_URL)
     count = max(concurrency, 1)
     request_counts = [TOTAL_REQUESTS // count] * count
     for index in range(TOTAL_REQUESTS % count):
@@ -99,7 +100,7 @@ def run_level(path_name: str, path: str, concurrency: int, tokens: list[str]) ->
     start_barrier = threading.Barrier(count)
 
     def worker(worker_index: int) -> tuple[list[float], int]:
-        connection = http.client.HTTPConnection(host, timeout=10)
+        connection = http.client.HTTPConnection(parsed.netloc, timeout=10)
         latencies: list[float] = []
         failures = 0
         token = tokens[worker_index % len(tokens)] if tokens else None
