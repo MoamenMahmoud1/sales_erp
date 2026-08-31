@@ -14,7 +14,12 @@ from purchases.models import Purchase
 class ConfirmPurchaseService:
     @staticmethod
     @transaction.atomic
-    def execute(*, purchase_id, created_by_id):
+    def execute(*, purchase_id, created_by_id=None, created_by=None):
+        if created_by_id is None:
+            if created_by is None:
+                raise ValueError("created_by_id is required.")
+            created_by_id = getattr(created_by, "pk", created_by)
+
         purchase = (
             Purchase.objects
             .select_for_update()
@@ -58,8 +63,7 @@ class ConfirmPurchaseService:
             reference=purchase.reference,
         )
 
-        # Keep all product/stock rows locked in deterministic product order
-        # inside StockBalanceService to avoid lock-order inversions.
+        # Always acquire StockBalance rows in deterministic product-id order.
         for item in sorted(items, key=lambda value: value.product_id):
             StockBalanceService.increase(
                 location=warehouse,
@@ -81,11 +85,12 @@ class ConfirmPurchaseService:
         return purchase
 
     @staticmethod
-    async def aexecute(*, purchase_id, created_by_id):
+    async def aexecute(*, purchase_id, created_by_id=None, created_by=None):
         return await sync_to_async(
             ConfirmPurchaseService.execute,
             thread_sensitive=True,
         )(
             purchase_id=purchase_id,
             created_by_id=created_by_id,
+            created_by=created_by,
         )
