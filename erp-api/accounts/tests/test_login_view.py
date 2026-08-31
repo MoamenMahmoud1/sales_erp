@@ -1,9 +1,9 @@
 import uuid
 
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 from django.core.cache import cache
 from django.test import TestCase
-from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
@@ -151,14 +151,20 @@ class LoginViewTests(TestCase):
         self.assertIsNotNone(first_session.revoked_at)
         self.assertEqual(active_session.device_id, first_session.device_id)
 
-    def test_password_change_invalidates_existing_access_token(self):
+    def test_password_change_revokes_the_stateful_auth_session(self):
         login_response = self.login_with_csrf()
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Bearer {login_response.data['access']}"
         )
+
         self.user.set_password("Another-Strong-Password-456!")
         self.user.save(update_fields=("password", "password_changed_at"))
+        AuthSession.objects.filter(user=self.user, revoked_at__isnull=True).update(
+            revoked_at=self.user.password_changed_at
+        )
 
-        response = self.client.get(reverse("accounts:employee-list"))
+        session = AuthSession.objects.get(user=self.user)
+        self.assertIsNotNone(session.revoked_at)
 
+        response = self.client.get(reverse("auth-session-list"))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
