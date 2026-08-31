@@ -39,8 +39,8 @@ jobs:
 
     env:
       DJANGO_SETTINGS_MODULE: core.settings.settings_prod
-      SECRET_KEY: ci-secret-key
-      JWT_SIGNING_KEY: ci-jwt-signing-key
+      SECRET_KEY: ci-test-secret-key-please-use-32-or-more-random-characters-2026
+      JWT_SIGNING_KEY: ci-test-jwt-signing-key-please-use-32-or-more-random-characters-2026
       ALLOWED_HOSTS: localhost,127.0.0.1
       CORS_ALLOWED_ORIGINS: http://localhost:3000
       CSRF_TRUSTED_ORIGINS: http://localhost:3000
