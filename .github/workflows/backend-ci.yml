@@ -88,7 +88,7 @@ jobs:
       - name: Test suite
         env:
           DJANGO_SETTINGS_MODULE: core.settings.settings_test
-        run: python manage.py test
+        run: python manage.py test --keepdb
 
       - name: Compile Python
         run: python -m compileall -q .
