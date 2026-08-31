@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Populate a disposable benchmark database with realistic ERP data.
 
-This file intentionally contains all synthetic data generation used by the
-sync-vs-async benchmark. It does not run as part of the application and can be
-reused independently when a local benchmark database needs to be populated.
+All synthetic benchmark data generation lives here. It is not application
+runtime code and can be reused for local or CI benchmark databases.
 
-Usage:
-    DJANGO_SETTINGS_MODULE=core.settings.settings_bench python benchmarks/seed_benchmark_data.py
+Usage from the repository root:
+    python erp-api/benchmarks/seed_benchmark_data.py
+
+Usage from erp-api:
+    python benchmarks/seed_benchmark_data.py
 
 Environment variables:
     BENCH_PRODUCTS=2000
@@ -14,7 +16,14 @@ Environment variables:
 """
 
 import os
+import sys
+from pathlib import Path
 
+# Make ``core`` importable when this script is launched by a CI job from the
+# repository root (or from any other working directory).
+ERP_API_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ERP_API_ROOT))
+os.chdir(ERP_API_ROOT)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings.settings_bench")
 
 import django
