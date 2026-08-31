@@ -19,6 +19,10 @@ class ERPTokenUser(TokenUser):
         except (TypeError, ValueError):
             return 0
 
+    @property
+    def email(self):
+        return str(self.token.get("email", ""))
+
     def get_all_permissions(self, obj=None):
         permissions = self.token.get("permissions", ())
         if not isinstance(permissions, (list, tuple, set)):
