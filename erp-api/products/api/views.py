@@ -12,6 +12,7 @@ from products.api.serializers import (
 )
 from products.models import CartonPricing, Product
 
+
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = (
@@ -42,24 +43,27 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
 
     def get_queryset(self):
-        # Aggregate stock and sold quantities with subqueries so the two sums do
-        # not multiply each other across joined rows (a well-known Django join
-        # pitfall). Both are read-only — the authoritative stock state lives in
-        # inventory.StockBalance.
-        sold_subquery = (
-            self._confirmed_invoice_item_qty()
+        # Keep stock and sold totals in independent correlated subqueries so
+        # their joins cannot multiply each other. Stock is read directly from
+        # the authoritative StockBalance table rather than traversing Product
+        # again inside the subquery.
+        sold_subquery = self._confirmed_invoice_item_qty()
+        stock_subquery = self._total_stock_subquery()
+
+        return Product.objects.annotate(
+            _total_stock=Coalesce(Subquery(stock_subquery), Value(0)),
+            _sold_quantity=Coalesce(Subquery(sold_subquery), Value(0)),
         )
-        stock_subquery = (
-            Product.objects.filter(pk=OuterRef("pk"))
-            .values("pk")
-            .annotate(total=Sum("stock_balances__quantity"))
-            .values("total")
-        )
+
+    @staticmethod
+    def _total_stock_subquery():
+        from inventory.models import StockBalance
+
         return (
-            Product.objects.annotate(
-                _total_stock=Coalesce(Subquery(stock_subquery), Value(0)),
-                _sold_quantity=Coalesce(Subquery(sold_subquery), Value(0)),
-            )
+            StockBalance.objects.filter(product_id=OuterRef("pk"))
+            .values("product_id")
+            .annotate(total=Sum("quantity"))
+            .values("total")
         )
 
     @staticmethod
@@ -70,13 +74,13 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return (
             InvoiceItem.objects.filter(
-                product=OuterRef("pk"),
+                product_id=OuterRef("pk"),
                 invoice__status__in=(
                     Invoice.Status.CONFIRMED,
                     Invoice.Status.PAID,
                 ),
             )
-            .values("product")
+            .values("product_id")
             .annotate(total=Sum("quantity"))
             .values("total")
         )
