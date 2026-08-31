@@ -98,7 +98,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         )(raise_exception=True)
 
         invoice = await CreateInvoice()(
-            user=request.user,
+            created_by_id=request.user.pk,
             validated_data=serializer.validated_data,
         )
         response_serializer = InvoiceSerializer(invoice)
