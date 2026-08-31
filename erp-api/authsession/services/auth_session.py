@@ -1,4 +1,3 @@
-import hmac
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone as datetime_timezone
@@ -9,8 +8,8 @@ from django.utils import timezone
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework_simplejwt.utils import get_md5_hash_password
 
+from accounts.models.role import Role
 from authsession.http import ClientContext
 from authsession.models import AuthSession
 
@@ -39,6 +38,20 @@ class AuthSessionTooNew(Exception):
         self.eligible_at = eligible_at
 
 
+def _set_authorization_claims(token, user):
+    """Populate only the authorization claims needed by stateless requests.
+
+    These claims are computed while creating/rotating tokens, where database
+    access is acceptable. Normal access-token authentication never queries the
+    database. The claims are deliberately limited to authorization state; no
+    password-derived value or session state is placed in the access token.
+    """
+    token["is_staff"] = bool(user.is_staff)
+    token["is_superuser"] = bool(user.is_superuser)
+    token["role_level"] = Role.level_for_user(user)
+    token["permissions"] = sorted(user.get_all_permissions())
+
+
 def _presented_session(refresh_token, access_token):
     try:
         refresh = RefreshToken(refresh_token)
@@ -56,14 +69,13 @@ def _presented_session(refresh_token, access_token):
     return refresh, refresh_session_id, refresh_jti, refresh_user_id
 
 
-def _session_matches(*, auth_session, refresh, refresh_jti, user, device_id):
+def _session_matches(*, auth_session, refresh_jti, user, device_id):
     return (
         auth_session.revoked_at is None
         and auth_session.expires_at > timezone.now()
         and auth_session.user_id == user.pk
         and auth_session.device_id == device_id
         and auth_session.current_refresh_jti == refresh_jti
-        and _refresh_password_matches(refresh, user)
     )
 
 
@@ -82,7 +94,6 @@ def get_current_auth_session(*, user, access_token, refresh_token, device_id):
 
     if not _session_matches(
         auth_session=auth_session,
-        refresh=refresh,
         refresh_jti=refresh_jti,
         user=user,
         device_id=device_id,
@@ -115,7 +126,6 @@ def verify_current_auth_session(
 
         if not _session_matches(
             auth_session=auth_session,
-            refresh=refresh,
             refresh_jti=refresh_jti,
             user=user,
             device_id=device_id,
@@ -146,12 +156,7 @@ def start_auth_session(*, user, client_context: ClientContext):
 
         refresh = RefreshToken.for_user(locked_user)
         refresh["sid"] = str(session_id)
-        # Password-hash binding for the stateful refresh flow.  This claim is
-        # only ever verified inside authsession (refresh / session management)
-        # — access-token validation remains stateless and never checks it.
-        refresh[api_settings.REVOKE_TOKEN_CLAIM] = get_md5_hash_password(
-            locked_user.password,
-        )
+        _set_authorization_claims(refresh, locked_user)
         access = refresh.access_token
         expires_at = datetime.fromtimestamp(
             refresh["exp"],
@@ -183,24 +188,6 @@ def start_auth_session(*, user, client_context: ClientContext):
     )
 
 
-def _refresh_password_matches(refresh, user):
-    """Check that the refresh token's password hash matches the user's current password.
-
-    This is a business requirement for the refresh flow (password change must
-    invalidate existing refresh tokens).  It is intentionally independent of
-    ``CHECK_REVOKE_TOKEN`` so that access-token validation remains stateless
-    while the stateful refresh flow still enforces password-change revocation.
-    """
-    token_hash = refresh.get(api_settings.REVOKE_TOKEN_CLAIM)
-    if not isinstance(token_hash, str):
-        return False
-
-    return hmac.compare_digest(
-        token_hash,
-        get_md5_hash_password(user.password),
-    )
-
-
 def refresh_auth_session(*, refresh_token, client_context: ClientContext):
     try:
         presented_refresh = RefreshToken(refresh_token)
@@ -223,13 +210,7 @@ def refresh_auth_session(*, refresh_token, client_context: ClientContext):
 
             if auth_session.revoked_at is not None or auth_session.expires_at <= now:
                 invalid_session = True
-            elif (
-                not auth_session.user.is_active
-                or not _refresh_password_matches(
-                    presented_refresh,
-                    auth_session.user,
-                )
-            ):
+            elif not auth_session.user.is_active:
                 auth_session.revoked_at = now
                 auth_session.save(update_fields=("revoked_at",))
                 invalid_session = True
@@ -248,12 +229,7 @@ def refresh_auth_session(*, refresh_token, client_context: ClientContext):
                 )
                 new_refresh = RefreshToken.for_user(auth_session.user)
                 new_refresh["sid"] = str(auth_session.id)
-                # Keep the password-hash binding on rotated refresh tokens so
-                # password-change revocation keeps working in the stateful
-                # refresh flow (access tokens stay stateless).
-                new_refresh[api_settings.REVOKE_TOKEN_CLAIM] = (
-                    get_md5_hash_password(auth_session.user.password)
-                )
+                _set_authorization_claims(new_refresh, auth_session.user)
                 new_refresh["exp"] = int(auth_session.expires_at.timestamp())
 
                 new_access = new_refresh.access_token
