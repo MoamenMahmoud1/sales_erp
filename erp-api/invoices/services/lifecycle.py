@@ -53,7 +53,11 @@ def _record_sale_movement_sync(invoice, source_location):
         reference=f"Invoice #{invoice.pk}",
     )
 
-    for item in invoice.items.select_related("product").all():
+    # All stock rows are acquired in a deterministic product-id order. This
+    # prevents two concurrent multi-item invoices from locking the same
+    # StockBalance rows in opposite orders and deadlocking.
+    items = sorted(invoice.items.select_related("product").all(), key=lambda value: value.product_id)
+    for item in items:
         try:
             StockBalanceService.decrease(
                 location=source_location,
@@ -129,7 +133,8 @@ def _reverse_sale_movement_sync(invoice):
         reference=f"Cancel Invoice #{invoice.pk}",
     )
 
-    for item in invoice.items.select_related("product").all():
+    items = sorted(invoice.items.select_related("product").all(), key=lambda value: value.product_id)
+    for item in items:
         StockBalanceService.increase(
             location=source_location,
             product=item.product,
