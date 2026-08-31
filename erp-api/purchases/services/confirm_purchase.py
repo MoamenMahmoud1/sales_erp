@@ -14,7 +14,7 @@ from purchases.models import Purchase
 class ConfirmPurchaseService:
     @staticmethod
     @transaction.atomic
-    def execute(*, purchase_id, created_by):
+    def execute(*, purchase_id, created_by_id):
         purchase = (
             Purchase.objects
             .select_for_update()
@@ -42,6 +42,7 @@ class ConfirmPurchaseService:
                 ),
                 is_active=True,
             )
+            .order_by("pk")
             .first()
         )
 
@@ -53,11 +54,13 @@ class ConfirmPurchaseService:
         movement = StockMovement.objects.create(
             movement_type=StockMovement.MovementType.PURCHASE,
             destination_location=warehouse,
-            created_by=created_by,
+            created_by_id=created_by_id,
             reference=purchase.reference,
         )
 
-        for item in items:
+        # Keep all product/stock rows locked in deterministic product order
+        # inside StockBalanceService to avoid lock-order inversions.
+        for item in sorted(items, key=lambda value: value.product_id):
             StockBalanceService.increase(
                 location=warehouse,
                 product=item.product,
@@ -78,11 +81,11 @@ class ConfirmPurchaseService:
         return purchase
 
     @staticmethod
-    async def aexecute(*, purchase_id, created_by):
+    async def aexecute(*, purchase_id, created_by_id):
         return await sync_to_async(
             ConfirmPurchaseService.execute,
             thread_sensitive=True,
         )(
             purchase_id=purchase_id,
-            created_by=created_by,
+            created_by_id=created_by_id,
         )
