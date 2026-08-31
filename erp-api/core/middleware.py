@@ -1,13 +1,8 @@
-"""Core middleware: proxy trusted headers + request correlation IDs.
-
-The correlation ID middleware generates (or propagates) a unique request
-identifier that flows through every log line, making it possible to trace a
-single request across the async/sync boundary and through the sync
-transactional core.
-"""
+"""Core middleware: proxy trusted headers + request correlation IDs."""
 import logging
 import uuid
 from contextvars import ContextVar
+from inspect import iscoroutinefunction, markcoroutinefunction
 
 from django.conf import settings
 
@@ -45,27 +40,13 @@ class _RequestIdLogRecordFactory:
         return record
 
 
-# Install at import time so log records outside a request still have the
-# attribute (value ``"-"``).
 logging.setLogRecordFactory(
     _RequestIdLogRecordFactory(logging.getLogRecordFactory())
 )
-_root = logging.getLogger()
-if not any(isinstance(f, _RequestIdFilter) for f in _root.filters):
-    _root.addFilter(_RequestIdFilter())
 
 
 class RequestCorrelationMiddleware:
-    """Generate / propagate a request-id stored in the logging context var.
-
-    Downstream sync code running inside ``sync_to_async`` can read
-    ``get_current_request_id()`` to attach the same id to its own log
-    records.  The response header ``X-Request-Id`` echoes the id back to
-    the client.
-
-    This middleware is async-capable: Django automatically detects the
-    ``async_capable`` flag and uses the appropriate call path.
-    """
+    """Hybrid middleware that preserves the ASGI async path without adaptation."""
 
     response_header = "X-Request-Id"
     async_capable = True
@@ -73,8 +54,14 @@ class RequestCorrelationMiddleware:
 
     def __init__(self, get_response):
         self.get_response = get_response
+        self._is_async = iscoroutinefunction(get_response)
+        if self._is_async:
+            markcoroutinefunction(self)
 
     def __call__(self, request):
+        if self._is_async:
+            return self._async_call(request)
+
         request_id = request.META.get(CORRELATION_HEADER) or uuid.uuid4().hex
         request.META[CORRELATION_HEADER] = request_id
         token = _current_request_id.set(request_id)
@@ -85,7 +72,7 @@ class RequestCorrelationMiddleware:
         response[self.response_header] = request_id
         return response
 
-    async def __acall__(self, request):
+    async def _async_call(self, request):
         request_id = request.META.get(CORRELATION_HEADER) or uuid.uuid4().hex
         request.META[CORRELATION_HEADER] = request_id
         token = _current_request_id.set(request_id)
@@ -98,10 +85,7 @@ class RequestCorrelationMiddleware:
 
 
 class TrustedProxyHeadersMiddleware:
-    """Strip forwarded headers unless the request comes from a trusted proxy.
-
-    Async-capable: Django uses ``__acall__`` for ASGI requests.
-    """
+    """Hybrid middleware that normalizes forwarded headers without sync adaptation."""
 
     forwarded_headers = (
         "HTTP_FORWARDED",
@@ -116,6 +100,9 @@ class TrustedProxyHeadersMiddleware:
 
     def __init__(self, get_response):
         self.get_response = get_response
+        self._is_async = iscoroutinefunction(get_response)
+        if self._is_async:
+            markcoroutinefunction(self)
 
     def _strip_headers(self, request):
         remote_address = normalize_ip(request.META.get("REMOTE_ADDR"))
@@ -129,9 +116,11 @@ class TrustedProxyHeadersMiddleware:
                 request.META.pop(header, None)
 
     def __call__(self, request):
+        if self._is_async:
+            return self._async_call(request)
         self._strip_headers(request)
         return self.get_response(request)
 
-    async def __acall__(self, request):
+    async def _async_call(self, request):
         self._strip_headers(request)
         return await self.get_response(request)
