@@ -1,7 +1,10 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -10,6 +13,7 @@ from authsession.models import AuthSession
 
 class RefreshViewTests(TestCase):
     password = "Strong-Test-Password-123!"
+    new_password = "Another-Strong-Password-456!"
 
     @classmethod
     def setUpTestData(cls):
@@ -38,6 +42,18 @@ class RefreshViewTests(TestCase):
             },
             format="json",
             HTTP_X_CSRFTOKEN=self.csrf_token(),
+        )
+
+    def verify_session_for_sensitive_action(self):
+        AuthSession.objects.filter(
+            user=self.user,
+            revoked_at__isnull=True,
+        ).update(created_at=timezone.now() - timedelta(days=8))
+        self.client.credentials()
+        return self.client.post(
+            reverse("accounts:session-verify"),
+            {"current_password": self.password},
+            format="json",
         )
 
     def test_refresh_rotates_cookie_and_returns_only_new_access(self):
@@ -104,9 +120,26 @@ class RefreshViewTests(TestCase):
         self.assertIsNotNone(AuthSession.objects.get(user=self.user).revoked_at)
 
     def test_password_change_invalidates_refresh_and_revokes_session(self):
-        self.login()
-        self.user.set_password("Another-Strong-Password-456!")
-        self.user.save(update_fields=("password", "password_changed_at"))
+        login_response = self.login()
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        self.verify_session_for_sensitive_action()
+
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {login_response.data['access']}"
+        )
+        password_change_response = self.client.post(
+            reverse("accounts:password-change"),
+            {
+                "new_password": self.new_password,
+                "password_confirm": self.new_password,
+            },
+            format="json",
+            HTTP_X_CSRFTOKEN=self.csrf_token(),
+        )
+        self.assertEqual(
+            password_change_response.status_code,
+            status.HTTP_204_NO_CONTENT,
+        )
 
         response = self.client.post(
             self.refresh_url,
