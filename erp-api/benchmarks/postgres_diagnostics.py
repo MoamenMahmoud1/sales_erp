@@ -1,9 +1,18 @@
+#!/usr/bin/env python3
+"""Inspect the exact Product-list query and PostgreSQL state used by benchmarks."""
+
 import json
 import os
+import sys
+from pathlib import Path
+
+ERP_API_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ERP_API_ROOT))
+os.chdir(ERP_API_ROOT)
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings.settings_bench")
 
 import django
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings.settings_bench")
 django.setup()
 
 from django.db import connection  # noqa: E402
@@ -18,6 +27,14 @@ TABLES = (
 )
 
 
+def explain(cursor, sql, params=()):
+    cursor.execute(
+        "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, WAL, TIMING, FORMAT JSON) " + sql,
+        params,
+    )
+    return cursor.fetchone()[0]
+
+
 def main():
     payload = {}
     with connection.cursor() as cursor:
@@ -28,7 +45,10 @@ def main():
             "'work_mem','random_page_cost','effective_io_concurrency','jit','track_io_timing'"
             ") ORDER BY name"
         )
-        payload["settings"] = [dict(zip(("name", "setting", "unit"), row)) for row in cursor.fetchall()]
+        payload["settings"] = [
+            dict(zip(("name", "setting", "unit"), row))
+            for row in cursor.fetchall()
+        ]
 
         cursor.execute(
             "SELECT tablename, indexname, indexdef "
@@ -40,17 +60,30 @@ def main():
             for row in cursor.fetchall()
         ]
 
+        cursor.execute(
+            "SELECT relname, n_live_tup, n_dead_tup, last_analyze, last_autoanalyze "
+            "FROM pg_stat_user_tables WHERE relname = ANY(%s) ORDER BY relname",
+            [list(TABLES)],
+        )
+        payload["table_statistics"] = [
+            dict(
+                zip(
+                    ("relname", "n_live_tup", "n_dead_tup", "last_analyze", "last_autoanalyze"),
+                    row,
+                )
+            )
+            for row in cursor.fetchall()
+        ]
+
     queryset = ProductViewSet().get_queryset().order_by("name", "pk")[:20]
     sql, params = queryset.query.sql_with_params()
     with connection.cursor() as cursor:
-        cursor.execute(
-            "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, FORMAT JSON) " + sql,
-            params,
+        payload["product_page_sql"] = sql
+        payload["product_page_plan"] = explain(cursor, sql, params)
+        payload["product_count_plan"] = explain(
+            cursor,
+            "SELECT COUNT(*) FROM products_product",
         )
-        payload["product_page_plan"] = cursor.fetchone()[0]
-
-        cursor.execute("EXPLAIN (ANALYZE, BUFFERS, SETTINGS, FORMAT JSON) SELECT COUNT(*) FROM products_product")
-        payload["product_count_plan"] = cursor.fetchone()[0]
 
     print(json.dumps(payload, indent=2, default=str))
 
