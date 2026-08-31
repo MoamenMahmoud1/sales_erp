@@ -1,10 +1,10 @@
-name: Backend HTTP Benchmark
+name: Backend Sync vs Async Benchmark
 
 on:
   push:
     branches: [main]
     paths:
-      - "benchmarks/**"
+      - "erp-api/benchmarks/**"
       - "erp-api/core/settings/settings_bench.py"
       - "erp-api/products/api/views.py"
       - "erp-api/products/api/serializers.py"
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: backend-http-benchmark
+  group: backend-sync-async-benchmark
   cancel-in-progress: true
 
 jobs:
@@ -64,6 +64,9 @@ jobs:
       DB_POOL_MAX_SIZE: "5"
       WEB_CONCURRENCY: "2"
       TRUST_PROXY_HEADERS: "false"
+      BENCH_REQUESTS: "1000"
+      BENCH_WARMUP: "100"
+      BENCH_TIMEOUT: "30"
 
     steps:
       - name: Checkout
@@ -76,18 +79,11 @@ jobs:
           cache: pip
           cache-dependency-path: erp-api/requirements.txt
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
-
-      - name: Install Bombardier
         run: |
-          go install github.com/codesenberg/bombardier@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx uvicorn-worker
 
       - name: Migrate
         run: python manage.py migrate --noinput
@@ -95,22 +91,20 @@ jobs:
       - name: Seed benchmark database
         run: |
           python manage.py shell <<'PY'
-          import json
           from django.contrib.auth import get_user_model
           from inventory.models import StockBalance, StockLocation
           from products.models import Product
           from rest_framework_simplejwt.tokens import AccessToken
 
           User = get_user_model()
-          users = []
-          for index in range(100):
-              username = f"bench_user_{index}"
-              email = f"bench_user_{index}@example.com"
-              user, _ = User.objects.get_or_create(
-                  username=username,
-                  defaults={"email": email, "is_active": True, "is_verified": True},
-              )
-              users.append(user)
+          user, _ = User.objects.get_or_create(
+              username="benchmark_user",
+              defaults={
+                  "email": "benchmark_user@example.com",
+                  "is_active": True,
+                  "is_verified": True,
+              },
+          )
 
           products = list(Product.objects.all()[:2000])
           if len(products) < 2000:
@@ -143,80 +137,136 @@ jobs:
           )
 
           with open("bench_token.txt", "w", encoding="utf-8") as output:
-              output.write(str(AccessToken.for_user(users[0])))
+              output.write(str(AccessToken.for_user(user)))
           PY
 
-      - name: Record runner capacity
+      - name: Record runner and dependency versions
         run: |
-          echo "=== CPU ==="
-          nproc
-          lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket' || true
-          echo "=== MEMORY ==="
-          free -h
+          mkdir -p benchmark-results
+          {
+            echo "# Environment"
+            echo
+            echo '```text'
+            date -u
+            echo "CPU logical: $(nproc)"
+            lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket' || true
+            free -h
+            python --version
+            python -c 'import django; print("Django", django.get_version())'
+            python -c 'import httpx; print("httpx", httpx.__version__)'
+            echo '```'
+          } > benchmark-results/environment.md
 
-      - name: Start server and benchmark
+      - name: Run sync and async benchmarks
         run: |
           set -euo pipefail
-          gunicorn core.asgi:application \
-            --bind 127.0.0.1:8000 \
-            --workers 2 \
-            --worker-class uvicorn_worker.UvicornWorker \
-            --timeout 30 \
-            --access-logfile /dev/null \
-            --error-logfile /tmp/gunicorn-error.log \
-            --log-level warning &
-          SERVER_PID=$!
-          trap 'kill "$SERVER_PID" || true' EXIT
-
-          for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null
-
           TOKEN="$(cat bench_token.txt)"
           BASE="http://127.0.0.1:8000"
-          declare -A ENDPOINTS=(
-            [health]="/health/live/"
-            [products]="/api/v1/products/?page=1&page_size=20"
-            [me]="/api/v1/auth/me/"
-          )
+          ENDPOINT="/api/v1/products/?page=1&page_size=20"
 
-          for endpoint_name in health products me; do
-            echo ""
-            echo "===== ${endpoint_name} ====="
-            for concurrency in 1 10 25 50 100; do
-              echo "--- concurrency=${concurrency} duration=10s ---"
-              if [[ "$endpoint_name" == "health" ]]; then
-                bombardier \
-                  --connections="$concurrency" \
-                  --duration=10s \
-                  --timeout=30s \
-                  --latencies \
-                  --http1 \
-                  "${BASE}${ENDPOINTS[$endpoint_name]}"
-              else
-                bombardier \
-                  --connections="$concurrency" \
-                  --duration=10s \
-                  --timeout=30s \
-                  --latencies \
-                  --http1 \
-                  --header="Authorization: Bearer ${TOKEN}" \
-                  "${BASE}${ENDPOINTS[$endpoint_name]}"
+          start_server() {
+            mode="$1"
+            if [[ "$mode" == "sync" ]]; then
+              gunicorn core.wsgi:application \
+                --bind 127.0.0.1:8000 \
+                --workers 2 \
+                --worker-class sync \
+                --timeout 30 \
+                --access-logfile /dev/null \
+                --error-logfile "/tmp/gunicorn-${mode}.log" \
+                --log-level warning &
+            else
+              gunicorn core.asgi:application \
+                --bind 127.0.0.1:8000 \
+                --workers 2 \
+                --worker-class uvicorn_worker.UvicornWorker \
+                --timeout 30 \
+                --access-logfile /dev/null \
+                --error-logfile "/tmp/gunicorn-${mode}.log" \
+                --log-level warning &
+            fi
+            SERVER_PID=$!
+            export SERVER_PID
+            for attempt in $(seq 1 60); do
+              if curl -fsS "$BASE/health/live/" >/dev/null; then
+                return
               fi
+              sleep 1
             done
+            echo "Server failed to start"
+            cat "/tmp/gunicorn-${mode}.log" || true
+            exit 1
+          }
+
+          stop_server() {
+            if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
+              kill "$SERVER_PID" || true
+              wait "$SERVER_PID" || true
+            fi
+            SERVER_PID=""
+          }
+
+          trap 'stop_server; rm -f bench_token.txt' EXIT
+
+          for mode in sync async; do
+            echo "===== MODE: ${mode} ====="
+            start_server "$mode"
+
+            for concurrency in 1 10 25 50 100; do
+              export BENCH_URL="${BASE}${ENDPOINT}"
+              export BENCH_TOKEN="$TOKEN"
+              export BENCH_CONCURRENCY="$concurrency"
+              output="benchmark-results/${mode}-c${concurrency}.jsonl"
+              rm -f "$output"
+
+              # Warm-up and measurement use the same client and endpoint.
+              python benchmarks/http_benchmark.py | tee "$output"
+            done
+
+            echo "=== ${mode} server errors ==="
+            cat "/tmp/gunicorn-${mode}.log" || true
+            stop_server
           done
 
-          echo "=== SERVER ERRORS ==="
-          if [[ -s /tmp/gunicorn-error.log ]]; then
-            cat /tmp/gunicorn-error.log
-          else
-            echo "none"
-          fi
-
-      - name: Cleanup benchmark secret
+      - name: Build benchmark report
         if: always()
-        run: rm -f bench_token.txt
+        working-directory: erp-api
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = []
+          for path in sorted(Path("benchmark-results").glob("*.jsonl")):
+              for line in path.read_text().splitlines():
+                  if line.strip():
+                      item = json.loads(line)
+                      if item.get("phase") == "measured":
+                          item["mode"] = path.name.split("-c", 1)[0]
+                          rows.append(item)
+
+          rows.sort(key=lambda x: (x["mode"], x["concurrency"]))
+          cols = ["mode", "concurrency", "requests", "successful", "failed", "timeouts", "wall_time_sec", "rps", "min_ms", "mean_ms", "p50_ms", "p75_ms", "p90_ms", "p95_ms", "p99_ms", "max_ms", "stddev_ms", "error_rate_pct"]
+
+          with open("benchmark-results/report.md", "w", encoding="utf-8") as f:
+              f.write("# Sync vs Async HTTP Benchmark\n\n")
+              f.write("Same `/api/v1/products/` endpoint, same DB/cache services, same 2 workers, same client, 100 warm-up requests, then 1000 measured requests per concurrency. `sync` means Gunicorn WSGI sync workers; `async` means Gunicorn ASGI workers using UvicornWorker.\n\n")
+              f.write("| " + " | ".join(cols) + " |\n")
+              f.write("|" + "---|" * len(cols) + "\n")
+              for row in rows:
+                  vals = []
+                  for col in cols:
+                      value = row.get(col, "")
+                      if isinstance(value, float):
+                          value = f"{value:.3f}"
+                      vals.append(str(value))
+                  f.write("| " + " | ".join(vals) + " |\n")
+          PY
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-vs-async-benchmark
+          path: erp-api/benchmark-results/
+          if-no-files-found: warn
