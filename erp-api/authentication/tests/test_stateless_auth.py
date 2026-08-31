@@ -1,6 +1,7 @@
 """Tests proving that JWT access-token authentication is stateless."""
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
@@ -22,6 +23,11 @@ class StatelessAuthTests(TestCase):
             is_verified=True,
             is_staff=True,
         )
+        self.permission = Permission.objects.get(
+            content_type__app_label="invoices",
+            codename="add_invoice",
+        )
+        self.user.user_permissions.add(self.permission)
         self.factory = APIRequestFactory()
 
     def _make_access_token(self):
@@ -30,7 +36,6 @@ class StatelessAuthTests(TestCase):
         return str(refresh.access_token)
 
     def test_real_jwt_authentication_performs_zero_db_queries(self):
-        """The actual JWT authentication class must perform no SQL queries."""
         request = self.factory.get("/api/v1/invoices/")
         request.META["HTTP_AUTHORIZATION"] = f"Bearer {self._make_access_token()}"
 
@@ -50,7 +55,7 @@ class StatelessAuthTests(TestCase):
         token_user, _ = JWTStatelessUserAuthentication().authenticate(request)
 
         self.assertTrue(token_user.is_staff)
-        self.assertFalse(token_user.has_perm("invoices.add_invoice"))
+        self.assertTrue(token_user.has_perm("invoices.add_invoice"))
 
     def test_access_token_contains_no_password_derived_claim(self):
         access = AccessToken(self._make_access_token())
