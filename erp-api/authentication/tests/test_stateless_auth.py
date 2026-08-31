@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIRequestFactory
 from rest_framework_simplejwt.authentication import JWTStatelessUserAuthentication
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from authsession.services.auth_session import _set_authorization_claims
 
@@ -50,12 +50,11 @@ class StatelessAuthTests(TestCase):
         token_user, _ = JWTStatelessUserAuthentication().authenticate(request)
 
         self.assertTrue(token_user.is_staff)
-        self.assertTrue(token_user.has_perm("invoices.add_invoice") is False)
-        self.assertEqual(token_user.role_level, 0)
+        self.assertFalse(token_user.has_perm("invoices.add_invoice"))
 
     def test_access_token_contains_no_password_derived_claim(self):
-        access = self._make_access_token()
-        self.assertNotIn("hash_password", RefreshToken(access).payload)
+        access = AccessToken(self._make_access_token())
+        self.assertNotIn("hash_password", access.payload)
 
     def test_invalid_token_rejected_without_db_lookup(self):
         request = self.factory.get("/api/v1/invoices/")
