@@ -21,7 +21,7 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: erp-api
@@ -99,18 +99,20 @@ jobs:
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET track_io_timing='on';"
           docker restart "$PG_CONTAINER"
           for attempt in $(seq 1 60); do
-            if PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SELECT 1" >/dev/null 2>&1; then break; fi
+            if PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SELECT 1" >/dev/null 2>&1; then exit 0; fi
             sleep 1
           done
+          exit 1
 
       - name: Seed benchmark database
         run: python benchmarks/seed_benchmark_data.py
 
       - name: Analyze and inspect PostgreSQL plan
         run: |
+          set -euo pipefail
           mkdir -p benchmark-results
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ANALYZE;"
-          python benchmarks/postgres_diagnostics.py | tee benchmark-results/postgres-diagnostics.json
+          python benchmarks/postgres_diagnostics.py > benchmark-results/postgres-diagnostics.json
           {
             echo "# Environment"
             date -u
@@ -123,13 +125,12 @@ jobs:
             PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SHOW server_version; SHOW max_connections; SHOW shared_buffers; SHOW effective_cache_size; SHOW work_mem; SHOW random_page_cost; SHOW effective_io_concurrency; SHOW jit; SHOW track_io_timing;"
           } > benchmark-results/environment.md
 
-      - name: Run sync and async benchmarks
+      - name: Run baseline sync and async benchmarks
         run: |
           set -euo pipefail
           TOKEN="$(cat bench_token.txt)"
           BASE="http://127.0.0.1:8000"
           ENDPOINT="/api/v1/products/?page=1&page_size=20"
-
           start_server() {
             mode="$1"
             if [[ "$mode" == "sync" ]]; then
@@ -150,7 +151,6 @@ jobs:
             SERVER_PID=""
           }
           trap 'stop_server; rm -f bench_token.txt' EXIT
-
           for mode in sync async; do
             start_server "$mode"
             for concurrency in 1 5 10 25 50 100; do
@@ -160,6 +160,36 @@ jobs:
             echo "=== ${mode} server errors ==="
             cat "/tmp/gunicorn-${mode}.log" || true
             stop_server
+          done
+
+      - name: Run focused DB-pool sweep
+        run: |
+          set -euo pipefail
+          TOKEN="$(cat bench_token.txt 2>/dev/null || true)"
+          if [[ -z "$TOKEN" ]]; then
+            python benchmarks/seed_benchmark_data.py >/dev/null
+            TOKEN="$(cat bench_token.txt)"
+          fi
+          BASE="http://127.0.0.1:8000"
+          ENDPOINT="/api/v1/products/?page=1&page_size=20"
+          for mode in sync async; do
+            for pool in 5 10 20 40; do
+              export DB_POOL_MAX_SIZE="$pool"
+              if [[ "$mode" == "sync" ]]; then
+                gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers 2 --worker-class sync --timeout 30 --access-logfile /dev/null --error-logfile "/tmp/gunicorn-pool.log" --log-level warning &
+              else
+                gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers 2 --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile "/tmp/gunicorn-pool.log" --log-level warning &
+              fi
+              SERVER_PID=$!
+              for attempt in $(seq 1 60); do curl -fsS "$BASE/health/live/" >/dev/null 2>&1 && break; sleep 1; done
+              for concurrency in 25 100; do
+                BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 \
+                  python benchmarks/http_benchmark.py | tee "benchmark-results/${mode}-pool${pool}-c${concurrency}.jsonl"
+              done
+              kill "$SERVER_PID" || true
+              wait "$SERVER_PID" || true
+              SERVER_PID=""
+            done
           done
 
       - name: Build benchmark report
@@ -176,24 +206,20 @@ jobs:
                       if item.get("phase") == "measured":
                           item["mode"] = path.name.split("-c", 1)[0]
                           rows.append(item)
-          rows.sort(key=lambda x: (x["mode"], x["concurrency"]))
-          cols = ["mode", "concurrency", "requests", "successful", "failed", "timeouts", "wall_time_sec", "rps", "min_ms", "mean_ms", "p50_ms", "p75_ms", "p90_ms", "p95_ms", "p99_ms", "max_ms", "stddev_ms", "error_rate_pct"]
+          rows.sort(key=lambda x: (x["mode"], x.get("concurrency", 0)))
+          cols = ["mode", "concurrency", "requests", "successful", "failed", "timeouts", "wall_time_sec", "rps", "p50_ms", "p95_ms", "p99_ms", "max_ms", "error_rate_pct"]
           with open("benchmark-results/report.md", "w", encoding="utf-8") as f:
-              f.write("# Sync vs Async HTTP Benchmark\n\n")
-              f.write("Same endpoint, seeded data, PostgreSQL instance, 2 workers, DB pool per worker, HTTP client, and warm-up. Results are end-to-end deployment measurements; they are not a universal async-vs-sync claim.\n\n")
+              f.write("# Sync vs Async root-cause benchmark\n\n")
+              f.write("Includes PostgreSQL EXPLAIN/BUFFERS/I/O diagnostics and a DB-pool sweep.\n\n")
               f.write("| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n")
               for row in rows:
-                  values = []
-                  for col in cols:
-                      value = row.get(col, "")
-                      values.append(f"{value:.3f}" if isinstance(value, float) else str(value))
-                  f.write("| " + " | ".join(values) + " |\n")
+                  f.write("| " + " | ".join(str(row.get(c, "")) for c in cols) + " |\n")
           PY
 
       - name: Upload benchmark results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sync-vs-async-benchmark
+          name: sync-vs-async-root-cause-benchmark
           path: erp-api/benchmark-results/
           if-no-files-found: warn
