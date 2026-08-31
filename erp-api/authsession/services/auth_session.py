@@ -5,9 +5,9 @@ from datetime import datetime, timezone as datetime_timezone
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.exceptions import TokenError
 
 from accounts.models.role import Role
 from authsession.http import ClientContext
@@ -67,7 +67,7 @@ def _session_matches(*, auth_session, refresh_jti, user_id, device_id):
     return (
         auth_session.revoked_at is None
         and auth_session.expires_at > timezone.now()
-        and auth_session.user_id == user_id
+        and str(auth_session.user_id) == str(user_id)
         and auth_session.device_id == device_id
         and auth_session.current_refresh_jti == refresh_jti
     )
