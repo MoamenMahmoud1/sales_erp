@@ -14,12 +14,24 @@ class PaymentTransaction(models.Model):
     or more of the customer's invoices via ``PaymentAllocation`` rows. The
     backend owns the allocation — the client only reports how much cash and
     transfer was received.
+
+    ``collected_by`` records the authenticated employee/user who performed
+    the collection.  It is a durable audit field — never derived from a
+    dynamic attribute.
     """
 
     customer = models.ForeignKey(
         "customers.Customer",
         on_delete=models.PROTECT,
         related_name="payment_transactions",
+    )
+    collected_by = models.ForeignKey(
+        "accounts.CustomUserModel",
+        on_delete=models.PROTECT,
+        related_name="payment_collections",
+        help_text="Authenticated user who performed the collection.",
+        null=True,
+        blank=True,
     )
     cash_amount = models.DecimalField(
         max_digits=12,
@@ -35,6 +47,12 @@ class PaymentTransaction(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+        indexes = [
+            models.Index(
+                fields=("customer", "created_at"),
+                name="pay_tx_cust_created_idx",
+            ),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=Q(cash_amount__gte=Decimal("0")),

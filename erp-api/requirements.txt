@@ -12,6 +12,7 @@ psycopg[binary,pool]==3.3.4
 # ASGI deployment
 gunicorn==26.0.0
 uvicorn[standard]==0.52.4
+uvicorn-worker==0.5.0
 
 # Auth / sessions / email / uploads
 django-cors-headers==4.9.0

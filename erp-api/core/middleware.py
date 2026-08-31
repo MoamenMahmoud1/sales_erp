@@ -62,9 +62,14 @@ class RequestCorrelationMiddleware:
     ``get_current_request_id()`` to attach the same id to its own log
     records.  The response header ``X-Request-Id`` echoes the id back to
     the client.
+
+    This middleware is async-capable: Django automatically detects the
+    ``async_capable`` flag and uses the appropriate call path.
     """
 
     response_header = "X-Request-Id"
+    async_capable = True
+    sync_capable = True
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -80,8 +85,24 @@ class RequestCorrelationMiddleware:
         response[self.response_header] = request_id
         return response
 
+    async def __acall__(self, request):
+        request_id = request.META.get(CORRELATION_HEADER) or uuid.uuid4().hex
+        request.META[CORRELATION_HEADER] = request_id
+        token = _current_request_id.set(request_id)
+        try:
+            response = await self.get_response(request)
+        finally:
+            _current_request_id.reset(token)
+        response[self.response_header] = request_id
+        return response
+
 
 class TrustedProxyHeadersMiddleware:
+    """Strip forwarded headers unless the request comes from a trusted proxy.
+
+    Async-capable: Django uses ``__acall__`` for ASGI requests.
+    """
+
     forwarded_headers = (
         "HTTP_FORWARDED",
         "HTTP_X_FORWARDED_FOR",
@@ -90,10 +111,13 @@ class TrustedProxyHeadersMiddleware:
         "HTTP_X_FORWARDED_PROTO",
     )
 
+    async_capable = True
+    sync_capable = True
+
     def __init__(self, get_response):
         self.get_response = get_response
 
-    def __call__(self, request):
+    def _strip_headers(self, request):
         remote_address = normalize_ip(request.META.get("REMOTE_ADDR"))
         trust_headers = (
             getattr(settings, "TRUST_PROXY_HEADERS", False)
@@ -104,4 +128,10 @@ class TrustedProxyHeadersMiddleware:
             for header in self.forwarded_headers:
                 request.META.pop(header, None)
 
+    def __call__(self, request):
+        self._strip_headers(request)
         return self.get_response(request)
+
+    async def __acall__(self, request):
+        self._strip_headers(request)
+        return await self.get_response(request)

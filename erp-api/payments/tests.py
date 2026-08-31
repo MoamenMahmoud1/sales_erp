@@ -1,3 +1,4 @@
+import asyncio
 import threading
 from decimal import Decimal
 
@@ -12,10 +13,11 @@ from common.exceptions import InvalidMoney
 from customers.models import Customer
 from invoices.models import Invoice, InvoiceItem
 from payments.api.views import CollectionView, TransactionListView
-from payments.models import PaymentAllocation, PaymentTransaction
+from payments.models import IdempotencyKey, PaymentAllocation, PaymentTransaction
 from payments.services import (
     NoConfirmableInvoicesError,
     OverpaymentError,
+    ProcessCollectionIdempotent,
     _process_collection_sync,
 )
 from products.models import Product
@@ -67,11 +69,14 @@ class ProcessCollectionTests(PaymentTestMixin, TransactionTestCase):
         self.customer = Customer.objects.create(name="Acme")
         self.product = self.create_product()
 
-    def collect(self, cash, transfer):
+    def collect(self, cash, transfer, collected_by_id=None):
+        if collected_by_id is None:
+            collected_by_id = self.user.pk
         return _process_collection_sync(
             customer=self.customer,
             cash_amount=Decimal(cash),
             transfer_amount=Decimal(transfer),
+            collected_by_id=collected_by_id,
         )
 
     def test_full_cash_payment_marks_invoice_paid(self):
@@ -207,14 +212,19 @@ class ProcessCollectionTests(PaymentTestMixin, TransactionTestCase):
     def test_concurrent_collections_cannot_double_allocate(self):
         invoice = self.create_invoice(self.customer, self.user, self.product, quantity=1)
         results = []
+        barrier = threading.Barrier(2)
 
         def worker():
+            from django.db import connection
+            connection.close()  # fresh connection per thread
             try:
+                barrier.wait(timeout=5)
                 results.append(
                     _process_collection_sync(
                         customer=self.customer,
                         cash_amount=Decimal("100.00"),
                         transfer_amount=Decimal("0.00"),
+                        collected_by_id=self.user.pk,
                     )
                 )
             except (OverpaymentError, NoConfirmableInvoicesError):
@@ -313,6 +323,7 @@ class PaymentAPITests(PaymentTestMixin, TestCase):
                 customer=self.customer,
                 cash_amount=Decimal("50.00"),
                 transfer_amount=Decimal("0.00"),
+                collected_by_id=self.user.pk,
             ),
             thread_sensitive=True,
         )()

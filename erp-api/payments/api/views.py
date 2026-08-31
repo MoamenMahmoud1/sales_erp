@@ -31,8 +31,7 @@ from payments.services import (
     NoConfirmableInvoicesError,
     OverpaymentError,
     ProcessCollection,
-    _lookup_idempotency_sync,
-    _record_idempotency_sync,
+    ProcessCollectionIdempotent,
 )
 from authentication.throttling import SensitiveActionThrottle
 
@@ -61,18 +60,23 @@ class CollectionView(APIView):
             "transfer_amount": str(transfer_amount),
         }
 
-        # Idempotency: return stored response if the same key was used before.
+        # Pass the authenticated user's PK explicitly — no dynamic attribute.
+        user_id = request.user.pk
+
         if idempotency_key:
-            existing = await sync_to_async(
-                _lookup_idempotency_sync,
-                thread_sensitive=True,
-            )(
+            # Transactional idempotency: the key is claimed inside the same
+            # transaction as the financial operation.  Concurrent duplicates
+            # block until the first commits, then return the stored response.
+            result = await ProcessCollectionIdempotent()(
                 key=idempotency_key,
-                user=request.user,
+                user_id=user_id,
                 path=request.path,
                 data=request_data,
+                customer=customer,
+                cash_amount=cash_amount,
+                transfer_amount=transfer_amount,
             )
-            if existing == "mismatch":
+            if result == "mismatch":
                 return Response(
                     {
                         "detail": "Idempotency key used with a different request body.",
@@ -80,10 +84,11 @@ class CollectionView(APIView):
                     },
                     status=status.HTTP_409_CONFLICT,
                 )
-            if existing is not None:
+            if result is not None:
+                # result is an IdempotencyKey with stored response.
                 return Response(
-                    existing.response_body,
-                    status=existing.response_status,
+                    result.response_body,
+                    status=result.response_status,
                 )
 
         try:
@@ -91,75 +96,45 @@ class CollectionView(APIView):
                 customer=customer,
                 cash_amount=cash_amount,
                 transfer_amount=transfer_amount,
+                collected_by_id=user_id,
             )
         except OverpaymentError as exc:
-            log_operation("payment.collection", user=request.user.pk,
+            log_operation("payment.collection", user=user_id,
                           customer=customer.pk, result="overpayment_rejected")
-            response = Response(
+            return Response(
                 {"detail": str(exc), "code": "overpayment"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-            await self._maybe_record_idempotency(request, request_data,
-                                                  idempotency_key, response)
-            return response
         except NoConfirmableInvoicesError as exc:
-            log_operation("payment.collection", user=request.user.pk,
+            log_operation("payment.collection", user=user_id,
                           customer=customer.pk, result="no_invoices_rejected")
-            response = Response(
+            return Response(
                 {"detail": str(exc), "code": "nothing_to_collect"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-            await self._maybe_record_idempotency(request, request_data,
-                                                  idempotency_key, response)
-            return response
         except (InvalidMoney, InvalidBusinessOperation) as exc:
-            log_operation("payment.collection", user=request.user.pk,
+            log_operation("payment.collection", user=user_id,
                           customer=customer.pk, result="invalid_rejected")
-            response = Response(
+            return Response(
                 {"detail": str(exc), "code": "invalid_payment"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-            await self._maybe_record_idempotency(request, request_data,
-                                                  idempotency_key, response)
-            return response
 
         if payment is None:
-            log_operation("payment.collection", user=request.user.pk,
+            log_operation("payment.collection", user=user_id,
                           customer=customer.pk, result="noop")
-            response = Response(
+            return Response(
                 {"detail": "Zero-value collection is a no-op.",
                  "code": "noop"},
                 status=status.HTTP_200_OK,
             )
-            await self._maybe_record_idempotency(request, request_data,
-                                                  idempotency_key, response)
-            return response
 
         response_serializer = PaymentTransactionSerializer(payment)
         data = await sync_to_async(
             lambda: response_serializer.data,
             thread_sensitive=True,
         )()
-        response = Response(data, status=status.HTTP_201_CREATED)
-        await self._maybe_record_idempotency(request, request_data,
-                                              idempotency_key, response)
-        return response
-
-    async def _maybe_record_idempotency(self, request, data, key, response):
-        """Persist the idempotency record if a key was supplied."""
-        if not key:
-            return
-        await sync_to_async(
-            _record_idempotency_sync,
-            thread_sensitive=True,
-        )(
-            key=key,
-            user=request.user,
-            path=request.path,
-            data=data,
-            status_code=response.status_code,
-            body=response.data,
-        )
+        return Response(data, status=status.HTTP_201_CREATED)
 
 
 class TransactionListView(generics.ListAPIView):

@@ -107,16 +107,65 @@ def _confirm_invoice_sync(invoice_id):
 
 
 def _cancel_invoice_sync(invoice_id):
-    """Keep the transaction and lock together without an await."""
+    """Cancel an invoice, reversing stock if it was confirmed.
+
+    DRAFT -> CANCELLED: no inventory impact.
+    CONFIRMED -> CANCELLED: creates a compensating SALEABLE_RETURN movement
+    that restores stock to the sales location.  The original SALE movement
+    remains immutable.
+    """
     with transaction.atomic():
         invoice = load_invoice_for_update_sync(invoice_id)
         if invoice.status not in (Invoice.Status.DRAFT, Invoice.Status.CONFIRMED):
             raise InvalidStateTransition(
                 f"Cannot cancel an invoice in state {invoice.status}."
             )
+
+        if invoice.status == Invoice.Status.CONFIRMED:
+            _reverse_sale_movement_sync(invoice)
+
         invoice.status = Invoice.Status.CANCELLED
         invoice.save(update_fields=("status", "updated_at"))
+        log_operation(
+            "invoice.cancel",
+            user=invoice.created_by_id,
+            invoice=invoice.pk,
+            was_confirmed=invoice.status == Invoice.Status.CANCELLED,
+        )
         return invoice
+
+
+def _reverse_sale_movement_sync(invoice):
+    """Create a compensating SALEABLE_RETURN movement to restore stock.
+
+    The original SALE movement is never edited — it remains an immutable
+    ledger entry.  This function creates a separate reversal movement that
+    increases the stock balance back to the sales location.
+    """
+    source_location = sales_source_location_sync(invoice.created_by)
+    if source_location is None:
+        raise InvalidBusinessOperation(
+            "Cannot reverse sale: the invoice creator has no active sales location."
+        )
+
+    movement = StockMovement.objects.create(
+        movement_type=StockMovement.MovementType.SALEABLE_RETURN,
+        destination_location=source_location,
+        created_by=invoice.created_by,
+        reference=f"Cancel Invoice #{invoice.pk}",
+    )
+
+    for item in invoice.items.select_related("product").all():
+        StockBalanceService.increase(
+            location=source_location,
+            product=item.product,
+            quantity=item.quantity,
+        )
+        StockMovementItem.objects.create(
+            movement=movement,
+            product=item.product,
+            quantity=item.quantity,
+        )
 
 
 class ConfirmInvoice:
