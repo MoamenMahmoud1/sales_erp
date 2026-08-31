@@ -32,7 +32,7 @@ USER appuser
 # Collect static files (needed for ManifestStaticFilesStorage in prod).
 RUN DJANGO_SETTINGS_MODULE=core.settings.settings_prod python manage.py collectstatic --noinput
 
-# Gunicorn starts the ASGI application via uvicorn workers.
-# Worker count and pool sizing are environment-driven — see gunicorn.conf.py.
+# Gunicorn starts the ASGI application; the checked-in config owns worker sizing.
+# Worker count and DB pool sizing are environment-driven — see gunicorn.conf.py.
 EXPOSE 8000
-CMD ["sh", "-c", "exec gunicorn -c gunicorn.conf.py core.asgi:application -k uvicorn.workers.UvicornWorker"]
+CMD ["sh", "-c", "exec gunicorn -c gunicorn.conf.py core.asgi:application"]
