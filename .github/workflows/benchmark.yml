@@ -59,7 +59,6 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
       REDIS_URL: redis://127.0.0.1:6379/0
-      # Identical pool settings for sync and async. Two workers own separate pools.
       DB_POOL_MIN_SIZE: "2"
       DB_POOL_MAX_SIZE: "10"
       WEB_CONCURRENCY: "2"
@@ -105,63 +104,7 @@ jobs:
           done
 
       - name: Seed benchmark database
-        run: |
-          python manage.py shell <<'PY'
-          from django.contrib.auth import get_user_model
-          from customers.models import Customer
-          from inventory.models import StockBalance, StockLocation
-          from invoices.models import Invoice, InvoiceItem
-          from products.models import Product
-          from rest_framework_simplejwt.tokens import AccessToken
-
-          User = get_user_model()
-          user, _ = User.objects.get_or_create(
-              username="benchmark_user",
-              defaults={"email": "benchmark_user@example.com", "is_active": True, "is_verified": True},
-          )
-          customer, _ = Customer.objects.get_or_create(name="Benchmark Customer")
-
-          products = list(Product.objects.all()[:2000])
-          if len(products) < 2000:
-              start = len(products)
-              products.extend(Product.objects.bulk_create([
-                  Product(name=f"Benchmark Product {i:05d}", purchase_price="10.00", selling_price="15.00")
-                  for i in range(start, 2000)
-              ], batch_size=500))
-
-          location, _ = StockLocation.objects.get_or_create(
-              name="Benchmark Warehouse",
-              defaults={"location_type": StockLocation.LocationType.MAIN_WAREHOUSE},
-          )
-          StockBalance.objects.bulk_create([
-              StockBalance(location=location, product=product, quantity=100)
-              for product in products
-          ], batch_size=500, ignore_conflicts=True)
-
-          # Exercise both Product correlated subqueries with realistic rows.
-          existing = InvoiceItem.objects.count()
-          if existing < 5000:
-              invoices = Invoice.objects.bulk_create([
-                  Invoice(
-                      customer=customer,
-                      created_by=user,
-                      status=Invoice.Status.CONFIRMED if i % 2 else Invoice.Status.PAID,
-                  )
-                  for i in range(5000 - existing)
-              ], batch_size=500)
-              InvoiceItem.objects.bulk_create([
-                  InvoiceItem(
-                      invoice=invoice,
-                      product=products[i % len(products)],
-                      quantity=(i % 9) + 1,
-                      unit_price="15.00",
-                  )
-                  for i, invoice in enumerate(invoices)
-              ], batch_size=500)
-
-          with open("bench_token.txt", "w", encoding="utf-8") as f:
-              f.write(str(AccessToken.for_user(user)))
-          PY
+        run: python benchmarks/seed_benchmark_data.py
 
       - name: Analyze and inspect PostgreSQL plan
         run: |
