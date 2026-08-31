@@ -49,7 +49,6 @@ class RefreshViewTests(TestCase):
             user=self.user,
             revoked_at__isnull=True,
         ).update(created_at=timezone.now() - timedelta(days=8))
-        self.client.credentials()
         return self.client.post(
             reverse("accounts:session-verify"),
             {"current_password": self.password},
@@ -122,11 +121,13 @@ class RefreshViewTests(TestCase):
     def test_password_change_invalidates_refresh_and_revokes_session(self):
         login_response = self.login()
         self.assertEqual(login_response.status_code, status.HTTP_200_OK)
-        self.verify_session_for_sensitive_action()
-
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Bearer {login_response.data['access']}"
         )
+
+        verification_response = self.verify_session_for_sensitive_action()
+        self.assertEqual(verification_response.status_code, status.HTTP_200_OK)
+
         password_change_response = self.client.post(
             reverse("accounts:password-change"),
             {
