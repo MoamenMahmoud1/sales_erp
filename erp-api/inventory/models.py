@@ -133,12 +133,6 @@ class StockBalance(models.Model):
                 name="stock_balance_unique_location_product",
             ),
         ]
-        indexes = [
-            models.Index(
-                fields=("location", "product"),
-                name="stock_bal_loc_prod_idx",
-            ),
-        ]
 
     def __str__(self):
         return f"{self.location_id} - {self.product_id}: {self.quantity}"
