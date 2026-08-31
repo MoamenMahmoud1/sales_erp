@@ -8,29 +8,18 @@ from authsession.services import InvalidAuthSession, get_current_auth_session
 
 
 class CurrentAuthSessionPermission(BasePermission):
-    """Verify the stateful auth session for the authenticated user.
-
-    The access token is validated statelessly by the JWT authentication class.
-    This permission performs a SEPARATE, stateful check against the
-    ``authsession`` system, which requires the real User object (for password
-    hash verification).  Fetching the user here is explicit business logic for
-    session management — it is NOT part of access-token authentication.
-    """
+    """Verify the stateful auth session using the JWT identity claim."""
 
     def has_permission(self, request, view):
         refresh_token = request.COOKIES.get("refresh_token")
         device_id = get_device_id(request)
-        if not refresh_token or device_id is None:
+        user_id = request.user.pk
+        if not refresh_token or device_id is None or user_id is None:
             raise AuthenticationFailed("Invalid authentication session.")
-
-        # The stateless JWT ``TokenUser`` lacks the password hash needed by the
-        # authsession verification.  Fetch the real user explicitly — this is a
-        # business lookup for the stateful session system, not a JWT auth check.
-        user = self._resolve_user(request)
 
         try:
             auth_session = get_current_auth_session(
-                user=user,
+                user_id=user_id,
                 access_token=request.auth,
                 refresh_token=refresh_token,
                 device_id=device_id,
@@ -42,25 +31,6 @@ class CurrentAuthSessionPermission(BasePermission):
 
         request.auth_session = auth_session
         return True
-
-    def _resolve_user(self, request):
-        """Return the database User needed for stateful session verification.
-
-        ``request.user`` is the stateless JWT ``TokenUser``.  The authsession
-        service needs the real user's password hash, so we fetch it here.
-        """
-        from django.contrib.auth import get_user_model
-
-        User = get_user_model()
-        user_pk = request.user.pk
-        if user_pk is None:
-            raise AuthenticationFailed("Invalid authentication session.")
-        try:
-            return User.objects.get(pk=user_pk)
-        except User.DoesNotExist as error:
-            raise AuthenticationFailed(
-                "Invalid authentication session."
-            ) from error
 
 
 class VerifiedAuthSessionPermission(CurrentAuthSessionPermission):
