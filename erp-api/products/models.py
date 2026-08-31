@@ -24,10 +24,7 @@ class Product(models.Model):
     class Meta:
         ordering = ("name",)
         indexes = [
-            models.Index(
-                fields=("name", "pk"),
-                name="products_product_name_pk_idx",
-            ),
+            models.Index(fields=("name",), name="products_product_name_idx"),
         ]
         constraints = [
             models.CheckConstraint(
@@ -75,9 +72,7 @@ class CartonPricing(models.Model):
     name = models.CharField(max_length=200)
     units_per_carton = models.PositiveIntegerField(validators=[MinValueValidator(1)])
     carton_price = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        validators=[MinValueValidator(Decimal("0"))],
+        max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0"))]
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
