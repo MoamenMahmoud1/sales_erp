@@ -142,8 +142,8 @@ jobs:
             --workers 2 \
             --worker-class uvicorn_worker.UvicornWorker \
             --timeout 30 \
-            --access-logfile - \
-            --error-logfile - \
+            --access-logfile /dev/null \
+            --error-logfile /dev/null \
             --log-level warning &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" || true' EXIT
@@ -156,8 +156,8 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null
 
-          BENCH_REQUESTS=300 \
-          BENCH_WARMUP=30 \
+          BENCH_REQUESTS=500 \
+          BENCH_WARMUP=50 \
           BENCH_CONCURRENCIES="1,10,25,50,100" \
           TOKEN_FILE="bench_tokens.json" \
           python ../benchmarks/http_benchmark.py
@@ -166,7 +166,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backend-http-benchmark
-          path: |
-            erp-api/benchmark-results.json
-            erp-api/bench_tokens.json
+          path: erp-api/benchmark-results.json
           retention-days: 7
