@@ -8,6 +8,10 @@ on:
       - "erp-api/core/settings/settings_bench.py"
       - "erp-api/products/api/views.py"
       - "erp-api/products/api/serializers.py"
+      - "erp-api/products/models.py"
+      - "erp-api/inventory/models.py"
+      - "erp-api/invoices/models.py"
+      - "erp-api/**/migrations/**"
       - ".github/workflows/benchmark.yml"
   workflow_dispatch:
 
@@ -18,6 +22,7 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: erp-api
@@ -60,12 +65,14 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
       REDIS_URL: redis://127.0.0.1:6379/0
+      # Same database-pool configuration for both server modes. Each Gunicorn
+      # worker owns a pool, so 2 workers x 10 = at most 20 DB connections.
       DB_POOL_MIN_SIZE: "2"
-      DB_POOL_MAX_SIZE: "5"
+      DB_POOL_MAX_SIZE: "10"
       WEB_CONCURRENCY: "2"
       TRUST_PROXY_HEADERS: "false"
       BENCH_REQUESTS: "1000"
-      BENCH_WARMUP: "100"
+      BENCH_WARMUP: "200"
       BENCH_TIMEOUT: "30"
 
     steps:
@@ -88,11 +95,34 @@ jobs:
       - name: Migrate
         run: python manage.py migrate --noinput
 
+      - name: Configure benchmark PostgreSQL
+        run: |
+          set -euo pipefail
+          PG_CONTAINER="$(docker ps --filter 'ancestor=postgres:16' --format '{{.ID}}' | head -n1)"
+          test -n "$PG_CONTAINER"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_buffers='512MB';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET effective_cache_size='2GB';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET work_mem='16MB';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET random_page_cost='1.1';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET effective_io_concurrency='200';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET jit='off';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET track_io_timing='on';"
+          docker restart "$PG_CONTAINER"
+          for attempt in $(seq 1 60); do
+            if PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c 'SELECT 1' >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c 'SELECT current_setting(\'shared_buffers\'), current_setting(\'effective_cache_size\'), current_setting(\'work_mem\'), current_setting(\'random_page_cost\'), current_setting(\'effective_io_concurrency\'), current_setting(\'jit\'), current_setting(\'track_io_timing\');'
+
       - name: Seed benchmark database
         run: |
           python manage.py shell <<'PY'
           from django.contrib.auth import get_user_model
           from inventory.models import StockBalance, StockLocation
+          from invoices.models import Invoice, InvoiceItem
+          from customers.models import Customer
           from products.models import Product
           from rest_framework_simplejwt.tokens import AccessToken
 
@@ -105,6 +135,7 @@ jobs:
                   "is_verified": True,
               },
           )
+          customer, _ = Customer.objects.get_or_create(name="Benchmark Customer")
 
           products = list(Product.objects.all()[:2000])
           if len(products) < 2000:
@@ -136,9 +167,44 @@ jobs:
               ignore_conflicts=True,
           )
 
+          # Populate the sales side of the Product endpoint too. The endpoint
+          # computes sold_quantity through a correlated subquery, so an empty
+          # invoice table would under-test half of the real SQL workload.
+          existing_items = InvoiceItem.objects.count()
+          if existing_items < 5000:
+              needed = 5000 - existing_items
+              invoices = Invoice.objects.bulk_create(
+                  [
+                      Invoice(
+                          customer=customer,
+                          created_by=user,
+                          status=(Invoice.Status.CONFIRMED if index % 2 else Invoice.Status.PAID),
+                      )
+                      for index in range(needed)
+                  ],
+                  batch_size=500,
+              )
+              InvoiceItem.objects.bulk_create(
+                  [
+                      InvoiceItem(
+                          invoice=invoice,
+                          product=products[index % len(products)],
+                          quantity=(index % 9) + 1,
+                          unit_price="15.00",
+                      )
+                      for index, invoice in enumerate(invoices)
+                  ],
+                  batch_size=500,
+              )
+
           with open("bench_token.txt", "w", encoding="utf-8") as output:
               output.write(str(AccessToken.for_user(user)))
           PY
+
+      - name: Refresh PostgreSQL statistics and inspect query plan
+        run: |
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c 'ANALYZE;'
+          python benchmarks/postgres_diagnostics.py | tee benchmark-results/postgres-diagnostics.json
 
       - name: Record runner and dependency versions
         run: |
@@ -149,11 +215,12 @@ jobs:
             echo '```text'
             date -u
             echo "CPU logical: $(nproc)"
-            lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket' || true
+            lscpu | grep -E 'Model name|CPU\\(s\\)|Thread|Core|Socket' || true
             free -h
             python --version
             python -c 'import django; print("Django", django.get_version())'
             python -c 'import httpx; print("httpx", httpx.__version__)'
+            PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SHOW server_version; SHOW max_connections; SHOW shared_buffers; SHOW effective_cache_size; SHOW work_mem; SHOW random_page_cost; SHOW effective_io_concurrency; SHOW jit; SHOW track_io_timing;"
             echo '```'
           } > benchmark-results/environment.md
 
@@ -212,14 +279,12 @@ jobs:
             echo "===== MODE: ${mode} ====="
             start_server "$mode"
 
-            for concurrency in 1 10 25 50 100; do
+            for concurrency in 1 5 10 25 50 100; do
               export BENCH_URL="${BASE}${ENDPOINT}"
               export BENCH_TOKEN="$TOKEN"
               export BENCH_CONCURRENCY="$concurrency"
               output="benchmark-results/${mode}-c${concurrency}.jsonl"
               rm -f "$output"
-
-              # Warm-up and measurement use the same client and endpoint.
               python benchmarks/http_benchmark.py | tee "$output"
             done
 
@@ -247,10 +312,9 @@ jobs:
 
           rows.sort(key=lambda x: (x["mode"], x["concurrency"]))
           cols = ["mode", "concurrency", "requests", "successful", "failed", "timeouts", "wall_time_sec", "rps", "min_ms", "mean_ms", "p50_ms", "p75_ms", "p90_ms", "p95_ms", "p99_ms", "max_ms", "stddev_ms", "error_rate_pct"]
-
           with open("benchmark-results/report.md", "w", encoding="utf-8") as f:
               f.write("# Sync vs Async HTTP Benchmark\n\n")
-              f.write("Same `/api/v1/products/` endpoint, same DB/cache services, same 2 workers, same client, 100 warm-up requests, then 1000 measured requests per concurrency. `sync` means Gunicorn WSGI sync workers; `async` means Gunicorn ASGI workers using UvicornWorker.\n\n")
+              f.write("Same Product API, same PostgreSQL instance, same seeded data, same 2 workers, same DB pool per worker, same client, 200 warm-up requests, then 1000 measured requests at each concurrency. The benchmark is an end-to-end deployment comparison, not a claim that async is universally faster.\n\n")
               f.write("| " + " | ".join(cols) + " |\n")
               f.write("|" + "---|" * len(cols) + "\n")
               for row in rows:
