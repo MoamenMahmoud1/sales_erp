@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      - "benchmarks/**"
       - ".github/workflows/benchmark-600.yml"
+      - "erp-api/benchmarks/fixed_600.py"
+      - "erp-api/core/settings/settings_bench.py"
+      - "erp-api/products/api/views.py"
+      - "erp-api/products/api/serializers.py"
   workflow_dispatch:
 
 concurrency:
@@ -73,18 +78,8 @@ jobs:
           cache: pip
           cache-dependency-path: erp-api/requirements.txt
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
-
-      - name: Install Bombardier
-        run: |
-          go install github.com/codesenberg/bombardier@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Migrate
         run: python manage.py migrate --noinput
@@ -137,6 +132,14 @@ jobs:
               output.write(str(AccessToken.for_user(user)))
           PY
 
+      - name: Record runner capacity
+        run: |
+          echo "=== CPU ==="
+          nproc
+          lscpu | grep -E 'Model name|CPU\\(s\\)|Thread|Core|Socket' || true
+          echo "=== MEMORY ==="
+          free -h
+
       - name: Start server
         run: |
           set -euo pipefail
@@ -163,48 +166,18 @@ jobs:
           set -euo pipefail
           TOKEN="$(cat bench_token.txt)"
           URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
-
-          echo "=============================================================="
-          echo "FIXED WORKLOAD: exactly 600 successful HTTP attempts"
-          echo "DEADLINE: 30 seconds per mode"
-          echo "ENDPOINT: $URL"
-          echo "=============================================================="
-
-          for mode in closed open; do
-            if [[ "$mode" == "closed" ]]; then
-              concurrency=1
-              description="GATE CLOSED — next request starts only after the previous one exits"
-            else
-              concurrency=600
-              description="GATE OPEN — up to 600 requests may be in flight together"
-            fi
-
-            echo ""
-            echo "===== $description ====="
-            echo "requests=600 concurrency=$concurrency deadline=30s"
-
-            START_NS=$(date +%s%N)
-            if timeout 30s bombardier \
-              --requests=600 \
-              --connections="$concurrency" \
-              --timeout=30s \
-              --latencies \
-              --http1 \
-              --header="Authorization: Bearer ${TOKEN}" \
-              "$URL"; then
-              END_NS=$(date +%s%N)
-              ELAPSED_NS=$((END_NS - START_NS))
-              python - <<PY
-          elapsed = ${ELAPSED_NS} / 1_000_000_000
-          print(f"wall_clock_seconds={elapsed:.3f}")
-          print(f"wall_clock_ms_per_request={elapsed * 1000 / 600:.3f}")
-          PY
-            else
-              status=$?
-              echo "BENCHMARK_FAILED mode=$mode status=$status"
-              exit "$status"
-            fi
-          done
+          python benchmarks/fixed_600.py \
+            --url "$URL" \
+            --token "$TOKEN" \
+            --requests 600 \
+            --concurrency 1 \
+            --deadline 30
+          python benchmarks/fixed_600.py \
+            --url "$URL" \
+            --token "$TOKEN" \
+            --requests 600 \
+            --concurrency 600 \
+            --deadline 30
 
           echo "=== SERVER ERRORS ==="
           if [[ -s /tmp/gunicorn-error.log ]]; then
