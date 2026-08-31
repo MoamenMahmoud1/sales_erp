@@ -14,8 +14,8 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="product",
             index=models.Index(
-                fields=("name", "pk"),
-                name="products_product_name_pk_idx",
+                fields=("name",),
+                name="products_product_name_idx",
             ),
         ),
     ]
