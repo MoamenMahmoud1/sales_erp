@@ -7,15 +7,17 @@ from products.models import CartonPricing, Product
 class ProductSerializer(serializers.ModelSerializer):
     sold_quantity = serializers.IntegerField(
         read_only=True,
+        source="_sold_quantity",
     )
 
     total_stock = serializers.IntegerField(
         read_only=True,
+        source="_total_stock",
     )
 
     stock_quantity = serializers.IntegerField(
         read_only=True,
-        source="total_stock",
+        source="_total_stock",
         help_text=(
             "DEPRECATED derived alias of total_stock. Computed from "
             "inventory.StockBalance — NOT an independently stored value."
@@ -106,8 +108,8 @@ class CartonPricingSerializer(serializers.ModelSerializer):
 
         return instance
 
-    async def aupdate(self, instance, validated_data):
+    async def aupdate(self, validated_data):
         return await sync_to_async(
             self.update,
             thread_sensitive=True,
-        )(instance, validated_data)
+        )(validated_data)
