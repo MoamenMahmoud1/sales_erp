@@ -39,13 +39,7 @@ class AuthSessionTooNew(Exception):
 
 
 def _set_authorization_claims(token, user):
-    """Populate only the authorization claims needed by stateless requests.
-
-    These claims are computed while creating/rotating tokens, where database
-    access is acceptable. Normal access-token authentication never queries the
-    database. The claims are deliberately limited to authorization state; no
-    password-derived value or session state is placed in the access token.
-    """
+    """Populate only the authorization claims needed by stateless requests."""
     token["is_staff"] = bool(user.is_staff)
     token["is_superuser"] = bool(user.is_superuser)
     token["role_level"] = Role.level_for_user(user)
@@ -69,22 +63,22 @@ def _presented_session(refresh_token, access_token):
     return refresh, refresh_session_id, refresh_jti, refresh_user_id
 
 
-def _session_matches(*, auth_session, refresh_jti, user, device_id):
+def _session_matches(*, auth_session, refresh_jti, user_id, device_id):
     return (
         auth_session.revoked_at is None
         and auth_session.expires_at > timezone.now()
-        and auth_session.user_id == user.pk
+        and auth_session.user_id == user_id
         and auth_session.device_id == device_id
         and auth_session.current_refresh_jti == refresh_jti
     )
 
 
-def get_current_auth_session(*, user, access_token, refresh_token, device_id):
-    refresh, session_id, refresh_jti, token_user_id = _presented_session(
+def get_current_auth_session(*, user_id, access_token, refresh_token, device_id):
+    _refresh, session_id, refresh_jti, token_user_id = _presented_session(
         refresh_token,
         access_token,
     )
-    if str(user.pk) != token_user_id:
+    if str(user_id) != token_user_id:
         raise InvalidAuthSession
 
     try:
@@ -95,7 +89,7 @@ def get_current_auth_session(*, user, access_token, refresh_token, device_id):
     if not _session_matches(
         auth_session=auth_session,
         refresh_jti=refresh_jti,
-        user=user,
+        user_id=user_id,
         device_id=device_id,
     ):
         raise InvalidAuthSession
@@ -110,7 +104,7 @@ def verify_current_auth_session(
     device_id,
     password,
 ):
-    refresh, session_id, refresh_jti, token_user_id = _presented_session(
+    _refresh, session_id, refresh_jti, token_user_id = _presented_session(
         refresh_token,
         access_token,
     )
@@ -127,7 +121,7 @@ def verify_current_auth_session(
         if not _session_matches(
             auth_session=auth_session,
             refresh_jti=refresh_jti,
-            user=user,
+            user_id=user.pk,
             device_id=device_id,
         ):
             raise InvalidAuthSession
@@ -164,14 +158,14 @@ def start_auth_session(*, user, client_context: ClientContext):
         )
 
         AuthSession.objects.filter(
-            user=locked_user,
+            user_id=locked_user.pk,
             device_id=client_context.device_id,
             revoked_at__isnull=True,
         ).update(revoked_at=timezone.now())
 
         AuthSession.objects.create(
             id=session_id,
-            user=locked_user,
+            user_id=locked_user.pk,
             device_id=client_context.device_id,
             device_name=client_context.device_name,
             user_agent=client_context.user_agent,
@@ -269,7 +263,7 @@ def refresh_auth_session(*, refresh_token, client_context: ClientContext):
     )
 
 
-def revoke_auth_session(*, user, refresh_token, device_id):
+def revoke_auth_session(*, user_id, refresh_token, device_id):
     try:
         refresh = RefreshToken(refresh_token)
         session_id = uuid.UUID(refresh["sid"])
@@ -277,19 +271,19 @@ def revoke_auth_session(*, user, refresh_token, device_id):
     except (KeyError, TypeError, ValueError, TokenError):
         return
 
-    if str(user.pk) != token_user_id:
+    if str(user_id) != token_user_id:
         return
 
     AuthSession.objects.filter(
         id=session_id,
-        user=user,
+        user_id=user_id,
         device_id=device_id,
         revoked_at__isnull=True,
     ).update(revoked_at=timezone.now())
 
 
-def revoke_all_sessions(user):
+def revoke_all_sessions(*, user_id):
     return AuthSession.objects.filter(
-        user=user,
+        user_id=user_id,
         revoked_at__isnull=True,
     ).update(revoked_at=timezone.now())
