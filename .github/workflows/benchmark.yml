@@ -6,6 +6,8 @@ on:
     paths:
       - "benchmarks/**"
       - "erp-api/core/settings/settings_bench.py"
+      - "erp-api/products/api/views.py"
+      - "erp-api/products/api/serializers.py"
       - ".github/workflows/benchmark.yml"
   workflow_dispatch:
 
