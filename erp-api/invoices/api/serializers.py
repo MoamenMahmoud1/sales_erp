@@ -60,6 +60,18 @@ class InvoiceSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    paid_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        read_only=True,
+    )
+
+    outstanding_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        read_only=True,
+    )
+
     class Meta:
         model = Invoice
         fields = (
@@ -71,6 +83,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "status",
             "subtotal",
             "total",
+            "paid_amount",
+            "outstanding_amount",
             "sold_quantity",
             "items",
             "created_at",
@@ -83,6 +97,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "status",
             "subtotal",
             "total",
+            "paid_amount",
+            "outstanding_amount",
             "sold_quantity",
             "created_at",
             "updated_at",
@@ -123,6 +139,18 @@ class InvoiceSummarySerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    paid_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        read_only=True,
+    )
+
+    outstanding_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        read_only=True,
+    )
+
     class Meta:
         model = Invoice
 
@@ -134,6 +162,8 @@ class InvoiceSummarySerializer(serializers.ModelSerializer):
             "subtotal",
             "coupon_discount",
             "total",
+            "paid_amount",
+            "outstanding_amount",
             "sold_quantity",
             "created_at",
             "updated_at",

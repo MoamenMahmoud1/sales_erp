@@ -1,5 +1,7 @@
 # Phase 5 — Payment / Collection Domain
 
+## Status: IMPLEMENTED
+
 ## Objective
 Replace the monolithic one-to-one `payments.Payment` with a real collection
 domain: `PaymentTransaction` + `PaymentAllocation` + `ProcessCollection`.
@@ -17,16 +19,17 @@ contract.
 - A zero-amount collection is a no-op (no transaction persisted).
 - An invoice becomes PAID when its cumulative allocations reach its total.
 
-## New models (payments app)
+## Models (payments app)
 - `PaymentTransaction` — customer FK, cash_amount, transfer_amount, created_at.
 - `PaymentAllocation` — transaction FK (CASCADE), invoice FK (PROTECT),
   cash_amount, transfer_amount; unique (transaction, invoice).
+- `IdempotencyKey` — DB-backed idempotency for the collection endpoint.
 
 The old one-to-one `Payment` model is removed; the `"payments"` reverse name
 on Invoice is replaced by `payment_allocations`.
 
 ## Service (`payments/services.py`)
-`ProcessCollection(customer_id, cash_amount, transfer_amount)`:
+`ProcessCollection(customer, cash_amount, transfer_amount)`:
 1. Validate non-negative cash/transfer; reject overpayment against the
    customer's confirmed-invoice outstanding (computed from totals minus
    existing allocations).
@@ -40,7 +43,7 @@ on Invoice is replaced by `payment_allocations`.
 ## API
 - `POST /api/v1/payments/collections/` — submit `{customer, cash_amount,
   transfer_amount}`; backend computes the allocation (client cannot decide
-  the split).
+  the split). Supports `Idempotency-Key` header for safe retries.
 - `GET /api/v1/payments/transactions/` — list transactions (read-only view).
 - Old `payments` router removed.
 
@@ -51,11 +54,19 @@ on Invoice is replaced by `payment_allocations`.
 - Atomic via `transaction.atomic()`: transaction, allocations, and the
   PAID transitions commit as one unit.
 
+## Idempotency
+- DB-backed (`IdempotencyKey` model) — never Redis-only.
+- Keys scoped to (user, path, request_body_hash).
+- Repeated requests return the stored response.
+- Key reuse with different body returns 409 `idempotency_conflict`.
+
 ## Files
-- Create: `payments/services.py`
-- Rewrite: `payments/models.py`, `payments/api/serializers.py`,
-  `payments/api/views.py`, `payments/urls.py`, `payments/admin.py`
-- Modify: `invoices/models.py` (paid_amount/outstanding + drop old reverse),
-  `invoices/api/views.py` (remove `payments` prefetch)
-- Migration: `payments/0003` (remove Payment, add Transaction + Allocation)
-- Tests: `payments/tests.py`
+- `payments/services.py` — ProcessCollection + idempotency helpers
+- `payments/models.py` — PaymentTransaction, PaymentAllocation, IdempotencyKey
+- `payments/api/serializers.py` — CollectionSerializer, PaymentTransactionSerializer
+- `payments/api/views.py` — CollectionView, TransactionListView
+- `payments/urls.py` — collections/ and transactions/ routes
+- `payments/permissions.py` — CollectionPermission, TransactionReadPermission
+- `payments/admin.py` — registered models
+- `payments/tests.py` — comprehensive test suite
+- Migration: `payments/0003` through `payments/0005`

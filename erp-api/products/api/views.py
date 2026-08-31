@@ -1,5 +1,5 @@
 from adrf import viewsets
-from django.db.models import Sum, Value
+from django.db.models import OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from rest_framework import filters
 
@@ -32,7 +32,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         "name",
         "purchase_price",
         "selling_price",
-        "stock_quantity",
         "created_at",
         "updated_at",
     )
@@ -43,11 +42,43 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
 
     def get_queryset(self):
-        return Product.objects.annotate(
-            _sold_quantity=Coalesce(
-                Sum("invoice_items__quantity"),
-                Value(0),
-            ),
+        # Aggregate stock and sold quantities with subqueries so the two sums do
+        # not multiply each other across joined rows (a well-known Django join
+        # pitfall). Both are read-only — the authoritative stock state lives in
+        # inventory.StockBalance.
+        sold_subquery = (
+            self._confirmed_invoice_item_qty()
+        )
+        stock_subquery = (
+            Product.objects.filter(pk=OuterRef("pk"))
+            .values("pk")
+            .annotate(total=Sum("stock_balances__quantity"))
+            .values("total")
+        )
+        return (
+            Product.objects.annotate(
+                _total_stock=Coalesce(Subquery(stock_subquery), Value(0)),
+                _sold_quantity=Coalesce(Subquery(sold_subquery), Value(0)),
+            )
+        )
+
+    @staticmethod
+    def _confirmed_invoice_item_qty():
+        # Quantity sold on confirmed/paid invoices only. Draft and cancelled
+        # invoices are NOT sales.
+        from invoices.models import Invoice, InvoiceItem
+
+        return (
+            InvoiceItem.objects.filter(
+                product=OuterRef("pk"),
+                invoice__status__in=(
+                    Invoice.Status.CONFIRMED,
+                    Invoice.Status.PAID,
+                ),
+            )
+            .values("product")
+            .annotate(total=Sum("quantity"))
+            .values("total")
         )
 
 

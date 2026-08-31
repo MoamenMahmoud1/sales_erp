@@ -55,6 +55,11 @@ class Invoice(models.Model):
                 name="invoice_cust_created_idx",
             )
         ]
+        permissions = [
+            ("confirm_invoice", "Can confirm an invoice"),
+            ("cancel_invoice", "Can cancel an invoice"),
+            ("apply_invoice_coupon", "Can apply a coupon to an invoice"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=Q(coupon_discount__gte=Decimal("0")),
@@ -77,6 +82,28 @@ class Invoice(models.Model):
     @property
     def sold_quantity(self):
         return sum(item.quantity for item in self.items.all())
+
+    @property
+    def paid_amount(self):
+        """Authoritative paid amount = sum of payment allocations.
+
+        Derived from ``PaymentAllocation`` rows — never independently editable.
+        """
+        from common.money import quantize_money
+
+        return quantize_money(
+            sum(
+                (allocation.total_amount for allocation in self.payment_allocations.all()),
+                Decimal("0"),
+            )
+        )
+
+    @property
+    def outstanding_amount(self):
+        """Remaining balance = total - paid_amount (no silent negative clamp)."""
+        from common.money import quantize_money
+
+        return quantize_money(self.total - self.paid_amount)
 
 
 class InvoiceItem(models.Model):

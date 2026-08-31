@@ -10,11 +10,18 @@ from rest_framework.test import force_authenticate
 
 from common.exceptions import (
     CouponInvalid,
+    InsufficientStock,
     InvalidDiscount,
     InvalidStateTransition,
 )
 from coupons.models import Coupon
 from customers.models import Customer
+from inventory.models import (
+    StockBalance,
+    StockLocation,
+    StockMovement,
+    StockMovementItem,
+)
 from invoices.models import Invoice, InvoiceItem
 from invoices.api.views import InvoiceViewSet
 from invoices.services import (
@@ -43,7 +50,16 @@ class BaseInvoiceTest(TestCase):
             name="Widget",
             purchase_price=Decimal("60.00"),
             selling_price=Decimal("100.00"),
-            stock_quantity=50,
+        )
+        self.vehicle = StockLocation.objects.create(
+            name="Van 01",
+            location_type=StockLocation.LocationType.SALES_VEHICLE,
+            employee=self.staff,
+        )
+        StockBalance.objects.create(
+            location=self.vehicle,
+            product=self.product,
+            quantity=50,
         )
 
     async def call(self, service, **kwargs):
@@ -89,7 +105,6 @@ class InvoiceCreationTests(BaseInvoiceTest):
             name="Other",
             purchase_price=Decimal("15.00"),
             selling_price=Decimal("25.50"),
-            stock_quantity=10,
         )
         invoice = await self.call(
             CreateInvoice(),
@@ -242,6 +257,95 @@ class InvoiceCouponTests(BaseInvoiceTest):
             await self.call(ApplyCoupon(), invoice_id=invoice.pk, code=coupon.code)
 
 
+class InvoiceConfirmationInventoryTests(BaseInvoiceTest):
+    async def test_confirmation_decreases_vehicle_stock_and_creates_sale_movement(
+        self,
+    ):
+        invoice = await self.run_sync(self.make_invoice, quantity=20)
+
+        await self.call(ConfirmInvoice(), invoice_id=invoice.pk)
+
+        balance = await StockBalance.objects.filter(
+            location=self.vehicle,
+            product=self.product,
+        ).aget()
+        self.assertEqual(balance.quantity, 30)
+
+        movement = await StockMovement.objects.filter(
+            movement_type=StockMovement.MovementType.SALE,
+            source_location=self.vehicle,
+        ).aget()
+        self.assertEqual(movement.reference, f"Invoice #{invoice.pk}")
+
+        item = await StockMovementItem.objects.filter(
+            movement=movement,
+            product=self.product,
+        ).aget()
+        self.assertEqual(item.quantity, 20)
+
+    async def test_confirmation_rejects_insufficient_stock_and_rolls_back(self):
+        invoice = await self.run_sync(self.make_invoice, quantity=500)
+
+        with self.assertRaises(InsufficientStock):
+            await self.call(ConfirmInvoice(), invoice_id=invoice.pk)
+
+        status = (await Invoice.objects.aget(pk=invoice.pk)).status
+        self.assertEqual(status, Invoice.Status.DRAFT)
+        self.assertFalse(
+            await StockBalance.objects.filter(
+                location=self.vehicle,
+                product=self.product,
+                quantity__lt=50,
+            ).aexists()
+        )
+        self.assertFalse(await StockMovement.objects.aexists())
+        self.assertFalse(await StockMovementItem.objects.aexists())
+
+    async def test_sale_movement_and_stock_roll_back_together(self):
+        second = await self.run_sync(
+            Product.objects.create,
+            name="Second Product",
+            purchase_price=Decimal("10.00"),
+            selling_price=Decimal("20.00"),
+        )
+
+        def _make_multi_invoice():
+            inv = Invoice.objects.create(
+                customer=self.customer,
+                created_by=self.staff,
+            )
+            InvoiceItem.objects.create(
+                invoice=inv,
+                product=self.product,
+                quantity=5,
+                unit_price=self.product.selling_price,
+            )
+            InvoiceItem.objects.create(
+                invoice=inv,
+                product=second,
+                quantity=3,
+                unit_price=second.selling_price,
+            )
+            return inv
+
+        # First product has stock, second does not — confirmation must roll back all.
+        invoice = await self.run_sync(_make_multi_invoice)
+
+        with self.assertRaises(InsufficientStock):
+            await self.call(ConfirmInvoice(), invoice_id=invoice.pk)
+
+        first_balance = await StockBalance.objects.filter(
+            location=self.vehicle,
+            product=self.product,
+        ).aget()
+        self.assertEqual(first_balance.quantity, 50)
+        self.assertFalse(await StockMovement.objects.aexists())
+        self.assertEqual(
+            (await Invoice.objects.aget(pk=invoice.pk)).status,
+            Invoice.Status.DRAFT,
+        )
+
+
 class InvoiceAPITests(TransactionTestCase):
     def setUp(self):
         User = get_user_model()
@@ -258,7 +362,16 @@ class InvoiceAPITests(TransactionTestCase):
             name="Gadget",
             purchase_price=Decimal("40.00"),
             selling_price=Decimal("80.00"),
-            stock_quantity=30,
+        )
+        self.vehicle = StockLocation.objects.create(
+            name="Van 02",
+            location_type=StockLocation.LocationType.SALES_VEHICLE,
+            employee=self.staff,
+        )
+        StockBalance.objects.create(
+            location=self.vehicle,
+            product=self.product,
+            quantity=30,
         )
         self.coupon = Coupon.objects.create(
             code="SAVE",

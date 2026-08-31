@@ -2,7 +2,12 @@ from decimal import Decimal
 
 from django.core.validators import MinValueValidator
 from django.db import models
-from django.db.models import Q
+from django.db.models import Q, Sum
+
+
+# Business statuses that represent a real, completed SALE. Draft and cancelled
+# invoices are NOT sales and must never contribute to product sold quantities.
+_INVOICE_SALE_STATUSES = ("confirmed", "paid")
 
 
 class Product(models.Model):
@@ -24,10 +29,6 @@ class Product(models.Model):
         validators=[
             MinValueValidator(Decimal("0")),
         ],
-    )
-
-    stock_quantity = models.PositiveIntegerField(
-        default=0,
     )
 
     created_at = models.DateTimeField(
@@ -64,22 +65,45 @@ class Product(models.Model):
         ]
 
     @property
+    def total_stock(self):
+        """Aggregated current stock across every StockLocation.
+
+        ``inventory.StockBalance`` is the SINGLE authoritative current-stock
+        state — this is computed by aggregating balances, never a stored field.
+        """
+        annotated = getattr(self, "_total_stock", None)
+        if annotated is not None:
+            return annotated
+        return (
+            self.stock_balances.aggregate(total=Sum("quantity"))["total"] or 0
+        )
+
+    @property
+    def stock_quantity(self):
+        """DEPRECATED derived alias of ``total_stock``.
+
+        Retained only so existing API consumers keep receiving a ``stock_quantity``
+        key. It is NOT authoritative — it is computed from StockBalance and must
+        never be written directly.
+        """
+        return self.total_stock
+
+    @property
     def sold_quantity(self):
+        """Quantity sold on confirmed/paid invoices only.
+
+        Draft and cancelled invoices are NOT sales and do not count. Prefer the
+        queryset annotation ``_sold_quantity`` for list/detail endpoints to avoid
+        per-row queries.
+        """
         if hasattr(self, "_sold_quantity"):
             return self._sold_quantity or 0
 
         return (
-            self.invoice_items.aggregate(
-                total=models.Sum("quantity"),
-            )["total"]
+            self.invoice_items.filter(
+                invoice__status__in=_INVOICE_SALE_STATUSES,
+            ).aggregate(total=Sum("quantity"))["total"]
             or 0
-        )
-
-    @property
-    def remaining_quantity(self):
-        return max(
-            0,
-            self.stock_quantity - self.sold_quantity,
         )
 
     def __str__(self):

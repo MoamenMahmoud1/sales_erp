@@ -31,6 +31,10 @@ class InvalidStateTransition(DomainError):
     """Raised when an object cannot move between two states."""
 
 
+class InsufficientStock(DomainError):
+    """Raised when an inventory operation needs more stock than is available."""
+
+
 class CouponInvalid(DomainError):
     """Raised when a coupon cannot be applied (missing, inactive, expired,
     below minimum, etc.)."""

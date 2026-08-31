@@ -1,5 +1,7 @@
 # Invoice Domain & Lifecycle
 
+## Status: IMPLEMENTED (including inventory integration and PAID transition)
+
 ## Scope
 
 The `invoices` app is the authoritative owner of invoice financial state. It
@@ -12,21 +14,39 @@ directly.
 
 ```
 DRAFT
-  ├── CONFIRMED   (ConfirmInvoice)
+  ├── CONFIRMED   (ConfirmInvoice — also decreases stock via SALE movement)
   └── CANCELLED   (CancelInvoice)
 
 CONFIRMED
   ├── CANCELLED   (CancelInvoice)
-  └── PAID        (reserved — set by the future payments domain, NOT by the
-                   invoice API)
+  └── PAID        (ProcessCollection — payment domain transitions when cumulative
+                   allocations reach invoice.total)
 ```
 
 - New invoices start `DRAFT`.
 - Transitions happen ONLY through the explicit business operations. There is
   no arbitrary `PATCH status`.
-- `CANCELLED` and `PAID` are terminal from the invoice API's perspective.
-- `PAID` is intentionally not reachable from the invoice domain; the payment
-  domain will transition `CONFIRMED -> PAID` in a later phase.
+- `CANCELLED` and `PAID` are terminal.
+- `PAID` is owned by the payment domain: `ProcessCollection` transitions
+  `CONFIRMED -> PAID` when cumulative allocations reach `invoice.total`.
+
+## Inventory integration (ConfirmInvoice)
+
+When a DRAFT invoice is confirmed:
+
+1. Lock the invoice (`select_for_update`).
+2. Verify it is still DRAFT.
+3. Resolve the source location — the active `SALES_VEHICLE` location bound to
+   `invoice.created_by`.
+4. Decrease `StockBalance` for each line item from that location.
+5. Create a `SALE` `StockMovement` with `StockMovementItem` rows.
+6. Transition the invoice to `CONFIRMED`.
+
+All steps run inside one `transaction.atomic()`. Any failure rolls back
+stock, movement, and status together.
+
+The source location is NOT configurable by the client. It is derived from the
+employee/sales-vehicle relationship already modeled in `StockLocation`.
 
 ## Authoritative calculation (`invoices/calculator.py`)
 
@@ -82,6 +102,17 @@ with `select_for_update()`, then re-check the current state. The state guard
 (together with row locking on PostgreSQL, DB-level serialization on SQLite)
 prevents two operators from confirming/cancelling the same invoice
 simultaneously.
+
+## Paid / outstanding (derived, never client-written)
+
+```python
+paid_amount = Sum("payment_allocations__cash_amount")
+               + Sum("payment_allocations__transfer_amount")
+outstanding_amount = total - paid_amount
+```
+
+These are derived from authoritative `PaymentAllocation` rows. The client
+cannot write them. There is no independently editable balance column.
 
 ## Money
 

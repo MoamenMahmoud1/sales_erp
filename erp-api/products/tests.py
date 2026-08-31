@@ -34,7 +34,6 @@ class ProductAsyncViewsTests(TestCase):
             name="Test Product",
             purchase_price=Decimal("100.00"),
             selling_price=Decimal("150.00"),
-            stock_quantity=10,
         )
 
         self.factory = APIRequestFactory()
@@ -96,7 +95,6 @@ class ProductAsyncViewsTests(TestCase):
                 "name": "New Product",
                 "purchase_price": "200.00",
                 "selling_price": "300.00",
-                "stock_quantity": 0,
             },
             format="json",
         )
@@ -126,7 +124,6 @@ class ProductAsyncViewsTests(TestCase):
                 "name": "New Product",
                 "purchase_price": "200.00",
                 "selling_price": "300.00",
-                "stock_quantity": 0,
             },
             format="json",
         )
@@ -256,7 +253,6 @@ class ProductAsyncViewsTests(TestCase):
             name="Delete Product",
             purchase_price=Decimal("50.00"),
             selling_price=Decimal("75.00"),
-            stock_quantity=0,
         )
 
         request = self.factory.delete(

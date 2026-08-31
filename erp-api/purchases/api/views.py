@@ -16,6 +16,7 @@ from purchases.models import Purchase
 from purchases.permissions.purchase import PurchaseAccessPermission
 from purchases.services.cancel_purchase import CancelPurchaseService
 from purchases.services.confirm_purchase import ConfirmPurchaseService
+from authentication.throttling import SensitiveActionThrottle
 
 
 class PurchaseListCreateView(generics.ListCreateAPIView):
@@ -72,6 +73,7 @@ class PurchaseDetailView(generics.RetrieveAPIView):
 class PurchaseConfirmView(APIView):
     permission_classes = (PurchaseAccessPermission,)
     permission_codename = "purchases.confirm_purchase"
+    throttle_classes = (SensitiveActionThrottle,)
 
     async def post(self, request, pk):
         try:
@@ -110,6 +112,7 @@ class PurchaseConfirmView(APIView):
 class PurchaseCancelView(APIView):
     permission_classes = (PurchaseAccessPermission,)
     permission_codename = "purchases.cancel_purchase"
+    throttle_classes = (SensitiveActionThrottle,)
 
     async def post(self, request, pk):
         try:

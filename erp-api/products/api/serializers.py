@@ -9,8 +9,17 @@ class ProductSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
-    remaining_quantity = serializers.IntegerField(
+    total_stock = serializers.IntegerField(
         read_only=True,
+    )
+
+    stock_quantity = serializers.IntegerField(
+        read_only=True,
+        source="total_stock",
+        help_text=(
+            "DEPRECATED derived alias of total_stock. Computed from "
+            "inventory.StockBalance — NOT an independently stored value."
+        ),
     )
 
     class Meta:
@@ -21,9 +30,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "name",
             "purchase_price",
             "selling_price",
+            "total_stock",
             "stock_quantity",
             "sold_quantity",
-            "remaining_quantity",
             "created_at",
             "updated_at",
         )
@@ -32,8 +41,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "id",
             "created_at",
             "updated_at",
+            "total_stock",
+            "stock_quantity",
             "sold_quantity",
-            "remaining_quantity",
         )
 
     def create(self, validated_data):

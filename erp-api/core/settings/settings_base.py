@@ -48,11 +48,10 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "corsheaders",
     'rest_framework',
+    "drf_spectacular",
     "adrf",
     'phonenumber_field',
     "django_filters",
-    #"debug_toolbar",
-    
 ]
 
 PROJECT_APPS = [
@@ -72,17 +71,16 @@ PROJECT_APPS = [
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
 
 MIDDLEWARE = [
+    "core.middleware.RequestCorrelationMiddleware",
     "core.middleware.TrustedProxyHeadersMiddleware",
     "corsheaders.middleware.CorsMiddleware",
-    'django.middleware.security.SecurityMiddleware',
-    #"debug_toolbar.middleware.DebugToolbarMiddleware",
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -130,8 +128,13 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend",],
     'DEFAULT_PAGINATION_CLASS': 'common.pagination.StandardPagination',
-    'DEFAULT_THROTTLE_CLASSES': (),
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ),
     'DEFAULT_THROTTLE_RATES': {
+        'anon': '60/min',
+        'user': '200/min',
         'login_burst': '5/min',
         'login_sustained': '30/hour',
         'refresh_burst': '30/min',
@@ -169,7 +172,7 @@ LOGGING = {
     'disable_existing_loggers': False,
     'formatters': {
         'standard': {
-            'format': '{asctime} {levelname} {name}: {message}',
+            'format': '{asctime} {levelname} {name} [{request_id}]: {message}',
             'style': '{',
         },
     },
@@ -205,3 +208,19 @@ STATIC_URL = "/static/"
 INTERNAL_IPS = [
     "127.0.0.1",
 ]
+
+
+# OpenAPI / drf-spectacular configuration.
+# drf-spectacular is added to INSTALLED_APPS in production-like settings
+# modules; the schema view is registered in api/urls.py.
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Sales ERP API",
+    "DESCRIPTION": (
+        "Backend API for the Sales ERP suite. "
+        "Authentication is JWT-based; include the token in the "
+        "Authorization header as `Bearer <token>`."
+    ),
+    "VERSION": __import__("core.version", fromlist=["API_VERSION"]).API_VERSION,
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+}

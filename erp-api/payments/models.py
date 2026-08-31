@@ -45,6 +45,12 @@ class PaymentTransaction(models.Model):
                 name="payment_tx_transfer_non_negative",
             ),
         ]
+        permissions = [
+            (
+                "process_collection",
+                "Can process a payment collection",
+            ),
+        ]
 
     @property
     def total_amount(self):
@@ -106,3 +112,48 @@ class PaymentAllocation(models.Model):
 
     def __str__(self):
         return f"Alloc {self.pk} -> invoice {self.invoice_id}"
+
+
+class IdempotencyKey(models.Model):
+    """DB-backed idempotency for financial write operations.
+
+    A client provides ``Idempotency-Key`` for a collection request.  If the
+    same key (scoped to the user and the target endpoint path) is seen again,
+    the previously persisted response is returned instead of re-executing the
+    service.  This guards against duplicate collections caused by network
+    retries.
+
+    Keys are durable in PostgreSQL — they are never solely Redis-backed.
+    """
+
+    key = models.CharField(max_length=128, db_index=True)
+    user = models.ForeignKey(
+        "accounts.CustomUserModel",
+        on_delete=models.PROTECT,
+        related_name="idempotency_keys",
+    )
+    path = models.CharField(max_length=500, help_text="Normalized request path.")
+    request_signature = models.CharField(
+        max_length=64,
+        help_text="SHA-256 of the canonical request body.",
+    )
+    response_status = models.PositiveSmallIntegerField()
+    response_body = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("key", "user", "path"),
+                name="idempotency_unique_key_user_path",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("user", "path", "key"),
+                name="idempotency_lookup_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Idempotency {self.key} ({self.user_id})"
