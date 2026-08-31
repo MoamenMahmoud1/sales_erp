@@ -39,11 +39,12 @@ class AuthSessionTooNew(Exception):
 
 
 def _set_authorization_claims(token, user):
-    """Populate only the authorization claims needed by stateless requests."""
+    """Populate only the authorization/identity claims needed by stateless requests."""
     token["is_staff"] = bool(user.is_staff)
     token["is_superuser"] = bool(user.is_superuser)
     token["role_level"] = Role.level_for_user(user)
     token["permissions"] = sorted(user.get_all_permissions())
+    token["email"] = user.email
 
 
 def _presented_session(refresh_token, access_token):
