@@ -7,7 +7,6 @@ on:
       - "erp-api/benchmarks/**"
       - "erp-api/core/settings/settings_bench.py"
       - "erp-api/products/api/views.py"
-      - "erp-api/products/api/serializers.py"
       - "erp-api/products/models.py"
       - "erp-api/inventory/models.py"
       - "erp-api/invoices/models.py"
@@ -38,19 +37,14 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd="pg_isready -U erp_bench -d erp_bench"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=20
-
+          --health-interval=5s --health-timeout=5s --health-retries=20
       redis:
         image: redis:7
         ports:
           - 6379:6379
         options: >-
           --health-cmd="redis-cli ping"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=20
+          --health-interval=5s --health-timeout=5s --health-retries=20
 
     env:
       DJANGO_SETTINGS_MODULE: core.settings.settings_bench
@@ -65,8 +59,7 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
       REDIS_URL: redis://127.0.0.1:6379/0
-      # Same database-pool configuration for both server modes. Each Gunicorn
-      # worker owns a pool, so 2 workers x 10 = at most 20 DB connections.
+      # Identical pool settings for sync and async. Two workers own separate pools.
       DB_POOL_MIN_SIZE: "2"
       DB_POOL_MAX_SIZE: "10"
       WEB_CONCURRENCY: "2"
@@ -76,11 +69,9 @@ jobs:
       BENCH_TIMEOUT: "30"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
           cache: pip
@@ -109,110 +100,76 @@ jobs:
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET track_io_timing='on';"
           docker restart "$PG_CONTAINER"
           for attempt in $(seq 1 60); do
-            if PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c 'SELECT 1' >/dev/null 2>&1; then
-              break
-            fi
+            if PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SELECT 1" >/dev/null 2>&1; then break; fi
             sleep 1
           done
-          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c 'SELECT current_setting(\'shared_buffers\'), current_setting(\'effective_cache_size\'), current_setting(\'work_mem\'), current_setting(\'random_page_cost\'), current_setting(\'effective_io_concurrency\'), current_setting(\'jit\'), current_setting(\'track_io_timing\');'
 
       - name: Seed benchmark database
         run: |
           python manage.py shell <<'PY'
           from django.contrib.auth import get_user_model
+          from customers.models import Customer
           from inventory.models import StockBalance, StockLocation
           from invoices.models import Invoice, InvoiceItem
-          from customers.models import Customer
           from products.models import Product
           from rest_framework_simplejwt.tokens import AccessToken
 
           User = get_user_model()
           user, _ = User.objects.get_or_create(
               username="benchmark_user",
-              defaults={
-                  "email": "benchmark_user@example.com",
-                  "is_active": True,
-                  "is_verified": True,
-              },
+              defaults={"email": "benchmark_user@example.com", "is_active": True, "is_verified": True},
           )
           customer, _ = Customer.objects.get_or_create(name="Benchmark Customer")
 
           products = list(Product.objects.all()[:2000])
           if len(products) < 2000:
               start = len(products)
-              products.extend(
-                  Product.objects.bulk_create(
-                      [
-                          Product(
-                              name=f"Benchmark Product {index:05d}",
-                              purchase_price="10.00",
-                              selling_price="15.00",
-                          )
-                          for index in range(start, 2000)
-                      ],
-                      batch_size=500,
-                  )
-              )
+              products.extend(Product.objects.bulk_create([
+                  Product(name=f"Benchmark Product {i:05d}", purchase_price="10.00", selling_price="15.00")
+                  for i in range(start, 2000)
+              ], batch_size=500))
 
           location, _ = StockLocation.objects.get_or_create(
               name="Benchmark Warehouse",
               defaults={"location_type": StockLocation.LocationType.MAIN_WAREHOUSE},
           )
-          StockBalance.objects.bulk_create(
-              [
-                  StockBalance(location=location, product=product, quantity=100)
-                  for product in products
-              ],
-              batch_size=500,
-              ignore_conflicts=True,
-          )
+          StockBalance.objects.bulk_create([
+              StockBalance(location=location, product=product, quantity=100)
+              for product in products
+          ], batch_size=500, ignore_conflicts=True)
 
-          # Populate the sales side of the Product endpoint too. The endpoint
-          # computes sold_quantity through a correlated subquery, so an empty
-          # invoice table would under-test half of the real SQL workload.
-          existing_items = InvoiceItem.objects.count()
-          if existing_items < 5000:
-              needed = 5000 - existing_items
-              invoices = Invoice.objects.bulk_create(
-                  [
-                      Invoice(
-                          customer=customer,
-                          created_by=user,
-                          status=(Invoice.Status.CONFIRMED if index % 2 else Invoice.Status.PAID),
-                      )
-                      for index in range(needed)
-                  ],
-                  batch_size=500,
-              )
-              InvoiceItem.objects.bulk_create(
-                  [
-                      InvoiceItem(
-                          invoice=invoice,
-                          product=products[index % len(products)],
-                          quantity=(index % 9) + 1,
-                          unit_price="15.00",
-                      )
-                      for index, invoice in enumerate(invoices)
-                  ],
-                  batch_size=500,
-              )
+          # Exercise both Product correlated subqueries with realistic rows.
+          existing = InvoiceItem.objects.count()
+          if existing < 5000:
+              invoices = Invoice.objects.bulk_create([
+                  Invoice(
+                      customer=customer,
+                      created_by=user,
+                      status=Invoice.Status.CONFIRMED if i % 2 else Invoice.Status.PAID,
+                  )
+                  for i in range(5000 - existing)
+              ], batch_size=500)
+              InvoiceItem.objects.bulk_create([
+                  InvoiceItem(
+                      invoice=invoice,
+                      product=products[i % len(products)],
+                      quantity=(i % 9) + 1,
+                      unit_price="15.00",
+                  )
+                  for i, invoice in enumerate(invoices)
+              ], batch_size=500)
 
-          with open("bench_token.txt", "w", encoding="utf-8") as output:
-              output.write(str(AccessToken.for_user(user)))
+          with open("bench_token.txt", "w", encoding="utf-8") as f:
+              f.write(str(AccessToken.for_user(user)))
           PY
 
-      - name: Refresh PostgreSQL statistics and inspect query plan
-        run: |
-          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c 'ANALYZE;'
-          python benchmarks/postgres_diagnostics.py | tee benchmark-results/postgres-diagnostics.json
-
-      - name: Record runner and dependency versions
+      - name: Analyze and inspect PostgreSQL plan
         run: |
           mkdir -p benchmark-results
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ANALYZE;"
+          python benchmarks/postgres_diagnostics.py | tee benchmark-results/postgres-diagnostics.json
           {
             echo "# Environment"
-            echo
-            echo '```text'
             date -u
             echo "CPU logical: $(nproc)"
             lscpu | grep -E 'Model name|CPU\\(s\\)|Thread|Core|Socket' || true
@@ -221,7 +178,6 @@ jobs:
             python -c 'import django; print("Django", django.get_version())'
             python -c 'import httpx; print("httpx", httpx.__version__)'
             PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SHOW server_version; SHOW max_connections; SHOW shared_buffers; SHOW effective_cache_size; SHOW work_mem; SHOW random_page_cost; SHOW effective_io_concurrency; SHOW jit; SHOW track_io_timing;"
-            echo '```'
           } > benchmark-results/environment.md
 
       - name: Run sync and async benchmarks
@@ -234,60 +190,30 @@ jobs:
           start_server() {
             mode="$1"
             if [[ "$mode" == "sync" ]]; then
-              gunicorn core.wsgi:application \
-                --bind 127.0.0.1:8000 \
-                --workers 2 \
-                --worker-class sync \
-                --timeout 30 \
-                --access-logfile /dev/null \
-                --error-logfile "/tmp/gunicorn-${mode}.log" \
-                --log-level warning &
+              gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers 2 --worker-class sync --timeout 30 --access-logfile /dev/null --error-logfile "/tmp/gunicorn-${mode}.log" --log-level warning &
             else
-              gunicorn core.asgi:application \
-                --bind 127.0.0.1:8000 \
-                --workers 2 \
-                --worker-class uvicorn_worker.UvicornWorker \
-                --timeout 30 \
-                --access-logfile /dev/null \
-                --error-logfile "/tmp/gunicorn-${mode}.log" \
-                --log-level warning &
+              gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers 2 --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile "/tmp/gunicorn-${mode}.log" --log-level warning &
             fi
             SERVER_PID=$!
-            export SERVER_PID
             for attempt in $(seq 1 60); do
-              if curl -fsS "$BASE/health/live/" >/dev/null; then
-                return
-              fi
+              if curl -fsS "$BASE/health/live/" >/dev/null; then return; fi
               sleep 1
             done
-            echo "Server failed to start"
             cat "/tmp/gunicorn-${mode}.log" || true
             exit 1
           }
-
           stop_server() {
-            if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
-              kill "$SERVER_PID" || true
-              wait "$SERVER_PID" || true
-            fi
+            if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then kill "$SERVER_PID" || true; wait "$SERVER_PID" || true; fi
             SERVER_PID=""
           }
-
           trap 'stop_server; rm -f bench_token.txt' EXIT
 
           for mode in sync async; do
-            echo "===== MODE: ${mode} ====="
             start_server "$mode"
-
             for concurrency in 1 5 10 25 50 100; do
-              export BENCH_URL="${BASE}${ENDPOINT}"
-              export BENCH_TOKEN="$TOKEN"
-              export BENCH_CONCURRENCY="$concurrency"
-              output="benchmark-results/${mode}-c${concurrency}.jsonl"
-              rm -f "$output"
-              python benchmarks/http_benchmark.py | tee "$output"
+              BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" \
+                python benchmarks/http_benchmark.py | tee "benchmark-results/${mode}-c${concurrency}.jsonl"
             done
-
             echo "=== ${mode} server errors ==="
             cat "/tmp/gunicorn-${mode}.log" || true
             stop_server
@@ -295,12 +221,10 @@ jobs:
 
       - name: Build benchmark report
         if: always()
-        working-directory: erp-api
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-
           rows = []
           for path in sorted(Path("benchmark-results").glob("*.jsonl")):
               for line in path.read_text().splitlines():
@@ -309,22 +233,18 @@ jobs:
                       if item.get("phase") == "measured":
                           item["mode"] = path.name.split("-c", 1)[0]
                           rows.append(item)
-
           rows.sort(key=lambda x: (x["mode"], x["concurrency"]))
           cols = ["mode", "concurrency", "requests", "successful", "failed", "timeouts", "wall_time_sec", "rps", "min_ms", "mean_ms", "p50_ms", "p75_ms", "p90_ms", "p95_ms", "p99_ms", "max_ms", "stddev_ms", "error_rate_pct"]
           with open("benchmark-results/report.md", "w", encoding="utf-8") as f:
               f.write("# Sync vs Async HTTP Benchmark\n\n")
-              f.write("Same Product API, same PostgreSQL instance, same seeded data, same 2 workers, same DB pool per worker, same client, 200 warm-up requests, then 1000 measured requests at each concurrency. The benchmark is an end-to-end deployment comparison, not a claim that async is universally faster.\n\n")
-              f.write("| " + " | ".join(cols) + " |\n")
-              f.write("|" + "---|" * len(cols) + "\n")
+              f.write("Same endpoint, seeded data, PostgreSQL instance, 2 workers, DB pool per worker, HTTP client, and warm-up. Results are end-to-end deployment measurements; they are not a universal async-vs-sync claim.\n\n")
+              f.write("| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n")
               for row in rows:
-                  vals = []
+                  values = []
                   for col in cols:
                       value = row.get(col, "")
-                      if isinstance(value, float):
-                          value = f"{value:.3f}"
-                      vals.append(str(value))
-                  f.write("| " + " | ".join(vals) + " |\n")
+                      values.append(f"{value:.3f}" if isinstance(value, float) else str(value))
+                  f.write("| " + " | ".join(values) + " |\n")
           PY
 
       - name: Upload benchmark results
