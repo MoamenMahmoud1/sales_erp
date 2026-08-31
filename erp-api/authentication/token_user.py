@@ -12,6 +12,13 @@ class ERPTokenUser(TokenUser):
     def is_superuser(self):
         return bool(self.token.get("is_superuser", False))
 
+    @property
+    def role_level(self):
+        try:
+            return int(self.token.get("role_level", 0))
+        except (TypeError, ValueError):
+            return 0
+
     def get_all_permissions(self, obj=None):
         permissions = self.token.get("permissions", ())
         if not isinstance(permissions, (list, tuple, set)):
