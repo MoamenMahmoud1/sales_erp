@@ -29,7 +29,19 @@ def _create_invoice_sync(*, created_by_id, validated_data):
 class CreateInvoice:
     """Create an invoice with server-authoritative product-price snapshots."""
 
-    async def __call__(self, *, created_by_id, validated_data):
+    async def __call__(
+        self,
+        *,
+        created_by_id=None,
+        user=None,
+        validated_data,
+    ):
+        # ``user`` is kept as a compatibility alias for existing callers/tests.
+        if created_by_id is None:
+            if user is None:
+                raise ValueError("created_by_id is required.")
+            created_by_id = getattr(user, "pk", user)
+
         return await sync_to_async(
             _create_invoice_sync,
             thread_sensitive=True,
