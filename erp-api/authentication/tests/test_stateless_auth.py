@@ -7,6 +7,7 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIRequestFactory
 from rest_framework_simplejwt.authentication import JWTStatelessUserAuthentication
+from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from authsession.services.auth_session import _set_authorization_claims
@@ -45,7 +46,7 @@ class StatelessAuthTests(TestCase):
 
         self.assertIsNotNone(authenticated)
         token_user, _ = authenticated
-        self.assertEqual(token_user.pk, self.user.pk)
+        self.assertEqual(str(token_user.pk), str(self.user.pk))
         self.assertEqual(ctx.captured_queries, [])
 
     def test_stateless_user_preserves_authorization_claims(self):
@@ -61,13 +62,14 @@ class StatelessAuthTests(TestCase):
         access = AccessToken(self._make_access_token())
         self.assertNotIn("hash_password", access.payload)
 
-    def test_invalid_token_rejected_without_db_lookup(self):
+    def test_invalid_token_is_rejected_without_db_lookup(self):
         request = self.factory.get("/api/v1/invoices/")
         request.META["HTTP_AUTHORIZATION"] = "Bearer invalid.token.value"
 
         authentication = JWTStatelessUserAuthentication()
         with CaptureQueriesContext(connection) as ctx:
-            self.assertIsNone(authentication.authenticate(request))
+            with self.assertRaises(InvalidToken):
+                authentication.authenticate(request)
 
         self.assertEqual(ctx.captured_queries, [])
 
