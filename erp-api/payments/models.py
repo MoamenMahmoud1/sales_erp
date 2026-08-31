@@ -71,7 +71,7 @@ class PaymentTransaction(models.Model):
         ]
 
     @property
-    def total_amount(self):
+    def total_amount(self) -> Decimal:
         return quantize_money(self.cash_amount + self.transfer_amount)
 
     def __str__(self):
@@ -125,7 +125,7 @@ class PaymentAllocation(models.Model):
         ]
 
     @property
-    def total_amount(self):
+    def total_amount(self) -> Decimal:
         return quantize_money(self.cash_amount + self.transfer_amount)
 
     def __str__(self):
