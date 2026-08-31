@@ -25,7 +25,7 @@ import json
 from decimal import Decimal
 
 from asgiref.sync import sync_to_async
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import F, Sum
 
 from common.exceptions import InvalidBusinessOperation, InvalidMoney
@@ -163,7 +163,6 @@ def _process_collection_sync(*, customer, cash_amount, transfer_amount, collecte
             "payment.collection",
             user=collected_by_id,
             customer=customer.pk,
-            total_received=str(total_received),
             invoices_allocated=len(info),
         )
 
@@ -200,8 +199,9 @@ def _process_collection_idempotent_sync(
     The idempotency row is created inside the same transaction as the financial
     operation, *before* the business logic runs.  The unique constraint on
     ``(key, user, path)`` guarantees that only one request can claim a key.
-    Concurrent duplicates block on ``select_for_update()`` until the first
-    transaction commits, then return the stored response.
+    Concurrent duplicates either block on ``select_for_update()`` (if the row
+    already exists) or race to insert; the loser catches ``IntegrityError`` and
+    retries within the same transaction to read the winner's stored response.
 
     Returns:
         IdempotencyKey: stored record (either pre-existing or newly created).
@@ -231,14 +231,43 @@ def _process_collection_idempotent_sync(
             return existing
 
         # Claim the key BEFORE executing the business operation.
-        record = IdempotencyKey.objects.create(
-            key=key,
-            user_id=user_id,
-            path=path,
-            request_signature=signature,
-            response_status=0,
-            response_body={},
-        )
+        # Two concurrent requests can both reach this point because
+        # ``select_for_update()`` cannot lock a row that doesn't exist yet.
+        # The unique constraint catches the race: one INSERT succeeds, the
+        # other raises IntegrityError.  We retry to read the winner's record.
+        try:
+            # Nested atomic block = SAVEPOINT.  If we lose the insert race the
+            # IntegrityError only rolls back to the savepoint, leaving the
+            # outer transaction usable for the recovery read below.
+            with transaction.atomic():
+                record = IdempotencyKey.objects.create(
+                    key=key,
+                    user_id=user_id,
+                    path=path,
+                    request_signature=signature,
+                    response_status=0,
+                    response_body={},
+                )
+        except IntegrityError:
+            # Lost the insert race — the winner's row is now visible.  Re-read
+            # it under lock to get a consistent view of the stored response.
+            winner = (
+                IdempotencyKey.objects.select_for_update()
+                .filter(
+                    key=key,
+                    user_id=user_id,
+                    path=path,
+                )
+                .first()
+            )
+            if winner is None:
+                # Extremely unlikely: winner rolled back.  Let the caller retry.
+                raise InvalidBusinessOperation(
+                    "Idempotency conflict — please retry."
+                )
+            if winner.request_signature != signature:
+                return "mismatch"
+            return winner
 
         # Execute the business operation.  If it fails, the entire
         # transaction rolls back (including the idempotency row), so a

@@ -121,7 +121,10 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        # Stateless JWT: signature + claims verified locally — NO DB lookup.
+        # The access token is self-contained; the authsession system owns
+        # refresh-token/session state separately.
+        'rest_framework_simplejwt.authentication.JWTStatelessUserAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
@@ -153,7 +156,10 @@ SIMPLE_JWT = {
         "JWT_SIGNING_KEY",
         default="dev-only-jwt-signing-key-change-me-0123456789abcdef",
     ),
-    "CHECK_REVOKE_TOKEN": True,
+    # CHECK_REVOKE_TOKEN MUST stay False: the access token is a stateless JWT.
+    # Session/refresh-token revocation belongs to authsession, NOT to access
+    # tokens.  Enabling this would force a DB lookup on every API request.
+    "CHECK_REVOKE_TOKEN": False,
 }
 AUTH_SESSION_MIN_AGE = timedelta(
     hours=config("AUTH_SESSION_MIN_AGE_HOURS", default=168, cast=int)

@@ -146,6 +146,12 @@ def start_auth_session(*, user, client_context: ClientContext):
 
         refresh = RefreshToken.for_user(locked_user)
         refresh["sid"] = str(session_id)
+        # Password-hash binding for the stateful refresh flow.  This claim is
+        # only ever verified inside authsession (refresh / session management)
+        # — access-token validation remains stateless and never checks it.
+        refresh[api_settings.REVOKE_TOKEN_CLAIM] = get_md5_hash_password(
+            locked_user.password,
+        )
         access = refresh.access_token
         expires_at = datetime.fromtimestamp(
             refresh["exp"],
@@ -178,14 +184,20 @@ def start_auth_session(*, user, client_context: ClientContext):
 
 
 def _refresh_password_matches(refresh, user):
-    if not api_settings.CHECK_REVOKE_TOKEN:
-        return True
+    """Check that the refresh token's password hash matches the user's current password.
 
+    This is a business requirement for the refresh flow (password change must
+    invalidate existing refresh tokens).  It is intentionally independent of
+    ``CHECK_REVOKE_TOKEN`` so that access-token validation remains stateless
+    while the stateful refresh flow still enforces password-change revocation.
+    """
     token_hash = refresh.get(api_settings.REVOKE_TOKEN_CLAIM)
-    current_hash = get_md5_hash_password(user.password)
-    return (
-        isinstance(token_hash, str)
-        and hmac.compare_digest(token_hash, current_hash)
+    if not isinstance(token_hash, str):
+        return False
+
+    return hmac.compare_digest(
+        token_hash,
+        get_md5_hash_password(user.password),
     )
 
 
@@ -236,6 +248,12 @@ def refresh_auth_session(*, refresh_token, client_context: ClientContext):
                 )
                 new_refresh = RefreshToken.for_user(auth_session.user)
                 new_refresh["sid"] = str(auth_session.id)
+                # Keep the password-hash binding on rotated refresh tokens so
+                # password-change revocation keeps working in the stateful
+                # refresh flow (access tokens stay stateless).
+                new_refresh[api_settings.REVOKE_TOKEN_CLAIM] = (
+                    get_md5_hash_password(auth_session.user.password)
+                )
                 new_refresh["exp"] = int(auth_session.expires_at.timestamp())
 
                 new_access = new_refresh.access_token

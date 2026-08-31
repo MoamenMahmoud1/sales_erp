@@ -7,13 +7,13 @@ from common.money import quantize_money
 from invoices.models import Invoice, InvoiceItem
 
 
-def _create_invoice_sync(*, user, validated_data):
+def _create_invoice_sync(*, created_by_id, validated_data):
     """Create an invoice and all items within one synchronous transaction."""
     invoice_data = validated_data.copy()
     items = invoice_data.pop("items")
 
     with transaction.atomic():
-        invoice = Invoice.objects.create(created_by=user, **invoice_data)
+        invoice = Invoice.objects.create(created_by_id=created_by_id, **invoice_data)
         for item in items:
             product = item["product"]
             InvoiceItem.objects.create(
@@ -29,8 +29,8 @@ def _create_invoice_sync(*, user, validated_data):
 class CreateInvoice:
     """Create an invoice with server-authoritative product-price snapshots."""
 
-    async def __call__(self, *, user, validated_data):
+    async def __call__(self, *, created_by_id, validated_data):
         return await sync_to_async(
             _create_invoice_sync,
             thread_sensitive=True,
-        )(user=user, validated_data=validated_data)
+        )(created_by_id=created_by_id, validated_data=validated_data)

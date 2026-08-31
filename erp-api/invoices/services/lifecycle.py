@@ -135,18 +135,37 @@ def _cancel_invoice_sync(invoice_id):
         return invoice
 
 
+def _find_original_sale_location_sync(invoice):
+    """Return the source location of the original SALE movement.
+
+    The original SALE movement is authoritative for where stock was removed.
+    We must NOT use the employee's current location — they may have moved
+    to a different sales vehicle since the sale.
+    """
+    sale = (
+        StockMovement.objects.filter(
+            reference=f"Invoice #{invoice.pk}",
+            movement_type=StockMovement.MovementType.SALE,
+        )
+        .select_related("source_location")
+        .first()
+    )
+    if sale is None:
+        raise InvalidBusinessOperation(
+            "Cannot reverse sale: no original SALE movement found for this invoice."
+        )
+    return sale.source_location
+
+
 def _reverse_sale_movement_sync(invoice):
     """Create a compensating SALEABLE_RETURN movement to restore stock.
 
     The original SALE movement is never edited — it remains an immutable
     ledger entry.  This function creates a separate reversal movement that
-    increases the stock balance back to the sales location.
+    increases the stock balance back to the ORIGINAL sales location (from
+    the SALE movement), not the employee's current location.
     """
-    source_location = sales_source_location_sync(invoice.created_by)
-    if source_location is None:
-        raise InvalidBusinessOperation(
-            "Cannot reverse sale: the invoice creator has no active sales location."
-        )
+    source_location = _find_original_sale_location_sync(invoice)
 
     movement = StockMovement.objects.create(
         movement_type=StockMovement.MovementType.SALEABLE_RETURN,
