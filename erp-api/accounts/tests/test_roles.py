@@ -10,6 +10,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import Employee, Role
+from authsession.services.auth_session import _set_authorization_claims
 
 User = get_user_model()
 
@@ -117,7 +118,9 @@ class EmployeeVisibilityTests(APITestCase):
         self.assertEqual(visible_ids, {self.manager.id, self.child.id, self.grandchild.id})
 
     def test_simple_jwt_bearer_token_authenticates_api_request(self):
-        access_token = RefreshToken.for_user(self.manager_user).access_token
+        refresh = RefreshToken.for_user(self.manager_user)
+        _set_authorization_claims(refresh, self.manager_user)
+        access_token = refresh.access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
 
         response = self.client.get(reverse("accounts:employee-list"))
