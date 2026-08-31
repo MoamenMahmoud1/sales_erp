@@ -79,7 +79,7 @@ class PurchaseConfirmView(APIView):
         try:
             purchase = await ConfirmPurchaseService.aexecute(
                 purchase_id=pk,
-                created_by=request.user,
+                created_by_id=request.user.pk,
             )
         except Purchase.DoesNotExist:
             return Response(
@@ -145,6 +145,8 @@ class PurchaseCancelView(APIView):
             await serializer.adata,
             status=status.HTTP_200_OK,
         )
+
+
 class PurchaseDeleteView(generics.DestroyAPIView):
     serializer_class = PurchaseSerializer
     permission_classes = (PurchaseAccessPermission,)
