@@ -82,6 +82,8 @@ jobs:
         run: python manage.py migrate --noinput
 
       - name: Test suite
+        env:
+          DJANGO_SETTINGS_MODULE: core.settings.settings_test
         run: python manage.py test
 
       - name: Compile Python
