@@ -157,6 +157,16 @@ SIMPLE_JWT = {
     "TOKEN_USER_CLASS": "authentication.token_user.ERPTokenUser",
 }
 
+# Persisted idempotency keys are retained for this window so clients can
+# safely retry financial requests. Cleanup is handled by a management command.
+IDEMPOTENCY_RETENTION_DAYS = config(
+    "IDEMPOTENCY_RETENTION_DAYS",
+    default=90,
+    cast=int,
+)
+if IDEMPOTENCY_RETENTION_DAYS < 1:
+    raise ValueError("IDEMPOTENCY_RETENTION_DAYS must be >= 1")
+
 AUTH_SESSION_MIN_AGE = timedelta(
     hours=config("AUTH_SESSION_MIN_AGE_HOURS", default=168, cast=int)
 )
