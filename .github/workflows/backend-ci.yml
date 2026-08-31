@@ -27,6 +27,16 @@ jobs:
           --health-timeout=5s
           --health-retries=10
 
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
     env:
       DJANGO_SETTINGS_MODULE: core.settings.settings_prod
       SECRET_KEY: ci-secret-key
@@ -58,6 +68,9 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Dependency integrity
+        run: pip check
 
       - name: Django system checks
         run: python manage.py check --deploy
