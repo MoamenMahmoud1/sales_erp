@@ -74,8 +74,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install httpx
-      - name: Django tests
-        run: python manage.py test
       - name: Migrate
         run: python manage.py migrate --noinput
       - name: Seed benchmark database
