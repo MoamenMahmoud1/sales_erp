@@ -22,10 +22,7 @@ class StockBalanceService:
         )
 
         balance.quantity += quantity
-        balance.save(
-            update_fields=["quantity", "updated_at"],
-        )
-
+        balance.save(update_fields=["quantity", "updated_at"])
         return balance
 
     @staticmethod
@@ -33,11 +30,7 @@ class StockBalanceService:
         return await sync_to_async(
             StockBalanceService.increase,
             thread_sensitive=True,
-        )(
-            location=location,
-            product=product,
-            quantity=quantity,
-        )
+        )(location=location, product=product, quantity=quantity)
 
     @staticmethod
     @transaction.atomic
@@ -48,10 +41,7 @@ class StockBalanceService:
         balance = (
             StockBalance.objects
             .select_for_update()
-            .filter(
-                location=location,
-                product=product,
-            )
+            .filter(location=location, product=product)
             .first()
         )
 
@@ -59,10 +49,7 @@ class StockBalanceService:
             raise ValueError("Insufficient stock.")
 
         balance.quantity -= quantity
-        balance.save(
-            update_fields=["quantity", "updated_at"],
-        )
-
+        balance.save(update_fields=["quantity", "updated_at"])
         return balance
 
     @staticmethod
@@ -70,8 +57,4 @@ class StockBalanceService:
         return await sync_to_async(
             StockBalanceService.decrease,
             thread_sensitive=True,
-        )(
-            location=location,
-            product=product,
-            quantity=quantity,
-        )
+        )(location=location, product=product, quantity=quantity)
