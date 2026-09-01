@@ -1,4 +1,4 @@
-"""Benchmark-only request, SQL, stack, and ORM timing instrumentation."""
+"""Benchmark-only request, SQL, pool, stack, and ORM timing instrumentation."""
 
 import asyncio
 import inspect
@@ -6,6 +6,7 @@ import time
 from contextvars import ContextVar
 
 from asgiref.sync import markcoroutinefunction
+from django.db import connection
 from django.db.backends.signals import connection_created
 from django.dispatch import receiver
 
@@ -29,26 +30,15 @@ def mark_async_orm_operation(operation: str) -> None:
 
 
 def _resolved_view_metadata(request):
-    """Return runtime metadata from Django's resolved endpoint callable.
-
-    ADRF's router proves itself through the resolved action: for a ModelViewSet
-    GET-list route it maps to ``alist`` rather than DRF's ``list``. This is more
-    reliable than inspecting the view MRO because router-generated callables can
-    hide the original class hierarchy.
-    """
     resolver = getattr(request, "resolver_match", None)
     func = getattr(resolver, "func", None)
     view_class = getattr(func, "view_class", None)
     actions = getattr(func, "actions", {}) or {}
     action = actions.get(request.method.lower())
-
     async_callable = bool(func and inspect.iscoroutinefunction(func))
     router = "adrf" if action in ASYNC_ROUTER_ACTIONS else "drf"
     async_handler = bool(async_callable and action in ASYNC_ROUTER_ACTIONS)
-    class_name = (
-        f"{view_class.__module__}.{view_class.__name__}" if view_class else ""
-    )
-
+    class_name = f"{view_class.__module__}.{view_class.__name__}" if view_class else ""
     return {
         "stack": "async" if async_callable else "sync",
         "router": router,
@@ -71,11 +61,42 @@ class TimingWrapper:
                 metrics["db_queries"] += 1
 
 
-def _install_wrapper(connection):
-    if getattr(connection, "_benchmark_wrapper_installed", False):
+def _pool_stats(connection):
+    pool = getattr(connection, "pool", None)
+    if pool is None or not hasattr(pool, "get_stats"):
+        return {}
+    try:
+        return pool.get_stats()
+    except Exception:
+        return {}
+
+
+def _install_pool_wrapper(connection):
+    """Measure real time blocked in Django's psycopg pool acquisition."""
+    pool = getattr(connection, "pool", None)
+    if pool is None or getattr(pool, "_benchmark_getconn_wrapped", False):
         return
-    connection.execute_wrappers.append(TimingWrapper())
-    connection._benchmark_wrapper_installed = True
+
+    original_getconn = pool.getconn
+
+    def timed_getconn(*args, **kwargs):
+        started = time.perf_counter()
+        try:
+            return original_getconn(*args, **kwargs)
+        finally:
+            metrics = _metrics.get()
+            if metrics is not None:
+                metrics["pool_wait"] += time.perf_counter() - started
+
+    pool.getconn = timed_getconn
+    pool._benchmark_getconn_wrapped = True
+
+
+def _install_wrapper(connection):
+    if not getattr(connection, "_benchmark_wrapper_installed", False):
+        connection.execute_wrappers.append(TimingWrapper())
+        connection._benchmark_wrapper_installed = True
+    _install_pool_wrapper(connection)
 
 
 @receiver(connection_created)
@@ -84,7 +105,7 @@ def _connection_created(sender, connection, **kwargs):
 
 
 class BenchmarkTimingMiddleware:
-    """Measure request wall time, SQL time, and runtime async-stack identity."""
+    """Measure request wall time, SQL time, pool wait, and runtime stack identity."""
 
     async_capable = True
     sync_capable = True
@@ -127,6 +148,7 @@ class BenchmarkTimingMiddleware:
         total_ms = (time.perf_counter() - started) * 1000
         db_ms = metrics["db_time"] * 1000
         pool_wait_ms = metrics["pool_wait"] * 1000
+        pool_stats = _pool_stats(connection)
         view_meta = _resolved_view_metadata(request)
         async_orm_ops = sorted(metrics.get("async_orm_ops", set()))
         serializer_path = getattr(request, "_benchmark_serializer_path", "")
@@ -140,6 +162,17 @@ class BenchmarkTimingMiddleware:
         response["X-Benchmark-DB-Ms"] = f"{db_ms:.3f}"
         response["X-Benchmark-DB-Queries"] = str(metrics["db_queries"])
         response["X-Benchmark-Pool-Wait-Ms"] = f"{pool_wait_ms:.3f}"
+        response["X-Benchmark-Pool-Size"] = str(pool_stats.get("pool_size", 0))
+        response["X-Benchmark-Pool-Available"] = str(pool_stats.get("pool_available", 0))
+        response["X-Benchmark-Pool-Requests-Waiting"] = str(
+            pool_stats.get("requests_waiting", 0)
+        )
+        response["X-Benchmark-Pool-Requests-Queued"] = str(
+            pool_stats.get("requests_queued", 0)
+        )
+        response["X-Benchmark-Pool-Requests-Wait-Ms"] = str(
+            pool_stats.get("requests_wait_ms", 0)
+        )
         response["X-Benchmark-Stack"] = view_meta["stack"]
         response["X-Benchmark-Router"] = view_meta["router"]
         response["X-Benchmark-Handler"] = view_meta["handler"]
