@@ -20,3 +20,7 @@ REST_FRAMEWORK = {
 ASYNC_DB_CONCURRENCY = int(os.getenv("ASYNC_DB_CONCURRENCY", "0") or "0")
 if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY > DB_POOL_MAX_SIZE:
     raise ValueError("ASYNC_DB_CONCURRENCY must be between 0 and DB_POOL_MAX_SIZE")
+
+# Emit X-Perf-* and Server-Timing headers so the external benchmark can collect
+# the internal stages without relying on Django debug instrumentation.
+PERF_TIMING_ENABLED = True
