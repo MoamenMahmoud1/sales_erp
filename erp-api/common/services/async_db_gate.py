@@ -81,6 +81,9 @@ async def db_slot():
     execution itself is measured by Django's execute wrapper middleware.
     """
     if not enabled():
+        # Baseline mode has no application gate, but still acquires the pool
+        # connection explicitly so pool wait remains measurable and comparable.
+        await _ensure_connection()
         yield
         return
 
