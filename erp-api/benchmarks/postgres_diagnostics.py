@@ -28,8 +28,11 @@ TABLES = (
 
 
 def explain(cursor, sql, params=()):
+    # TIMING ON is intentional here: unlike the load benchmark, this diagnostic
+    # is a small single-query probe used to attribute time to individual plan
+    # nodes/subplans. It must not be confused with the high-concurrency latency.
     cursor.execute(
-        "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, WAL, TIMING OFF, FORMAT JSON) " + sql,
+        "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, WAL, TIMING ON, FORMAT JSON) " + sql,
         params,
     )
     return cursor.fetchone()[0]
