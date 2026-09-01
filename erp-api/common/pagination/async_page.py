@@ -56,6 +56,13 @@ class AsyncStandardPagination(PageNumberPagination):
             return None
 
         raw_page = request.query_params.get(self.page_query_param) or "1"
+
+        benchmark_ops = getattr(request, "_benchmark_async_orm_operations", None)
+        if benchmark_ops is None:
+            benchmark_ops = []
+            request._benchmark_async_orm_operations = benchmark_ops
+
+        benchmark_ops.append("acount")
         count = await queryset.acount()
         num_pages = math.ceil(count / page_size) if count else 1
 
@@ -78,6 +85,7 @@ class AsyncStandardPagination(PageNumberPagination):
             )
 
         start = (page_number - 1) * page_size
+        benchmark_ops.append("async_iter")
         objects = [obj async for obj in queryset[start : start + page_size]]
         self.page = AsyncPage(objects, page_number, count, page_size)
         self.display_page_controls = num_pages > 1 and self.template is not None
