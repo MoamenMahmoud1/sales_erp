@@ -16,16 +16,18 @@ _gate_wait: ContextVar[float] = ContextVar("async_db_gate_wait", default=0.0)
 
 
 def _limit() -> int:
-    value = int(getattr(settings, "ASYNC_DB_CONCURRENCY", 0) or 0)
-    return max(value, 0)
+    return max(int(getattr(settings, "ASYNC_DB_CONCURRENCY", 0) or 0), 0)
 
 
 def enabled() -> bool:
     return _limit() > 0
 
 
+def configured_limit() -> int:
+    return _limit()
+
+
 def consume_wait() -> float:
-    """Return and clear the current request's accumulated gate wait time."""
     waited = _gate_wait.get()
     _gate_wait.set(0.0)
     return waited
@@ -47,7 +49,7 @@ def _get_gate() -> asyncio.Semaphore:
 
 @asynccontextmanager
 async def db_slot():
-    """Acquire one bounded application-level DB concurrency slot."""
+    """Bound DB-bound ORM concurrency per ASGI worker."""
     if not enabled():
         yield
         return
