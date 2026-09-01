@@ -1,0 +1,199 @@
+name: Middleware Latency Diagnostic PR
+
+on:
+  pull_request:
+    paths:
+      - "erp-api/benchmarks/**"
+      - "erp-api/core/settings/settings_bench.py"
+      - ".github/workflows/middleware-diagnostic-pr.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: erp-api
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: erp_bench
+          POSTGRES_USER: erp_bench
+          POSTGRES_PASSWORD: erp_bench
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U erp_bench -d erp_bench"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    env:
+      DJANGO_SETTINGS_MODULE: core.settings.settings_bench
+      SECRET_KEY: bench-secret-key-please-use-32-or-more-random-characters-2026
+      JWT_SIGNING_KEY: bench-jwt-signing-key-please-use-32-or-more-random-characters-2026
+      ALLOWED_HOSTS: 127.0.0.1,localhost
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      CSRF_TRUSTED_ORIGINS: http://localhost:3000
+      DB_NAME: erp_bench
+      DB_USER: erp_bench
+      DB_PASSWORD: erp_bench
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      REDIS_URL: redis://127.0.0.1:6379/0
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "10"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: erp-api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx
+
+      - name: Validate diagnostic code
+        run: |
+          python -m py_compile \
+            benchmarks/middleware_probe.py \
+            benchmarks/request_timing_middleware.py \
+            benchmarks/view_boundary_middleware.py \
+            benchmarks/middleware_diagnostic.py
+
+      - name: Migrate
+        run: python manage.py migrate --noinput
+
+      - name: Seed benchmark database
+        run: python benchmarks/seed_benchmark_data.py
+
+      - name: Tune PostgreSQL
+        run: |
+          set -euo pipefail
+          PG_CONTAINER="$(docker ps --filter 'ancestor=postgres:16' --format '{{.ID}}' | head -n1)"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_buffers='512MB';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET work_mem='16MB';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET random_page_cost='1.1';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET jit='off';"
+          docker restart "$PG_CONTAINER"
+          for attempt in $(seq 1 60); do
+            if PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SELECT 1" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "ANALYZE;"
+
+      - name: Run diagnostic
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-results
+          TOKEN="$(cat bench_token.txt)"
+          URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
+          SERVER_PID=""
+
+          cleanup() {
+            if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
+              kill "$SERVER_PID" || true
+              wait "$SERVER_PID" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          run_server() {
+            export BENCH_API_STACK=async
+            export BENCH_MIDDLEWARE_DIAGNOSTIC=1
+            export BENCH_MINIMAL_MIDDLEWARE="$1"
+            export BENCH_MIDDLEWARE_EXCLUDE="$2"
+            export ASYNC_DB_CONCURRENCY=0
+            gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers 2 --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn.log --log-level warning &
+            SERVER_PID=$!
+            for attempt in $(seq 1 60); do
+              curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1 && return
+              sleep 1
+            done
+            cat /tmp/gunicorn.log || true
+            exit 1
+          }
+
+          run_case() {
+            local name="$1"
+            local c="$2"
+            local n="$3"
+            BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_CASE="$name" BENCH_CONCURRENCY="$c" BENCH_REQUESTS="$n" BENCH_WARMUP=50 BENCH_DEADLINE=90 BENCH_TIMEOUT=10 python benchmarks/middleware_diagnostic.py | tee "benchmark-results/${name}.json"
+          }
+
+          # Two comparable baselines plus one causal leave-one-out sweep.
+          run_server 0 ""
+          run_case full-c50 50 300
+          cleanup; SERVER_PID=""
+
+          run_server 1 ""
+          run_case minimal-c50 50 300
+          cleanup; SERVER_PID=""
+
+          for mw in \
+            core.middleware.RequestCorrelationMiddleware \
+            core.middleware.TrustedProxyHeadersMiddleware \
+            corsheaders.middleware.CorsMiddleware \
+            django.middleware.security.SecurityMiddleware \
+            django.middleware.common.CommonMiddleware \
+            django.middleware.csrf.CsrfViewMiddleware \
+            django.middleware.clickjacking.XFrameOptionsMiddleware; do
+            safe="${mw//./-}"
+            run_server 0 "$mw"
+            run_case "loo-${safe}-c50" 50 200
+            cleanup; SERVER_PID=""
+          done
+
+          # Session/Auth/Messages are coupled by Django's middleware ordering.
+          coupled="django.contrib.sessions.middleware.SessionMiddleware,django.contrib.auth.middleware.AuthenticationMiddleware,django.contrib.messages.middleware.MessageMiddleware"
+          run_server 0 "$coupled"
+          run_case loo-session-auth-messages-c50 50 200
+
+      - name: Build report
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('benchmark-results')
+          cases=[]
+          for p in sorted(root.glob('*.json')):
+              try: cases.append(json.loads(p.read_text()))
+              except Exception: pass
+          def f(v): return '' if v is None else f'{v:.3f}'
+          full=next((x for x in cases if x.get('case')=='full-c50'),{})
+          out=['# Middleware latency diagnostic','','| case | p50 | p95 | p99 | server p50 | db p50 | pool p50 | complete |','|---|---:|---:|---:|---:|---:|---:|---|']
+          for x in cases:
+              out.append(f"| {x.get('case','')} | {f(x.get('p50_ms'))} | {f(x.get('p95_ms'))} | {f(x.get('p99_ms'))} | {f(x.get('server_p50_ms'))} | {f(x.get('db_p50_ms'))} | {f(x.get('pool_p50_ms'))} | {x.get('complete','')} |")
+          out += ['', '| leave-one-out | p50 delta vs full | p95 | p99 |','|---|---:|---:|---:|']
+          for x in cases:
+              if x.get('case','').startswith('loo-'):
+                  delta=None
+                  if x.get('p50_ms') is not None and full.get('p50_ms') is not None: delta=x['p50_ms']-full['p50_ms']
+                  out.append(f"| {x.get('case')} | {f(delta)} | {f(x.get('p95_ms'))} | {f(x.get('p99_ms'))} |")
+          (root/'report.md').write_text('\n'.join(out)+'\n')
+          (root/'report.json').write_text(json.dumps(cases,indent=2,sort_keys=True))
+          PY
+
+      - name: Upload diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: middleware-latency-diagnostic-pr
+          path: erp-api/benchmark-results/
+          if-no-files-found: warn
