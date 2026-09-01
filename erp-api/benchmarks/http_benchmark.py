@@ -9,7 +9,7 @@ import math
 import os
 import statistics
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 
 import httpx
 
@@ -55,7 +55,7 @@ async def run_requests(
     concurrency: int,
     timeout_s: float,
     progress_every: int = 0,
-) -> tuple[list[float], list[int], Counter[str], dict[str, list[float]], int]:
+) -> tuple[list[float], list[int], Counter[str], dict[str, list[float]], dict[str, list[float]], int]:
     latencies: list[float] = []
     statuses: list[int] = []
     errors: Counter[str] = Counter()
@@ -67,6 +67,7 @@ async def run_requests(
         "serializer_wait": [],
         "serializer_cpu": [],
     }
+    view_stage_samples: dict[str, list[float]] = defaultdict(list)
     instrumented_responses = 0
     next_index = 0
     completed = 0
@@ -124,6 +125,18 @@ async def run_requests(
                             stage_samples[stage].append(float(value))
                         except ValueError:
                             parsed = False
+
+                    for header_name, value in response.headers.items():
+                        if not header_name.lower().startswith("x-perf-view-"):
+                            continue
+                        if not header_name.lower().endswith("-ms"):
+                            continue
+                        try:
+                            stage_name = header_name[12:-3].replace("-", ".")
+                            view_stage_samples[stage_name].append(float(value))
+                        except ValueError:
+                            parsed = False
+
                     if parsed:
                         instrumented_responses += 1
                 except Exception as exc:
@@ -139,7 +152,7 @@ async def run_requests(
 
         await asyncio.gather(*(worker() for _ in range(concurrency)))
 
-    return latencies, statuses, errors, stage_samples, instrumented_responses
+    return latencies, statuses, errors, stage_samples, dict(view_stage_samples), instrumented_responses
 
 
 async def main() -> None:
@@ -159,7 +172,7 @@ async def main() -> None:
         await run_requests(url, token, warmup, min(concurrency, warmup), timeout_s)
 
     started = time.perf_counter()
-    latencies, statuses, errors, stage_samples, instrumented = await run_requests(
+    latencies, statuses, errors, stage_samples, view_stage_samples, instrumented = await run_requests(
         url, token, requests, concurrency, timeout_s, progress_every
     )
     elapsed = time.perf_counter() - started
@@ -168,6 +181,9 @@ async def main() -> None:
     completed = len(latencies)
     failed = completed - successful
     stage_stats = {stage: summarize(values) for stage, values in stage_samples.items()}
+    view_stage_stats = {
+        stage: summarize(values) for stage, values in sorted(view_stage_samples.items())
+    }
 
     stack_verified = (
         completed == requests
@@ -197,6 +213,7 @@ async def main() -> None:
         "status_counts": dict(Counter(map(str, statuses))),
         "errors": dict(errors),
         "server_timing": stage_stats,
+        "view_stage_timing": view_stage_stats,
         "server_p50_ms": stage_stats["app"]["p50_ms"],
         "server_p95_ms": stage_stats["app"]["p95_ms"],
         "server_p99_ms": stage_stats["app"]["p99_ms"],
