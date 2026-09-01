@@ -11,9 +11,13 @@ def create_coupon_sync(validated_data):
 
 
 class CreateCoupon:
-    """Create a coupon off the ASGI event loop."""
+    """Create a coupon from either sync or async application code."""
 
-    async def __call__(self, *, validated_data):
+    def __call__(self, *, validated_data):
+        return create_coupon_sync(validated_data)
+
+    async def acall(self, *, validated_data):
+        """Async entry point; keeps blocking model work off the event loop."""
         return await sync_to_async(
             create_coupon_sync,
             thread_sensitive=True,
