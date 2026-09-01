@@ -8,7 +8,7 @@ from common.pagination import AsyncStandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
 from common.services.async_db_gate import DBAdmissionTimeout, db_slot
 from common.services.async_serializer import AsyncSerializerService
-from common.services.perf_timing import db_operation
+from common.services.perf_timing import db_operation, view_stage
 
 from products.api.serializers import (
     CartonPricingSerializer,
@@ -49,42 +49,53 @@ class ProductViewSet(viewsets.ModelViewSet):
     async def afilter_queryset(self, queryset):
         """Apply lazy QuerySet filters without a sync-to-async thread hop."""
         for backend_class in self.filter_backends:
-            queryset = backend_class().filter_queryset(self.request, queryset, self)
+            name = backend_class.__name__.removesuffix("Filter").lower()
+            with view_stage(f"view.filter.{name}"):
+                queryset = backend_class().filter_queryset(self.request, queryset, self)
         return queryset
 
     async def alist(self, request, *args, **kwargs):
         """List products with bounded DB concurrency and one serializer hop."""
-        queryset = await self.afilter_queryset(self.get_queryset())
+        with view_stage("view.queryset.build"):
+            queryset = await self.afilter_queryset(self.get_queryset())
 
         try:
             async with db_slot():
                 with db_operation():
                     page = await self.apaginate_queryset(queryset)
         except DBAdmissionTimeout:
-            response = Response(
-                {"detail": "The database is temporarily busy. Please retry."},
-                status=503,
-            )
-            response["Retry-After"] = "1"
-            return response
+            with view_stage("view.response.busy"):
+                response = Response(
+                    {"detail": "The database is temporarily busy. Please retry."},
+                    status=503,
+                )
+                response["Retry-After"] = "1"
+                return response
 
         if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            data = await AsyncSerializerService.adata(serializer)
+            with view_stage("view.serializer.instantiate"):
+                serializer = self.get_serializer(page, many=True)
+            with view_stage("view.serializer.adata"):
+                data = await AsyncSerializerService.adata(serializer)
             return await self.get_apaginated_response(data)
 
-        serializer = self.get_serializer(queryset, many=True)
-        data = await AsyncSerializerService.adata(serializer)
-        return Response(data, status=200)
+        with view_stage("view.serializer.instantiate"):
+            serializer = self.get_serializer(queryset, many=True)
+        with view_stage("view.serializer.adata"):
+            data = await AsyncSerializerService.adata(serializer)
+        with view_stage("view.response.unpaginated"):
+            return Response(data, status=200)
 
     def get_queryset(self):
-        sold_subquery = self._confirmed_invoice_item_qty()
-        stock_subquery = self._total_stock_subquery()
-
-        return Product.objects.annotate(
-            _total_stock=Coalesce(Subquery(stock_subquery), Value(0)),
-            _sold_quantity=Coalesce(Subquery(sold_subquery), Value(0)),
-        )
+        with view_stage("view.queryset.sold_subquery"):
+            sold_subquery = self._confirmed_invoice_item_qty()
+        with view_stage("view.queryset.stock_subquery"):
+            stock_subquery = self._total_stock_subquery()
+        with view_stage("view.queryset.annotate"):
+            return Product.objects.annotate(
+                _total_stock=Coalesce(Subquery(stock_subquery), Value(0)),
+                _sold_quantity=Coalesce(Subquery(sold_subquery), Value(0)),
+            )
 
     @staticmethod
     def _total_stock_subquery():
@@ -146,7 +157,9 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
 
     async def afilter_queryset(self, queryset):
         for backend_class in self.filter_backends:
-            queryset = backend_class().filter_queryset(self.request, queryset, self)
+            name = backend_class.__name__.removesuffix("Filter").lower()
+            with view_stage(f"view.filter.{name}"):
+                queryset = backend_class().filter_queryset(self.request, queryset, self)
         return queryset
 
     def get_queryset(self):
