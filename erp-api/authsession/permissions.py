@@ -4,13 +4,14 @@ from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from rest_framework.permissions import BasePermission
 
 from authsession.http import get_device_id
-from authsession.services import InvalidAuthSession, get_current_auth_session
+from authsession.services import InvalidAuthSession
+from authsession.services.auth_session import aget_current_auth_session
 
 
 class CurrentAuthSessionPermission(BasePermission):
     """Verify the stateful auth session using the JWT identity claim."""
 
-    def has_permission(self, request, view):
+    async def has_permission(self, request, view):
         refresh_token = request.COOKIES.get("refresh_token")
         device_id = get_device_id(request)
         user_id = request.user.pk
@@ -18,7 +19,7 @@ class CurrentAuthSessionPermission(BasePermission):
             raise AuthenticationFailed("Invalid authentication session.")
 
         try:
-            auth_session = get_current_auth_session(
+            auth_session = await aget_current_auth_session(
                 user_id=user_id,
                 access_token=request.auth,
                 refresh_token=refresh_token,
@@ -34,8 +35,8 @@ class CurrentAuthSessionPermission(BasePermission):
 
 
 class VerifiedAuthSessionPermission(CurrentAuthSessionPermission):
-    def has_permission(self, request, view):
-        super().has_permission(request, view)
+    async def has_permission(self, request, view):
+        await super().has_permission(request, view)
         auth_session = request.auth_session
 
         if (
