@@ -14,6 +14,8 @@ from collections import Counter
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+import httpx
+
 
 @dataclass(slots=True)
 class Result:
@@ -25,6 +27,11 @@ class Result:
     db_ms: float | None = None
     pool_wait_ms: float | None = None
     db_queries: float | None = None
+    pool_size: float | None = None
+    pool_available: float | None = None
+    pool_requests_waiting: float | None = None
+    pool_requests_queued: float | None = None
+    pool_requests_wait_ms: float | None = None
     stack: str | None = None
     router: str | None = None
     handler: str | None = None
@@ -34,6 +41,7 @@ class Result:
     event_loop: str | None = None
     async_orm_ops: str | None = None
     serializer_path: str | None = None
+    transport_retries: int = 0
 
 
 def percentile(values: list[float], p: float) -> float | None:
@@ -53,17 +61,6 @@ def mean(values: list[float]) -> float | None:
     return statistics.fmean(values) if values else None
 
 
-def _headers(lines: list[bytes]) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for line in lines[1:]:
-        if b":" in line:
-            key, value = line.split(b":", 1)
-            result[key.decode("ascii", "ignore").lower()] = value.strip().decode(
-                "ascii", "ignore"
-            )
-    return result
-
-
 def _expected_runtime_metadata() -> dict[str, str | None]:
     stack = os.getenv("BENCH_EXPECT_STACK") or os.getenv("BENCH_API_STACK")
     expected = {
@@ -75,22 +72,30 @@ def _expected_runtime_metadata() -> dict[str, str | None]:
         "event_loop": os.getenv("BENCH_EXPECT_EVENT_LOOP"),
     }
     if stack == "async":
-        expected.update({
-            "router": expected["router"] or "adrf",
-            "handler": expected["handler"] or "alist",
-            "async_callable": expected["async_callable"] or "1",
-            "async_handler": expected["async_handler"] or "1",
-            "event_loop": expected["event_loop"] or "1",
-        })
+        expected.update(
+            {
+                "router": expected["router"] or "adrf",
+                "handler": expected["handler"] or "alist",
+                "async_callable": expected["async_callable"] or "1",
+                "async_handler": expected["async_handler"] or "1",
+                "event_loop": expected["event_loop"] or "1",
+            }
+        )
     elif stack == "sync":
-        expected.update({
-            "router": expected["router"] or "drf",
-            "handler": expected["handler"] or "list",
-            "async_callable": expected["async_callable"] or "0",
-            "async_handler": expected["async_handler"] or "0",
-            "event_loop": expected["event_loop"] or "0",
-        })
+        expected.update(
+            {
+                "router": expected["router"] or "drf",
+                "handler": expected["handler"] or "list",
+                "async_callable": expected["async_callable"] or "0",
+                "async_handler": expected["async_handler"] or "0",
+                "event_loop": expected["event_loop"] or "0",
+            }
+        )
     return expected
+
+
+def _headers(response: httpx.Response) -> dict[str, str]:
+    return {key.lower(): value for key, value in response.headers.items()}
 
 
 def _validate_stack(headers: dict[str, str], expected: dict[str, str | None]) -> str | None:
@@ -118,84 +123,6 @@ def _validate_stack(headers: dict[str, str], expected: dict[str, str | None]) ->
     return None
 
 
-async def request_once(
-    host: str,
-    port: int,
-    path: str,
-    authorization: str,
-    timeout_s: float,
-    expected: dict[str, str | None],
-) -> Result:
-    started = time.perf_counter()
-    writer = None
-    try:
-        async with asyncio.timeout(timeout_s):
-            reader, writer = await asyncio.open_connection(host, port)
-            request = (
-                f"GET {path} HTTP/1.1\r\n"
-                f"Host: {host}:{port}\r\n"
-                f"Authorization: Bearer {authorization}\r\n"
-                "Accept: application/json\r\n"
-                "Connection: close\r\n"
-                "\r\n"
-            ).encode()
-            writer.write(request)
-            await writer.drain()
-
-            header_bytes = await reader.readuntil(b"\r\n\r\n")
-            header_lines = header_bytes[:-4].split(b"\r\n")
-            status_line = header_lines[0].decode("ascii", "replace")
-            try:
-                status = int(status_line.split(" ", 2)[1])
-            except (IndexError, ValueError) as exc:
-                raise RuntimeError(f"invalid HTTP status line: {status_line!r}") from exc
-
-            headers = _headers(header_lines)
-            content_length = headers.get("content-length")
-            if content_length is not None:
-                remaining = int(content_length)
-                while remaining:
-                    chunk = await reader.read(min(remaining, 65536))
-                    if not chunk:
-                        raise RuntimeError("connection closed before full response body")
-                    remaining -= len(chunk)
-            else:
-                while await reader.read(65536):
-                    pass
-
-            stack_error = _validate_stack(headers, expected)
-            return Result(
-                latency_s=time.perf_counter() - started,
-                status=status,
-                error="stack_mismatch" if stack_error else None,
-                error_detail=stack_error,
-                server_ms=_float_header(headers.get("x-benchmark-request-ms")),
-                db_ms=_float_header(headers.get("x-benchmark-db-ms")),
-                pool_wait_ms=_float_header(headers.get("x-benchmark-pool-wait-ms")),
-                db_queries=_float_header(headers.get("x-benchmark-db-queries")),
-                stack=headers.get("x-benchmark-stack"),
-                router=headers.get("x-benchmark-router"),
-                handler=headers.get("x-benchmark-handler"),
-                async_callable=headers.get("x-benchmark-async-callable"),
-                async_handler=headers.get("x-benchmark-async-handler"),
-                view_class=headers.get("x-benchmark-view-class"),
-                event_loop=headers.get("x-benchmark-event-loop"),
-                async_orm_ops=headers.get("x-benchmark-async-orm-ops"),
-                serializer_path=headers.get("x-benchmark-serializer-path"),
-            )
-    except TimeoutError:
-        return Result(time.perf_counter() - started, None, "timeout")
-    except (OSError, asyncio.IncompleteReadError, ValueError, RuntimeError) as exc:
-        return Result(time.perf_counter() - started, None, type(exc).__name__, str(exc))
-    finally:
-        if writer is not None:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except OSError:
-                pass
-
-
 def _float_header(value: str | None) -> float | None:
     if value is None:
         return None
@@ -205,11 +132,85 @@ def _float_header(value: str | None) -> float | None:
         return None
 
 
+async def request_once(
+    client: httpx.AsyncClient,
+    url: str,
+    authorization: str,
+    timeout_s: float,
+    expected: dict[str, str | None],
+) -> Result:
+    started = time.perf_counter()
+    retries = 0
+    request_headers = {
+        "Authorization": f"Bearer {authorization}",
+        "Accept": "application/json",
+    }
+
+    for attempt in range(2):
+        try:
+            async with asyncio.timeout(timeout_s):
+                response = await client.get(url, headers=request_headers)
+                response.read()
+                headers = _headers(response)
+                stack_error = _validate_stack(headers, expected)
+                return Result(
+                    latency_s=time.perf_counter() - started,
+                    status=response.status_code,
+                    error="stack_mismatch" if stack_error else None,
+                    error_detail=stack_error,
+                    server_ms=_float_header(headers.get("x-benchmark-request-ms")),
+                    db_ms=_float_header(headers.get("x-benchmark-db-ms")),
+                    pool_wait_ms=_float_header(headers.get("x-benchmark-pool-wait-ms")),
+                    db_queries=_float_header(headers.get("x-benchmark-db-queries")),
+                    pool_size=_float_header(headers.get("x-benchmark-pool-size")),
+                    pool_available=_float_header(headers.get("x-benchmark-pool-available")),
+                    pool_requests_waiting=_float_header(
+                        headers.get("x-benchmark-pool-requests-waiting")
+                    ),
+                    pool_requests_queued=_float_header(
+                        headers.get("x-benchmark-pool-requests-queued")
+                    ),
+                    pool_requests_wait_ms=_float_header(
+                        headers.get("x-benchmark-pool-requests-wait-ms")
+                    ),
+                    stack=headers.get("x-benchmark-stack"),
+                    router=headers.get("x-benchmark-router"),
+                    handler=headers.get("x-benchmark-handler"),
+                    async_callable=headers.get("x-benchmark-async-callable"),
+                    async_handler=headers.get("x-benchmark-async-handler"),
+                    view_class=headers.get("x-benchmark-view-class"),
+                    event_loop=headers.get("x-benchmark-event-loop"),
+                    async_orm_ops=headers.get("x-benchmark-async-orm-ops"),
+                    serializer_path=headers.get("x-benchmark-serializer-path"),
+                    transport_retries=retries,
+                )
+        except (httpx.ConnectError, httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError) as exc:
+            if attempt == 0:
+                retries += 1
+                await asyncio.sleep(0)
+                continue
+            return Result(
+                latency_s=time.perf_counter() - started,
+                status=None,
+                error=type(exc).__name__,
+                error_detail=str(exc),
+                transport_retries=retries,
+            )
+        except (httpx.TimeoutException, httpx.HTTPError, ValueError, RuntimeError) as exc:
+            return Result(
+                latency_s=time.perf_counter() - started,
+                status=None,
+                error=type(exc).__name__,
+                error_detail=str(exc),
+                transport_retries=retries,
+            )
+
+    raise AssertionError("unreachable")
+
+
 async def run_phase(
     *,
-    host: str,
-    port: int,
-    path: str,
+    url: str,
     token: str,
     requests: int,
     concurrency: int,
@@ -223,32 +224,49 @@ async def run_phase(
     lock = asyncio.Lock()
     started = time.perf_counter()
     last_report = 0
+    limits = httpx.Limits(
+        max_connections=concurrency,
+        max_keepalive_connections=concurrency,
+        keepalive_expiry=30.0,
+    )
+    timeout = httpx.Timeout(request_timeout_s)
 
-    async def worker() -> None:
-        nonlocal next_index, last_report
-        while True:
-            async with lock:
-                if next_index >= requests:
-                    return
-                next_index += 1
-            result = await request_once(
-                host, port, path, token, request_timeout_s, expected
-            )
-            results.append(result)
-            if len(results) - last_report >= 100:
-                last_report = len(results)
-                print(
-                    f"PROGRESS phase={label} completed={last_report}/{requests} "
-                    f"elapsed={time.perf_counter() - started:.3f}s",
-                    flush=True,
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        limits=limits,
+        http2=False,
+        trust_env=False,
+    ) as client:
+
+        async def worker() -> None:
+            nonlocal next_index, last_report
+            while True:
+                async with lock:
+                    if next_index >= requests:
+                        return
+                    next_index += 1
+                result = await request_once(
+                    client,
+                    url,
+                    token,
+                    request_timeout_s,
+                    expected,
                 )
+                results.append(result)
+                if len(results) - last_report >= 100:
+                    last_report = len(results)
+                    print(
+                        f"PROGRESS phase={label} completed={last_report}/{requests} "
+                        f"elapsed={time.perf_counter() - started:.3f}s",
+                        flush=True,
+                    )
 
-    deadline_exceeded = False
-    try:
-        async with asyncio.timeout(deadline_s):
-            await asyncio.gather(*(worker() for _ in range(concurrency)))
-    except TimeoutError:
-        deadline_exceeded = True
+        deadline_exceeded = False
+        try:
+            async with asyncio.timeout(deadline_s):
+                await asyncio.gather(*(worker() for _ in range(concurrency)))
+        except TimeoutError:
+            deadline_exceeded = True
 
     return results, deadline_exceeded
 
@@ -265,18 +283,32 @@ def summarize(
     expected: dict[str, str | None],
 ) -> dict:
     successful = [
-        r for r in results if r.status is not None and 200 <= r.status < 300 and r.error is None
+        r
+        for r in results
+        if r.status is not None and 200 <= r.status < 300 and r.error is None
     ]
     latencies = [r.latency_s * 1000 for r in results]
     server = [r.server_ms for r in results if r.server_ms is not None]
     db = [r.db_ms for r in results if r.db_ms is not None]
     pool = [r.pool_wait_ms for r in results if r.pool_wait_ms is not None]
     db_queries = [r.db_queries for r in results if r.db_queries is not None]
+    pool_sizes = [r.pool_size for r in results if r.pool_size is not None]
+    pool_available = [r.pool_available for r in results if r.pool_available is not None]
+    pool_waiting = [
+        r.pool_requests_waiting for r in results if r.pool_requests_waiting is not None
+    ]
+    pool_queued = [
+        r.pool_requests_queued for r in results if r.pool_requests_queued is not None
+    ]
+    pool_wait_totals = [
+        r.pool_requests_wait_ms for r in results if r.pool_requests_wait_ms is not None
+    ]
     status_counts = Counter(str(r.status) for r in results if r.status is not None)
     error_counts = Counter(r.error for r in results if r.error)
+    retry_count = sum(r.transport_retries for r in results)
 
     metadata_ok = all(
-        r.error not in {"stack_mismatch"}
+        r.error != "stack_mismatch"
         and r.stack is not None
         and r.router is not None
         and r.handler is not None
@@ -306,7 +338,7 @@ def summarize(
         "completed": len(results),
         "successful": len(successful),
         "failed": len(results) - len(successful),
-        "timeouts": error_counts.get("timeout", 0),
+        "timeouts": error_counts.get("TimeoutException", 0),
         "error_rate_pct": ((len(results) - len(successful)) / len(results) * 100) if results else None,
         "rps": len(results) / elapsed if elapsed else 0.0,
         "successful_rps": len(successful) / elapsed if elapsed else 0.0,
@@ -333,7 +365,13 @@ def summarize(
         "pool_wait_p50_ms": percentile(pool, 0.50),
         "pool_wait_p95_ms": percentile(pool, 0.95),
         "pool_wait_p99_ms": percentile(pool, 0.99),
+        "pool_size_mean": mean(pool_sizes),
+        "pool_available_mean": mean(pool_available),
+        "pool_requests_waiting_mean": mean(pool_waiting),
+        "pool_requests_queued_mean": mean(pool_queued),
+        "pool_requests_wait_ms_mean": mean(pool_wait_totals),
         "db_queries_mean": mean(db_queries),
+        "transport_retries": retry_count,
         "status_counts": dict(status_counts),
         "errors": dict(error_counts),
         "error_details": sorted({r.error_detail for r in results if r.error_detail}),
@@ -361,6 +399,13 @@ def env_float(name: str, default: float) -> float:
     return float(value) if value else default
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default=os.getenv("BENCH_URL"))
@@ -369,7 +414,11 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=env_int("BENCH_WARMUP", 50))
     parser.add_argument("--concurrency", type=int, default=env_int("BENCH_CONCURRENCY", 1))
     parser.add_argument("--deadline", type=float, default=env_float("BENCH_DEADLINE", 60.0))
-    parser.add_argument("--request-timeout", type=float, default=env_float("BENCH_TIMEOUT", 10.0))
+    parser.add_argument(
+        "--request-timeout",
+        type=float,
+        default=env_float("BENCH_TIMEOUT", 10.0),
+    )
     args = parser.parse_args()
 
     if not args.url:
@@ -390,19 +439,15 @@ def main() -> None:
     parsed = urlsplit(args.url)
     if parsed.scheme != "http":
         parser.error("benchmark URL must use http")
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 80
-    path = parsed.path or "/"
-    if parsed.query:
-        path += f"?{parsed.query}"
+    url = args.url
+
+    allow_partial = env_bool("BENCH_ALLOW_PARTIAL", False)
 
     if args.warmup:
         warmup_started = time.perf_counter()
         warmup_results, warmup_deadline_exceeded = asyncio.run(
             run_phase(
-                host=host,
-                port=port,
-                path=path,
+                url=url,
                 token=args.token,
                 requests=args.warmup,
                 concurrency=args.concurrency,
@@ -423,9 +468,7 @@ def main() -> None:
     started = time.perf_counter()
     results, measured_deadline_exceeded = asyncio.run(
         run_phase(
-            host=host,
-            port=port,
-            path=path,
+            url=url,
             token=args.token,
             requests=args.requests,
             concurrency=args.concurrency,
@@ -447,7 +490,9 @@ def main() -> None:
     )
     print(json.dumps(summary, sort_keys=True, allow_nan=False))
 
-    if not summary["stack_verified"] or summary["status"] != "complete":
+    if not summary["stack_verified"]:
+        raise SystemExit(3)
+    if summary["status"] != "complete" and not allow_partial:
         raise SystemExit(2)
 
 
