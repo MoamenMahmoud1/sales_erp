@@ -11,6 +11,9 @@ on:
       - ".github/workflows/middleware-diagnostic.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: middleware-diagnostic
   cancel-in-progress: true
@@ -234,7 +237,7 @@ jobs:
               "| removed middleware | p50 | p95 | p99 | delta vs full-c50 | server p50 |",
               "|---|---:|---:|---:|---:|---:|",
           ]
-          full = next((c for c in cases if c.get("case") == "full-c25"), None)
+          full = next((c for c in cases if c.get("case") == "full-c50"), None)
           for case in cases:
               name = case.get("case", "")
               if not name.startswith("loo-"):
@@ -250,15 +253,15 @@ jobs:
 
           rows += [
               "",
-              "## Per-middleware timing from full-c50",
+              "## Per-middleware timing from full-c25",
               "",
               "| middleware | inclusive p50 | inclusive p95 | exclusive p50 | exclusive p95 | coverage |",
               "|---|---:|---:|---:|---:|---:|",
           ]
-          full50 = next((c for c in cases if c.get("case") == "full-c25"), None)
-          if full50:
+          full25 = next((c for c in cases if c.get("case") == "full-c25"), None)
+          if full25:
               for name, metrics in sorted(
-                  full50.get("middleware", {}).items(),
+                  full25.get("middleware", {}).items(),
                   key=lambda item: item[1].get("exclusive_p50_ms") or 0,
                   reverse=True,
               ):
@@ -277,3 +280,19 @@ jobs:
           name: middleware-latency-diagnostic
           path: erp-api/benchmark-results/
           if-no-files-found: warn
+
+      - name: Persist diagnostic results
+        if: always()
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if [[ ! -f erp-api/benchmark-results/report.json ]]; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add erp-api/benchmark-results/report.json erp-api/benchmark-results/report.md
+          git add erp-api/benchmark-results/*.json
+          git diff --cached --quiet && exit 0
+          git commit -m "test(results): persist middleware latency diagnostic"
+          git push
