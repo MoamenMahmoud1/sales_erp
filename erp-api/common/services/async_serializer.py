@@ -2,6 +2,9 @@
 
 from asgiref.sync import sync_to_async
 
+from common.services.perf_timing import add_serializer_cpu, add_serializer_wait
+import time
+
 
 class AsyncSerializerService:
     """Keep synchronous serializer work behind explicit async boundaries."""
@@ -15,14 +18,24 @@ class AsyncSerializerService:
 
     @staticmethod
     async def adata(serializer):
-        """Serialize already-materialized objects with one executor hop.
+        """Serialize a materialized page and measure executor queueing separately."""
+        queued_at = time.perf_counter_ns()
+        started_at = 0
+        finished_at = 0
 
-        ADRF's generic serializer path crosses sync_to_async once per field and
-        once per field representation. For scalar Product rows this is pure
-        CPU work and does not need thread-sensitive ORM access, so batch the
-        whole page behind a single non-thread-sensitive boundary.
-        """
-        return await sync_to_async(
-            lambda: serializer.data,
+        def serialize():
+            nonlocal started_at, finished_at
+            started_at = time.perf_counter_ns()
+            try:
+                return serializer.data
+            finally:
+                finished_at = time.perf_counter_ns()
+
+        data = await sync_to_async(
+            serialize,
             thread_sensitive=False,
         )()
+
+        add_serializer_wait(max(started_at - queued_at, 0))
+        add_serializer_cpu(max(finished_at - started_at, 0))
+        return data
