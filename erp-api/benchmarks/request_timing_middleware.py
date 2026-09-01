@@ -1,5 +1,6 @@
-"""Benchmark-only request, SQL, and DB-pool timing instrumentation."""
+"""Benchmark-only request, SQL, stack, and ORM timing instrumentation."""
 
+import asyncio
 import inspect
 import time
 from contextvars import ContextVar
@@ -9,6 +10,33 @@ from django.db.backends.signals import connection_created
 from django.dispatch import receiver
 
 _metrics: ContextVar[dict | None] = ContextVar("benchmark_metrics", default=None)
+
+
+def _resolved_view_metadata(request):
+    """Return runtime metadata from Django's resolved endpoint callable."""
+    resolver = getattr(request, "resolver_match", None)
+    func = getattr(resolver, "func", None)
+    view_class = getattr(func, "view_class", None)
+    actions = getattr(func, "actions", {}) or {}
+    action = actions.get(request.method.lower())
+    handler = getattr(view_class, action, None) if view_class and action else None
+
+    async_callable = bool(func and inspect.iscoroutinefunction(func))
+    async_handler = bool(handler and inspect.iscoroutinefunction(handler))
+    mro = getattr(view_class, "__mro__", ()) if view_class else ()
+    router = "adrf" if any(cls.__module__.startswith("adrf.") for cls in mro) else "drf"
+    class_name = (
+        f"{view_class.__module__}.{view_class.__name__}" if view_class else ""
+    )
+
+    return {
+        "stack": "async" if async_callable else "sync",
+        "router": router,
+        "handler": action or "",
+        "async_callable": "1" if async_callable else "0",
+        "async_handler": "1" if async_handler else "0",
+        "view_class": class_name,
+    }
 
 
 class TimingWrapper:
@@ -36,12 +64,7 @@ def _connection_created(sender, connection, **kwargs):
 
 
 class BenchmarkTimingMiddleware:
-    """Measure request wall time, SQL execution time, and derived app time.
-
-    Pool acquisition is intentionally not counted as SQL time. If the backend
-    exposes pool wait telemetry, benchmark code can add it to the same metrics
-    context without conflating it with PostgreSQL execution time.
-    """
+    """Measure request wall time, SQL time, and runtime async-stack identity."""
 
     async_capable = True
     sync_capable = True
@@ -64,7 +87,7 @@ class BenchmarkTimingMiddleware:
             if self._is_async:
                 return self._async_call(request, started, token, metrics)
             response = self.get_response(request)
-            self._finish(response, started, token, metrics)
+            self._finish(request, response, started, token, metrics, event_loop=False)
             return response
         except Exception:
             _metrics.reset(token)
@@ -73,16 +96,20 @@ class BenchmarkTimingMiddleware:
     async def _async_call(self, request, started, token, metrics):
         try:
             response = await self.get_response(request)
-            self._finish(response, started, token, metrics)
+            self._finish(request, response, started, token, metrics, event_loop=True)
             return response
         except Exception:
             _metrics.reset(token)
             raise
 
-    def _finish(self, response, started, token, metrics):
+    def _finish(self, request, response, started, token, metrics, *, event_loop):
         total_ms = (time.perf_counter() - started) * 1000
         db_ms = metrics["db_time"] * 1000
         pool_wait_ms = metrics["pool_wait"] * 1000
+        view_meta = _resolved_view_metadata(request)
+        async_orm_ops = getattr(request, "_benchmark_async_orm_operations", [])
+        serializer_path = getattr(request, "_benchmark_serializer_path", "")
+
         response["Server-Timing"] = (
             f"app;dur={max(total_ms - db_ms - pool_wait_ms, 0):.3f}, "
             f"db;dur={db_ms:.3f}, pool;dur={pool_wait_ms:.3f}, "
@@ -92,4 +119,20 @@ class BenchmarkTimingMiddleware:
         response["X-Benchmark-DB-Ms"] = f"{db_ms:.3f}"
         response["X-Benchmark-DB-Queries"] = str(metrics["db_queries"])
         response["X-Benchmark-Pool-Wait-Ms"] = f"{pool_wait_ms:.3f}"
+        response["X-Benchmark-Stack"] = view_meta["stack"]
+        response["X-Benchmark-Router"] = view_meta["router"]
+        response["X-Benchmark-Handler"] = view_meta["handler"]
+        response["X-Benchmark-Async-Callable"] = view_meta["async_callable"]
+        response["X-Benchmark-Async-Handler"] = view_meta["async_handler"]
+        response["X-Benchmark-View-Class"] = view_meta["view_class"]
+        response["X-Benchmark-Event-Loop"] = "1" if event_loop else "0"
+        response["X-Benchmark-Async-ORM-Ops"] = ",".join(async_orm_ops)
+        response["X-Benchmark-Serializer-Path"] = serializer_path
+
+        if event_loop:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                response["X-Benchmark-Event-Loop"] = "0"
+
         _metrics.reset(token)
