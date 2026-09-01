@@ -37,13 +37,13 @@ class CouponSerializer(serializers.ModelSerializer):
 
     async def acreate(self, validated_data):
         try:
-            return await CreateCoupon()(validated_data=validated_data)
+            return await CreateCoupon().acall(validated_data=validated_data)
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict) from exc
 
     async def aupdate(self, instance, validated_data):
         try:
-            return await UpdateCoupon()(
+            return await UpdateCoupon().acall(
                 instance=instance,
                 validated_data=validated_data,
             )
