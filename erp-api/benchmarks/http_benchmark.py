@@ -30,6 +30,9 @@ def percentile(values, p):
 async def run_load(client, total, concurrency):
     semaphore = asyncio.Semaphore(concurrency)
     latencies_ms = []
+    server_ms = []
+    db_ms = []
+    db_queries = []
     statuses = Counter()
     errors = Counter()
     started = time.perf_counter()
@@ -42,7 +45,13 @@ async def run_load(client, total, concurrency):
                 elapsed = (time.perf_counter() - request_started) * 1000
                 latencies_ms.append(elapsed)
                 statuses[str(response.status_code)] += 1
-            except httpx.TimeoutException as exc:
+                try:
+                    server_ms.append(float(response.headers["X-Benchmark-Request-Ms"]))
+                    db_ms.append(float(response.headers["X-Benchmark-DB-Ms"]))
+                    db_queries.append(int(response.headers["X-Benchmark-DB-Queries"]))
+                except (KeyError, ValueError):
+                    errors["missing_timing_headers"] += 1
+            except httpx.TimeoutException:
                 elapsed = (time.perf_counter() - request_started) * 1000
                 latencies_ms.append(elapsed)
                 errors["timeout"] += 1
@@ -57,7 +66,7 @@ async def run_load(client, total, concurrency):
     successful = sum(count for status, count in statuses.items() if status.startswith("2"))
     failed_http = total - successful - sum(errors.values())
     failed = failed_http + sum(errors.values())
-    rps = total / wall_time if wall_time else 0.0
+    rps = successful / wall_time if wall_time else 0.0
 
     return {
         "requests": total,
@@ -78,6 +87,15 @@ async def run_load(client, total, concurrency):
         "p95_ms": percentile(latencies_ms, 0.95),
         "p99_ms": percentile(latencies_ms, 0.99),
         "max_ms": max(latencies_ms) if latencies_ms else 0.0,
+        "server_p50_ms": percentile(server_ms, 0.50),
+        "server_p95_ms": percentile(server_ms, 0.95),
+        "server_p99_ms": percentile(server_ms, 0.99),
+        "db_p50_ms": percentile(db_ms, 0.50),
+        "db_p95_ms": percentile(db_ms, 0.95),
+        "db_p99_ms": percentile(db_ms, 0.99),
+        "db_mean_ms": statistics.mean(db_ms) if db_ms else 0.0,
+        "db_queries_mean": statistics.mean(db_queries) if db_queries else 0.0,
+        "timed_requests": len(server_ms),
         "status_codes": dict(statuses),
     }
 
