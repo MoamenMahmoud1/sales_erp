@@ -56,9 +56,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         """List products with bounded DB concurrency and one serializer hop."""
         queryset = await self.afilter_queryset(self.get_queryset())
 
-        # Gate only the DB-bound section. As soon as both COUNT and page
-        # evaluation finish, the slot is released for the next request while
-        # response serialization can proceed independently.
         try:
             async with db_slot():
                 with db_operation():
@@ -81,8 +78,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response(data, status=200)
 
     def get_queryset(self):
-        # Keep stock and sold totals in independent correlated subqueries so
-        # their joins cannot multiply each other.
         sold_subquery = self._confirmed_invoice_item_qty()
         stock_subquery = self._total_stock_subquery()
 
@@ -142,11 +137,6 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
         "carton_price",
         "created_at",
         "updated_at",
-    )
-
-    ordering = (
-        "name",
-        "pk",
     )
 
     ordering = (
