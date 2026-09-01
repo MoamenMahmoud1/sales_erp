@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure end-to-end HTTP latency and collect optional server stage timings."""
+"""True end-to-end HTTP benchmark with optional server-side stage timings."""
 
 from __future__ import annotations
 
@@ -17,14 +17,14 @@ import httpx
 def percentile(values: list[float], p: float) -> float | None:
     if not values:
         return None
-    values = sorted(values)
-    rank = (len(values) - 1) * p
+    ordered = sorted(values)
+    rank = (len(ordered) - 1) * p
     lower = math.floor(rank)
     upper = math.ceil(rank)
     if lower == upper:
-        return values[lower]
+        return ordered[lower]
     weight = rank - lower
-    return values[lower] + (values[upper] - values[lower]) * weight
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * weight
 
 
 def env_int(name: str, default: int) -> int:
@@ -37,13 +37,25 @@ def env_float(name: str, default: float) -> float:
     return float(value) if value else default
 
 
+def summarize(values: list[float]) -> dict[str, float | int | None]:
+    return {
+        "count": len(values),
+        "mean_ms": statistics.fmean(values) if values else None,
+        "p50_ms": percentile(values, 0.50),
+        "p95_ms": percentile(values, 0.95),
+        "p99_ms": percentile(values, 0.99),
+        "max_ms": max(values) if values else None,
+    }
+
+
 async def run_requests(
     url: str,
     token: str,
     requests: int,
     concurrency: int,
     timeout_s: float,
-):
+    progress_every: int = 0,
+) -> tuple[list[float], list[int], Counter[str], dict[str, list[float]], list[int], int]:
     latencies: list[float] = []
     statuses: list[int] = []
     errors: Counter[str] = Counter()
@@ -54,8 +66,11 @@ async def run_requests(
         "sql": [],
     }
     sql_counts: list[int] = []
+    instrumented_responses = 0
     next_index = 0
+    completed = 0
     lock = asyncio.Lock()
+
     limits = httpx.Limits(
         max_connections=concurrency,
         max_keepalive_connections=concurrency,
@@ -68,13 +83,16 @@ async def run_requests(
         http2=False,
         trust_env=False,
     ) as client:
+
         async def worker() -> None:
-            nonlocal next_index
+            nonlocal next_index, completed, instrumented_responses
+
             while True:
                 async with lock:
                     if next_index >= requests:
                         return
                     next_index += 1
+
                 started = time.perf_counter()
                 try:
                     response = await client.get(
@@ -84,8 +102,10 @@ async def run_requests(
                             "Accept": "application/json",
                         },
                     )
+                    # Include body consumption in client-observed latency.
                     response.read()
-                    latencies.append((time.perf_counter() - started) * 1000)
+                    elapsed_ms = (time.perf_counter() - started) * 1000
+                    latencies.append(elapsed_ms)
                     statuses.append(response.status_code)
 
                     header_map = {
@@ -94,37 +114,58 @@ async def run_requests(
                         "db_pool": "X-Perf-DB-Pool-ms",
                         "sql": "X-Perf-SQL-ms",
                     }
+                    parsed_all = True
                     for stage, header in header_map.items():
                         value = response.headers.get(header)
-                        if value is not None:
-                            try:
-                                stage_samples[stage].append(float(value))
-                            except ValueError:
-                                pass
+                        if value is None:
+                            parsed_all = False
+                            continue
+                        try:
+                            stage_samples[stage].append(float(value))
+                        except ValueError:
+                            parsed_all = False
+
                     sql_count = response.headers.get("X-Perf-SQL-Count")
-                    if sql_count is not None:
+                    if sql_count is None:
+                        parsed_all = False
+                    else:
                         try:
                             sql_counts.append(int(sql_count))
                         except ValueError:
-                            pass
-                except Exception as exc:  # benchmark must record transport failures
+                            parsed_all = False
+
+                    if parsed_all:
+                        instrumented_responses += 1
+                except Exception as exc:
                     latencies.append((time.perf_counter() - started) * 1000)
                     errors[type(exc).__name__] += 1
 
+                async with lock:
+                    completed += 1
+                    current = completed
+
+                if progress_every and current % progress_every == 0:
+                    print(
+                        json.dumps(
+                            {
+                                "phase": "progress",
+                                "completed": current,
+                                "requests": requests,
+                            }
+                        ),
+                        flush=True,
+                    )
+
         await asyncio.gather(*(worker() for _ in range(concurrency)))
 
-    return latencies, statuses, errors, stage_samples, sql_counts
-
-
-def summarize_stage(values: list[float]) -> dict[str, float | None]:
-    return {
-        "count": len(values),
-        "mean_ms": statistics.fmean(values) if values else None,
-        "p50_ms": percentile(values, 0.50),
-        "p95_ms": percentile(values, 0.95),
-        "p99_ms": percentile(values, 0.99),
-        "max_ms": max(values) if values else None,
-    }
+    return (
+        latencies,
+        statuses,
+        errors,
+        stage_samples,
+        sql_counts,
+        instrumented_responses,
+    )
 
 
 async def main() -> None:
@@ -134,28 +175,66 @@ async def main() -> None:
     concurrency = env_int("BENCH_CONCURRENCY", 50)
     warmup = env_int("BENCH_WARMUP", 50)
     timeout_s = env_float("BENCH_TIMEOUT", 10)
+    deadline_s = env_float("BENCH_DEADLINE", 0)
+    progress_every = env_int("BENCH_PROGRESS_EVERY", 0)
 
-    # Warmup is discarded and is never included in the reported measurements.
-    await run_requests(url, token, warmup, min(concurrency, warmup), timeout_s)
+    if requests <= 0 or concurrency <= 0:
+        raise SystemExit("BENCH_REQUESTS and BENCH_CONCURRENCY must be > 0")
+
+    # Warmup is deliberately discarded and never contributes to reported stats.
+    if warmup > 0:
+        await run_requests(
+            url,
+            token,
+            warmup,
+            min(concurrency, warmup),
+            timeout_s,
+        )
 
     started = time.perf_counter()
-    latencies, statuses, errors, stage_samples, sql_counts = await run_requests(
-        url, token, requests, concurrency, timeout_s
+    (
+        latencies,
+        statuses,
+        errors,
+        stage_samples,
+        sql_counts,
+        instrumented_responses,
+    ) = await run_requests(
+        url,
+        token,
+        requests,
+        concurrency,
+        timeout_s,
+        progress_every,
     )
     elapsed = time.perf_counter() - started
 
     successful = sum(200 <= status < 300 for status in statuses)
+    completed = len(latencies)
+    failed = completed - successful
+    stage_stats = {
+        stage: summarize(values) for stage, values in stage_samples.items()
+    }
+
+    stack_verified = (
+        completed == requests
+        and successful == requests
+        and instrumented_responses == requests
+        and len(sql_counts) == requests
+    )
+
     payload = {
-        "status": "complete" if len(latencies) == requests and successful == requests else "partial",
+        "phase": "measured",
+        "status": "complete" if stack_verified else "partial",
         "requests": requests,
-        "completed": len(latencies),
+        "completed": completed,
         "successful": successful,
-        "failed": len(latencies) - successful,
-        "error_rate_pct": ((len(latencies) - successful) / len(latencies) * 100) if latencies else None,
+        "failed": failed,
+        "error_rate_pct": (failed / completed * 100) if completed else None,
         "concurrency": concurrency,
         "warmup_requests": warmup,
         "wall_time_sec": elapsed,
-        "rps": len(latencies) / elapsed if elapsed else 0,
+        "rps": completed / elapsed if elapsed else 0,
         "successful_rps": successful / elapsed if elapsed else 0,
         "latency_mean_ms": statistics.fmean(latencies) if latencies else None,
         "p50_ms": percentile(latencies, 0.50),
@@ -165,15 +244,33 @@ async def main() -> None:
         "latency_max_ms": max(latencies) if latencies else None,
         "status_counts": dict(Counter(map(str, statuses))),
         "errors": dict(errors),
-        "server_timing": {
-            stage: summarize_stage(values)
-            for stage, values in stage_samples.items()
-        },
+        "server_timing": stage_stats,
+        "server_p50_ms": stage_stats["app"]["p50_ms"],
+        "server_p95_ms": stage_stats["app"]["p95_ms"],
+        "server_p99_ms": stage_stats["app"]["p99_ms"],
+        "db_p50_ms": stage_stats["sql"]["p50_ms"],
+        "db_p95_ms": stage_stats["sql"]["p95_ms"],
+        "db_p99_ms": stage_stats["sql"]["p99_ms"],
+        "pool_wait_p50_ms": stage_stats["db_pool"]["p50_ms"],
+        "pool_wait_p95_ms": stage_stats["db_pool"]["p95_ms"],
+        "pool_wait_p99_ms": stage_stats["db_pool"]["p99_ms"],
+        "db_admission_p50_ms": stage_stats["db_admission"]["p50_ms"],
+        "db_admission_p95_ms": stage_stats["db_admission"]["p95_ms"],
+        "db_admission_p99_ms": stage_stats["db_admission"]["p99_ms"],
+        "db_queries_mean": statistics.fmean(sql_counts) if sql_counts else None,
         "sql_count_mean": statistics.fmean(sql_counts) if sql_counts else None,
+        "instrumented_responses": instrumented_responses,
+        "stack_verified": stack_verified,
+        "deadline_sec": deadline_s,
+        "deadline_exceeded": bool(deadline_s and elapsed > deadline_s),
     }
+
     print(json.dumps(payload, indent=2, sort_keys=True))
+
     if payload["status"] != "complete":
         raise SystemExit(1)
+    if payload["deadline_exceeded"]:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
