@@ -11,7 +11,7 @@ from accounts.api.serializers.account_email import (
     SignUpSerializer,
 )
 from authsession.http import NoStoreResponseMixin, clear_login_cookies
-from authsession.permissions import VerifiedAuthSessionPermission
+from authsession.permissions import VerifiedAuthSessionSyncPermission
 from authentication.throttling import (
     EmailActionThrottle,
     SignUpThrottle,
@@ -62,7 +62,7 @@ class EmailVerificationResendView(NoStoreResponseMixin, GenericAPIView):
 
 class EmailChangeRequestView(NoStoreResponseMixin, GenericAPIView):
     serializer_class = EmailChangeRequestSerializer
-    permission_classes = (IsAuthenticated, VerifiedAuthSessionPermission)
+    permission_classes = (IsAuthenticated, VerifiedAuthSessionSyncPermission)
     throttle_classes = (EmailActionThrottle,)
 
     def post(self, request, *args, **kwargs):
