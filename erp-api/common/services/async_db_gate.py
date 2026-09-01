@@ -7,9 +7,8 @@ import time
 from contextlib import asynccontextmanager
 
 from django.conf import settings
-from django.db import connection
 
-from common.services.perf_timing import add_admission_wait, add_pool_wait
+from common.services.perf_timing import add_admission_wait
 
 
 class DBAdmissionTimeout(RuntimeError):
@@ -65,25 +64,15 @@ async def _acquire_gate(gate: asyncio.Semaphore, timeout: float | None) -> None:
         add_admission_wait(time.perf_counter_ns() - started)
 
 
-async def _ensure_connection() -> None:
-    """Acquire the backend pool connection before any ORM SQL is executed."""
-    started = time.perf_counter_ns()
-    await connection.aensure_connection()
-    add_pool_wait(time.perf_counter_ns() - started)
-
-
 @asynccontextmanager
 async def db_slot():
     """Bound DB-bound ORM concurrency per ASGI worker.
 
-    Admission wait is measured before the semaphore. Once admitted, the
-    connection is explicitly acquired so pool wait is a separate stage. SQL
-    execution itself is measured by Django's execute wrapper middleware.
+    The gate measures only application admission wait. Psycopg pool checkout
+    is instrumented independently at ConnectionPool.getconn(), and SQL
+    execution is measured by Django's execute wrapper middleware.
     """
     if not enabled():
-        # Baseline mode has no application gate, but still acquires the pool
-        # connection explicitly so pool wait remains measurable and comparable.
-        await _ensure_connection()
         yield
         return
 
@@ -92,7 +81,6 @@ async def db_slot():
     await _acquire_gate(gate, timeout)
 
     try:
-        await _ensure_connection()
         yield
     finally:
         gate.release()
