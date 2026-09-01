@@ -5,7 +5,7 @@ from rest_framework import filters, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from common.pagination import StandardPagination
+from common.pagination import AsyncStandardPagination
 
 from purchases.api.filters.purchase import PurchaseFilter
 from purchases.api.serializers import (
@@ -21,7 +21,7 @@ from authentication.throttling import SensitiveActionThrottle
 
 class PurchaseListCreateView(generics.ListCreateAPIView):
     permission_classes = (PurchaseAccessPermission,)
-    pagination_class = StandardPagination
+    pagination_class = AsyncStandardPagination
 
     filter_backends = (
         DjangoFilterBackend,
