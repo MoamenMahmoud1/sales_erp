@@ -2,9 +2,11 @@ from adrf import viewsets
 from django.db.models import OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from rest_framework import filters
+from rest_framework.response import Response
 
 from common.pagination import AsyncStandardPagination, StandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
+from common.services.async_serializer import AsyncSerializerService
 
 from products.api.serializers import (
     CartonPricingSerializer,
@@ -52,6 +54,21 @@ class ProductViewSet(viewsets.ModelViewSet):
         for backend_class in self.filter_backends:
             queryset = backend_class().filter_queryset(self.request, queryset, self)
         return queryset
+
+    async def alist(self, request, *args, **kwargs):
+        """List products with one batched serializer boundary for the page."""
+        queryset = await self.afilter_queryset(self.get_queryset())
+        page = await self.apaginate_queryset(queryset)
+
+        request._benchmark_serializer_path = "batched_sync_representation"
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            data = await AsyncSerializerService.adata(serializer)
+            return await self.get_apaginated_response(data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        data = await AsyncSerializerService.adata(serializer)
+        return Response(data, status=200)
 
     def get_queryset(self):
         # Keep stock and sold totals in independent correlated subqueries so
