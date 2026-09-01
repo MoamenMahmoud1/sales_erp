@@ -11,7 +11,6 @@ from django.dispatch import receiver
 
 _metrics: ContextVar[dict | None] = ContextVar("benchmark_metrics", default=None)
 
-
 ASYNC_ROUTER_ACTIONS = {
     "alist",
     "aretrieve",
@@ -20,6 +19,13 @@ ASYNC_ROUTER_ACTIONS = {
     "apatch",
     "adestroy",
 }
+
+
+def mark_async_orm_operation(operation: str) -> None:
+    """Record an async ORM operation in the active benchmark request context."""
+    metrics = _metrics.get()
+    if metrics is not None:
+        metrics.setdefault("async_orm_ops", set()).add(operation)
 
 
 def _resolved_view_metadata(request):
@@ -94,6 +100,7 @@ class BenchmarkTimingMiddleware:
             "db_time": 0.0,
             "db_queries": 0,
             "pool_wait": 0.0,
+            "async_orm_ops": set(),
         }
         token = _metrics.set(metrics)
         started = time.perf_counter()
@@ -121,7 +128,7 @@ class BenchmarkTimingMiddleware:
         db_ms = metrics["db_time"] * 1000
         pool_wait_ms = metrics["pool_wait"] * 1000
         view_meta = _resolved_view_metadata(request)
-        async_orm_ops = getattr(request, "_benchmark_async_orm_operations", [])
+        async_orm_ops = sorted(metrics.get("async_orm_ops", set()))
         serializer_path = getattr(request, "_benchmark_serializer_path", "")
 
         response["Server-Timing"] = (
