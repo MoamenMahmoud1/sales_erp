@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure end-to-end HTTP latency without application-side instrumentation."""
+"""Measure end-to-end HTTP latency and collect optional server stage timings."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ import json
 import math
 import os
 import statistics
-import sys
-import time
 from collections import Counter
 
 import httpx
@@ -38,10 +36,23 @@ def env_float(name: str, default: float) -> float:
     return float(value) if value else default
 
 
-async def run_requests(url: str, token: str, requests: int, concurrency: int, timeout_s: float):
+async def run_requests(
+    url: str,
+    token: str,
+    requests: int,
+    concurrency: int,
+    timeout_s: float,
+):
     latencies: list[float] = []
     statuses: list[int] = []
     errors: Counter[str] = Counter()
+    stage_samples: dict[str, list[float]] = {
+        "app": [],
+        "db_admission": [],
+        "db_pool": [],
+        "sql": [],
+    }
+    sql_counts: list[int] = []
     next_index = 0
     lock = asyncio.Lock()
     limits = httpx.Limits(
@@ -63,7 +74,7 @@ async def run_requests(url: str, token: str, requests: int, concurrency: int, ti
                     if next_index >= requests:
                         return
                     next_index += 1
-                started = time.perf_counter()
+                started = __import__("time").perf_counter()
                 try:
                     response = await client.get(
                         url,
@@ -73,15 +84,46 @@ async def run_requests(url: str, token: str, requests: int, concurrency: int, ti
                         },
                     )
                     response.read()
-                    latencies.append((time.perf_counter() - started) * 1000)
+                    latencies.append((__import__("time").perf_counter() - started) * 1000)
                     statuses.append(response.status_code)
+
+                    header_map = {
+                        "app": "X-Perf-App-ms",
+                        "db_admission": "X-Perf-DB-Admission-ms",
+                        "db_pool": "X-Perf-DB-Pool-ms",
+                        "sql": "X-Perf-SQL-ms",
+                    }
+                    for stage, header in header_map.items():
+                        value = response.headers.get(header)
+                        if value is not None:
+                            try:
+                                stage_samples[stage].append(float(value))
+                            except ValueError:
+                                pass
+                    sql_count = response.headers.get("X-Perf-SQL-Count")
+                    if sql_count is not None:
+                        try:
+                            sql_counts.append(int(sql_count))
+                        except ValueError:
+                            pass
                 except Exception as exc:  # benchmark must record transport failures
-                    latencies.append((time.perf_counter() - started) * 1000)
+                    latencies.append((__import__("time").perf_counter() - started) * 1000)
                     errors[type(exc).__name__] += 1
 
         await asyncio.gather(*(worker() for _ in range(concurrency)))
 
-    return latencies, statuses, errors
+    return latencies, statuses, errors, stage_samples, sql_counts
+
+
+def summarize_stage(values: list[float]) -> dict[str, float | None]:
+    return {
+        "count": len(values),
+        "mean_ms": statistics.fmean(values) if values else None,
+        "p50_ms": percentile(values, 0.50),
+        "p95_ms": percentile(values, 0.95),
+        "p99_ms": percentile(values, 0.99),
+        "max_ms": max(values) if values else None,
+    }
 
 
 async def main() -> None:
@@ -95,11 +137,11 @@ async def main() -> None:
     # Warmup is discarded and is never included in the reported measurements.
     await run_requests(url, token, warmup, min(concurrency, warmup), timeout_s)
 
-    started = time.perf_counter()
-    latencies, statuses, errors = await run_requests(
+    started = __import__("time").perf_counter()
+    latencies, statuses, errors, stage_samples, sql_counts = await run_requests(
         url, token, requests, concurrency, timeout_s
     )
-    elapsed = time.perf_counter() - started
+    elapsed = __import__("time").perf_counter() - started
 
     successful = sum(200 <= status < 300 for status in statuses)
     payload = {
@@ -122,6 +164,8 @@ async def main() -> None:
         "latency_max_ms": max(latencies) if latencies else None,
         "status_counts": dict(Counter(map(str, statuses))),
         "errors": dict(errors),
+        "server_timing": {stage: summarize_stage(values) for stage, values in stage_samples.items()},
+        "sql_count_mean": statistics.fmean(sql_counts) if sql_counts else None,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
     if payload["status"] != "complete":
