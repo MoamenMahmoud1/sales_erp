@@ -1,35 +1,37 @@
 """Benchmark-only request/DB timing instrumentation.
 
-This module is loaded only by settings_bench. It measures wall-clock request
-time and SQL execution time without changing production middleware.
+Loaded only by settings_bench. It measures request wall time and SQL execution
+time without changing production middleware.
 """
 
+import inspect
 import time
 from contextvars import ContextVar
 
+from asgiref.sync import markcoroutinefunction
 from django.db.backends.signals import connection_created
 from django.dispatch import receiver
 
 _metrics: ContextVar[dict | None] = ContextVar("benchmark_metrics", default=None)
 
 
+class TimingWrapper:
+    def __call__(self, execute, sql, params, many, context):
+        started = time.perf_counter()
+        try:
+            return execute(sql, params, many, context)
+        finally:
+            metrics = _metrics.get()
+            if metrics is not None:
+                metrics["db_time"] += time.perf_counter() - started
+                metrics["db_queries"] += 1
+
+
 def _install_wrapper(connection):
     if getattr(connection, "_benchmark_wrapper_installed", False):
         return
-
-    class TimingWrapper:
-        def __call__(self, execute, sql, params, many, context):
-            started = time.perf_counter()
-            try:
-                return execute(sql, params, many, context)
-            finally:
-                elapsed = time.perf_counter() - started
-                metrics = _metrics.get()
-                if metrics is not None:
-                    metrics["db_time"] += elapsed
-                    metrics["db_queries"] += 1
-
-    connection.execute_wrapper(TimingWrapper())
+    # BaseDatabaseWrapper.execute_wrappers is the per-connection wrapper stack.
+    connection.execute_wrappers.append(TimingWrapper())
     connection._benchmark_wrapper_installed = True
 
 
@@ -46,9 +48,6 @@ class BenchmarkTimingMiddleware:
 
     def __init__(self, get_response):
         self.get_response = get_response
-        import inspect
-        from asgiref.sync import markcoroutinefunction
-
         self._is_async = inspect.iscoroutinefunction(get_response)
         if self._is_async:
             markcoroutinefunction(self)
