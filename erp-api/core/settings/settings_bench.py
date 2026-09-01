@@ -1,4 +1,4 @@
-"""Benchmark settings: production DB/cache/ASGI stack without request throttling."""
+"""Benchmark settings using the real async application stack."""
 
 import os
 
@@ -10,56 +10,13 @@ SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 
-# Benchmark-only instrumentation. It exposes request wall time and SQL time
-# through response headers; it is never enabled by production settings.
-_bench_minimal_middleware = os.getenv("BENCH_MINIMAL_MIDDLEWARE", "0") == "1"
-_bench_middleware_diagnostic = os.getenv("BENCH_MIDDLEWARE_DIAGNOSTIC", "0") == "1"
-_bench_middleware_exclude = {
-    item.strip()
-    for item in os.getenv("BENCH_MIDDLEWARE_EXCLUDE", "").split(",")
-    if item.strip()
-}
-_bench_view_boundary = "benchmarks.view_boundary_middleware.BenchmarkViewBoundaryMiddleware"
-
-if _bench_minimal_middleware:
-    # The products benchmark is authenticated by DRF's stateless JWT
-    # authentication, so the Django AuthenticationMiddleware/session stack is
-    # not required for this read-only endpoint. This gives us a true
-    # end-to-end async middleware comparison.
-    MIDDLEWARE = [
-        "benchmarks.request_timing_middleware.BenchmarkTimingMiddleware",
-        _bench_view_boundary,
-    ] if _bench_middleware_diagnostic else [
-        "benchmarks.request_timing_middleware.BenchmarkTimingMiddleware",
-    ]
-else:
-    MIDDLEWARE = [
-        "benchmarks.request_timing_middleware.BenchmarkTimingMiddleware",
-        *MIDDLEWARE,
-    ]
-    if _bench_middleware_exclude:
-        MIDDLEWARE = [
-            path
-            for path in MIDDLEWARE
-            if path not in _bench_middleware_exclude
-        ]
-    if _bench_middleware_diagnostic:
-        MIDDLEWARE.append(_bench_view_boundary)
-
-# Diagnostic mode is deliberately activated from BenchmarkTimingMiddleware.__init__
-# rather than while importing this settings module. At that point Django has
-# completed app loading and all middleware instances have been constructed,
-# while class-level __call__ patching still affects those live instances.
-
-# Application-level DB concurrency control. Zero disables the gate. When
-# enabled, the async view waits here before entering its DB-bound section,
-# preventing Django's PostgreSQL pool from becoming the primary request queue.
-ASYNC_DB_CONCURRENCY = int(os.getenv("ASYNC_DB_CONCURRENCY", "0") or "0")
-if ASYNC_DB_CONCURRENCY < 0:
-    raise ValueError("ASYNC_DB_CONCURRENCY must be >= 0")
-
 # Benchmark raw application capacity, not the configured rate-limit policy.
 REST_FRAMEWORK = {
     **REST_FRAMEWORK,
     "DEFAULT_THROTTLE_CLASSES": (),
 }
+
+# Benchmark runs explicitly choose the admission limit through the environment.
+ASYNC_DB_CONCURRENCY = int(os.getenv("ASYNC_DB_CONCURRENCY", "0") or "0")
+if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY > DB_POOL_MAX_SIZE:
+    raise ValueError("ASYNC_DB_CONCURRENCY must be between 0 and DB_POOL_MAX_SIZE")
