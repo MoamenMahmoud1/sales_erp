@@ -7,6 +7,8 @@ on:
       - "erp-api/benchmarks/**"
       - "erp-api/core/settings/settings_bench.py"
       - "erp-api/products/api/views.py"
+      - "erp-api/products/api/sync_views.py"
+      - "erp-api/products/urls.py"
       - "erp-api/products/models.py"
       - "erp-api/inventory/models.py"
       - "erp-api/invoices/models.py"
@@ -125,7 +127,7 @@ jobs:
             PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SHOW server_version; SHOW max_connections; SHOW shared_buffers; SHOW effective_cache_size; SHOW work_mem; SHOW random_page_cost; SHOW effective_io_concurrency; SHOW jit; SHOW track_io_timing;"
           } > benchmark-results/environment.md
 
-      - name: Run baseline sync and async benchmarks
+      - name: Run true pure sync and async stack benchmarks
         run: |
           set -euo pipefail
           TOKEN="$(cat bench_token.txt)"
@@ -133,6 +135,7 @@ jobs:
           ENDPOINT="/api/v1/products/?page=1&page_size=20"
           start_server() {
             mode="$1"
+            export BENCH_API_STACK="$mode"
             if [[ "$mode" == "sync" ]]; then
               gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers 2 --worker-class sync --timeout 30 --access-logfile /dev/null --error-logfile "/tmp/gunicorn-${mode}.log" --log-level warning &
             else
@@ -150,13 +153,15 @@ jobs:
             if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then kill "$SERVER_PID" || true; wait "$SERVER_PID" || true; fi
             SERVER_PID=""
           }
-          trap 'stop_server; rm -f bench_token.txt' EXIT
+          trap 'stop_server' EXIT
           for mode in sync async; do
             start_server "$mode"
             for concurrency in 1 5 10 25 50 100; do
               BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" \
                 python benchmarks/http_benchmark.py | tee "benchmark-results/${mode}-c${concurrency}.jsonl"
             done
+            BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY=100 BENCH_REQUESTS=500 BENCH_WARMUP=100 \
+              python benchmarks/transport_diagnostics.py | tee "benchmark-results/${mode}-transport-c100.jsonl"
             echo "=== ${mode} server errors ==="
             cat "/tmp/gunicorn-${mode}.log" || true
             stop_server
@@ -173,6 +178,7 @@ jobs:
           BASE="http://127.0.0.1:8000"
           ENDPOINT="/api/v1/products/?page=1&page_size=20"
           for mode in sync async; do
+            export BENCH_API_STACK="$mode"
             for pool in 5 10 20 40; do
               export DB_POOL_MAX_SIZE="$pool"
               if [[ "$mode" == "sync" ]]; then
@@ -207,10 +213,10 @@ jobs:
                           item["mode"] = path.name.split("-c", 1)[0]
                           rows.append(item)
           rows.sort(key=lambda x: (x["mode"], x.get("concurrency", 0)))
-          cols = ["mode", "concurrency", "requests", "successful", "failed", "timeouts", "wall_time_sec", "rps", "p50_ms", "p95_ms", "p99_ms", "max_ms", "error_rate_pct"]
+          cols = ["mode", "concurrency", "requests", "successful", "failed", "timeouts", "wall_time_sec", "rps", "p50_ms", "p95_ms", "p99_ms", "max_ms", "error_rate_pct", "server_p50_ms", "server_p95_ms", "server_p99_ms", "db_p50_ms", "db_p95_ms", "db_p99_ms", "db_mean_ms", "db_queries_mean"]
           with open("benchmark-results/report.md", "w", encoding="utf-8") as f:
-              f.write("# Sync vs Async root-cause benchmark\n\n")
-              f.write("Includes PostgreSQL EXPLAIN/BUFFERS/I/O diagnostics and a DB-pool sweep.\n\n")
+              f.write("# True pure Sync vs Async root-cause benchmark\n\n")
+              f.write("Sync uses DRF + Django sync ORM; Async uses ADRF + Django async ORM. Same endpoint, logic, data, auth and permissions.\n\n")
               f.write("| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n")
               for row in rows:
                   f.write("| " + " | ".join(str(row.get(c, "")) for c in cols) + " |\n")
