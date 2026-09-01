@@ -69,6 +69,7 @@ PROJECT_APPS = [
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
 
 MIDDLEWARE = [
+    "core.middleware.RequestIdAndPerfMiddleware",
     "core.middleware.RequestCorrelationMiddleware",
     "core.middleware.TrustedProxyHeadersMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -84,6 +85,10 @@ MIDDLEWARE = [
 ROOT_URLCONF = "core.urls"
 WSGI_APPLICATION = "core.wsgi.application"
 ASGI_APPLICATION = "core.asgi.application"
+
+# Request-stage timing is enabled only by benchmark settings (or explicitly
+# through PERF_TIMING_ENABLED=1). Keep production overhead at zero by default.
+PERF_TIMING_ENABLED = config("PERF_TIMING_ENABLED", default=False, cast=bool)
 
 TEMPLATES = [
     {
@@ -157,8 +162,6 @@ SIMPLE_JWT = {
     "TOKEN_USER_CLASS": "authentication.token_user.ERPTokenUser",
 }
 
-# Persisted idempotency keys are retained for this window so clients can
-# safely retry financial requests. Cleanup is handled by a management command.
 IDEMPOTENCY_RETENTION_DAYS = config(
     "IDEMPOTENCY_RETENTION_DAYS",
     default=90,
