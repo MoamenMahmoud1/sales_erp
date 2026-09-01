@@ -1,6 +1,11 @@
+import os
+
 from rest_framework.routers import SimpleRouter
 
-from .api.views import CartonPricingViewSet, ProductViewSet
+if os.environ.get("BENCH_API_STACK", "async").lower() == "sync":
+    from .api.sync_views import CartonPricingViewSet, ProductViewSet
+else:
+    from .api.views import CartonPricingViewSet, ProductViewSet
 
 app_name = "products"
 
