@@ -6,6 +6,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param, replace_query_param
 
+from common.services.perf_timing import view_stage
+
 
 class AsyncPage:
     """Small page adapter backed by an async-evaluated QuerySet slice."""
@@ -51,47 +53,56 @@ class AsyncStandardPagination(PageNumberPagination):
 
     async def paginate_queryset(self, queryset, request, view=None):
         self.request = request
-        page_size = self.get_page_size(request)
-        if not page_size:
-            return None
+        with view_stage("view.pagination.config"):
+            page_size = self.get_page_size(request)
+            if not page_size:
+                return None
+            raw_page = request.query_params.get(self.page_query_param) or "1"
 
-        raw_page = request.query_params.get(self.page_query_param) or "1"
-        count = await queryset.acount()
-        num_pages = math.ceil(count / page_size) if count else 1
+        with view_stage("view.pagination.count"):
+            count = await queryset.acount()
 
-        if raw_page in self.last_page_strings:
-            page_number = num_pages
-        else:
-            try:
-                page_number = int(raw_page)
-            except (TypeError, ValueError) as exc:
+        with view_stage("view.pagination.page_math"):
+            num_pages = math.ceil(count / page_size) if count else 1
+            if raw_page in self.last_page_strings:
+                page_number = num_pages
+            else:
+                try:
+                    page_number = int(raw_page)
+                except (TypeError, ValueError) as exc:
+                    raise NotFound(
+                        self.invalid_page_message.format(page_number=raw_page, message=exc)
+                    ) from exc
+
+            if page_number < 1 or page_number > num_pages:
                 raise NotFound(
-                    self.invalid_page_message.format(page_number=raw_page, message=exc)
-                ) from exc
-
-        if page_number < 1 or page_number > num_pages:
-            raise NotFound(
-                self.invalid_page_message.format(
-                    page_number=page_number,
-                    message=f"valid pages are 1 through {num_pages}",
+                    self.invalid_page_message.format(
+                        page_number=page_number,
+                        message=f"valid pages are 1 through {num_pages}",
+                    )
                 )
-            )
 
-        start = (page_number - 1) * page_size
-        objects = [obj async for obj in queryset[start : start + page_size]]
-        self.page = AsyncPage(objects, page_number, count, page_size)
-        self.display_page_controls = num_pages > 1 and self.template is not None
+            start = (page_number - 1) * page_size
+            queryset_slice = queryset[start : start + page_size]
+
+        with view_stage("view.pagination.fetch"):
+            objects = [obj async for obj in queryset_slice]
+
+        with view_stage("view.pagination.page_object"):
+            self.page = AsyncPage(objects, page_number, count, page_size)
+            self.display_page_controls = num_pages > 1 and self.template is not None
         return objects
 
     async def get_paginated_response(self, data):
-        return Response(
-            {
-                "count": self.page.count,
-                "next": self.get_next_link(),
-                "previous": self.get_previous_link(),
-                "results": data,
-            }
-        )
+        with view_stage("view.response.paginated"):
+            return Response(
+                {
+                    "count": self.page.count,
+                    "next": self.get_next_link(),
+                    "previous": self.get_previous_link(),
+                    "results": data,
+                }
+            )
 
     def get_next_link(self):
         if not self.page.has_next():
