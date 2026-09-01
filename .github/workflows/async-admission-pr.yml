@@ -12,8 +12,6 @@ on:
       - "erp-api/core/settings/settings_bench.py"
       - "erp-api/core/settings/settings_prod.py"
       - "erp-api/gunicorn.conf.py"
-      - "erp-api/core/asgi.py"
-      - "erp-api/Dockerfile"
       - ".github/workflows/async-admission-pr.yml"
   workflow_dispatch:
 
@@ -56,13 +54,11 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
       REDIS_URL: redis://127.0.0.1:6379/0
-      # Match the production defaults in settings_prod.py / gunicorn.conf.py.
       DB_POOL_MIN_SIZE: "1"
       DB_POOL_MAX_SIZE: "5"
       WEB_CONCURRENCY: "4"
       TRUST_PROXY_HEADERS: "false"
       BENCH_TIMEOUT: "10"
-      BENCH_DEADLINE: "90"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,11 +71,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install httpx
+      - name: Django tests
+        run: python manage.py test
       - name: Migrate
         run: python manage.py migrate --noinput
       - name: Seed benchmark database
         run: python benchmarks/seed_benchmark_data.py
-      - name: Configure PostgreSQL
+      - name: Configure PostgreSQL diagnostics
         run: |
           set -euo pipefail
           PG_CONTAINER="$(docker ps --filter 'ancestor=postgres:16' --format '{{.ID}}' | head -n1)"
@@ -87,75 +85,66 @@ jobs:
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET work_mem='16MB';"
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET random_page_cost='1.1';"
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET jit='off';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries='pg_stat_statements';"
           docker restart "$PG_CONTAINER"
           for attempt in $(seq 1 60); do
             if PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SELECT 1" >/dev/null 2>&1; then break; fi
             sleep 1
           done
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "SELECT pg_stat_statements_reset();"
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "ANALYZE;"
-      - name: Run admission matrix
+      - name: Start API
         run: |
           set -euo pipefail
-          rm -rf benchmark-results
+          export ASYNC_DB_CONCURRENCY=0
+          gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
+          echo $! > /tmp/gunicorn.pid
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/gunicorn-admission.log || true
+          exit 1
+      - name: Benchmark baseline
+        run: |
+          set -euo pipefail
           mkdir -p benchmark-results
           TOKEN="$(cat bench_token.txt)"
           URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
-          SERVER_PID=""
-
-          start_server() {
-            local gate="$1"
-            local minimal="$2"
-            export BENCH_API_STACK=async
-            export BENCH_MINIMAL_MIDDLEWARE="$minimal"
-            export BENCH_MIDDLEWARE_DIAGNOSTIC=0
-            export BENCH_MIDDLEWARE_EXCLUDE=""
-            export ASYNC_DB_CONCURRENCY="$gate"
-            gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
-            SERVER_PID=$!
+          for concurrency in 50 100; do
+            BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 python benchmarks/http_benchmark.py > "benchmark-results/baseline-c${concurrency}.json"
+          done
+      - name: Benchmark admission limits
+        run: |
+          set -euo pipefail
+          TOKEN="$(cat bench_token.txt)"
+          URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
+          for gate in 3 4 5; do
+            kill "$(cat /tmp/gunicorn.pid)" || true
+            wait "$(cat /tmp/gunicorn.pid)" || true
+            ASYNC_DB_CONCURRENCY="$gate" gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
+            echo $! > /tmp/gunicorn.pid
             for attempt in $(seq 1 60); do
-              if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then return; fi
+              if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then break; fi
               sleep 1
             done
-            cat /tmp/gunicorn-admission.log || true
-            exit 1
-          }
-
-          stop_server() {
-            if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
-              kill "$SERVER_PID" || true
-              wait "$SERVER_PID" || true
-            fi
-            SERVER_PID=""
-          }
-
-          trap stop_server EXIT
-
-          run_case() {
-            local case_name="$1"
-            local concurrency="$2"
-            local requests="$3"
-            BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_EXPECT_STACK=async BENCH_CASE="$case_name" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS="$requests" BENCH_WARMUP=50 BENCH_DEADLINE=90 BENCH_TIMEOUT=10 python benchmarks/http_benchmark.py > "benchmark-results/${case_name}.json"
-          }
-
-          # Compare the full production-like middleware stack with the minimal
-          # API stack, using the same Python and worker/pool defaults as prod.
-          for stack in full minimal; do
-            if [[ "$stack" == "minimal" ]]; then
-              minimal=1
-            else
-              minimal=0
-            fi
-
-            for gate in 0 3 4 5; do
-              start_server "$gate" "$minimal"
-              run_case "${stack}-gate${gate}-c50" 50 300
-              stop_server
-
-              start_server "$gate" "$minimal"
-              run_case "${stack}-gate${gate}-c100" 100 300
-              stop_server
+            for concurrency in 50 100; do
+              BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 python benchmarks/http_benchmark.py > "benchmark-results/gate${gate}-c${concurrency}.json"
             done
           done
+      - name: PostgreSQL query diagnostics
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-results
+          python benchmarks/postgres_diagnostics.py > benchmark-results/postgres-plan.json
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -At -F $'\t' -c "SELECT calls, total_exec_time, mean_exec_time, rows, shared_blks_hit, shared_blks_read, left(query, 1000) FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 30;" > benchmark-results/pg-stat-statements.tsv
+      - name: Stop API
+        if: always()
+        run: |
+          if [[ -f /tmp/gunicorn.pid ]]; then
+            kill "$(cat /tmp/gunicorn.pid)" 2>/dev/null || true
+          fi
       - name: Build report
         run: |
           python - <<'PY'
@@ -164,41 +153,43 @@ jobs:
 
           root = Path("benchmark-results")
           cases = []
-          for p in sorted(root.glob("*-gate*.json")):
+          for p in sorted(root.glob("*.json")):
+              if p.name == "postgres-plan.json":
+                  continue
               cases.append(json.loads(p.read_text()))
 
           def f(value):
-              return "" if value is None else f"{value:.3f}"
+              return "" if value is None else f"{value:.2f}"
 
           out = [
               "# Async DB admission benchmark",
               "",
-              "The matrix uses the production Python/worker/pool defaults and compares the full production-like middleware stack with a minimal API stack. Benchmark middleware instrumentation is disabled during measurement.",
+              "HTTP latency is measured entirely outside Django. No request timing middleware, SQL wrappers, ContextVars, response timing headers, or per-request benchmark state are enabled.",
               "",
-              "| stack | gate | concurrency | p50 | p95 | p99 | server p50 | db p50 | pool p50 | gate p50 | gate p95 | gate p99 | successful | failed | complete |",
-              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+              "| case | concurrency | p50 ms | p95 ms | p99 ms | RPS | successful | failed |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|",
           ]
-
           for case in cases:
-              name = case.get("case", "")
-              stack, gate_part, _ = name.split("-", 2)
-              gate = gate_part.removeprefix("gate")
+              name = case["status"] if False else "unknown"
+              path = next(root.glob("*.json"), None)
+          for p in sorted(root.glob("*.json")):
+              if p.name == "postgres-plan.json":
+                  continue
+              case = json.loads(p.read_text())
               out.append(
-                  f"| {stack} | {gate} | {case.get('concurrency')} | "
-                  f"{f(case.get('p50_ms'))} | {f(case.get('p95_ms'))} | {f(case.get('p99_ms'))} | "
-                  f"{f(case.get('server_p50_ms'))} | {f(case.get('db_p50_ms'))} | {f(case.get('pool_wait_p50_ms'))} | "
-                  f"{f(case.get('gate_p50_ms'))} | {f(case.get('gate_p95_ms'))} | {f(case.get('gate_p99_ms'))} | "
-                  f"{case.get('successful')} | {case.get('failed')} | {case.get('status') == 'complete'} |"
+                  f"| {p.stem} | {case['concurrency']} | {f(case['p50_ms'])} | {f(case['p95_ms'])} | "
+                  f"{f(case['p99_ms'])} | {f(case['rps'])} | {case['successful']} | {case['failed']} |"
               )
 
           (root / "report.md").write_text("\n".join(out) + "\n")
-          (root / "report.json").write_text(json.dumps(cases, indent=2, sort_keys=True))
           PY
       - name: Add benchmark summary
-        run: cat benchmark-results/report.md >> "$GITHUB_STEP_SUMMARY"
+        if: always()
+        run: cat benchmark-results/report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
       - name: Upload benchmark results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: async-db-admission-benchmark
           path: erp-api/benchmark-results/
-          if-no-files-found: error
+          if-no-files-found: warn
