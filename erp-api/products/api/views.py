@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from common.pagination import AsyncStandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
-from common.services.async_db_gate import db_slot
+from common.services.async_db_gate import DBAdmissionTimeout, db_slot
 from common.services.async_serializer import AsyncSerializerService
 
 from products.api.serializers import (
@@ -58,8 +58,16 @@ class ProductViewSet(viewsets.ModelViewSet):
         # Gate only the DB-bound section. As soon as both COUNT and page
         # evaluation finish, the slot is released for the next request while
         # response serialization can proceed independently.
-        async with db_slot():
-            page = await self.apaginate_queryset(queryset)
+        try:
+            async with db_slot():
+                page = await self.apaginate_queryset(queryset)
+        except DBAdmissionTimeout:
+            response = Response(
+                {"detail": "The database is temporarily busy. Please retry."},
+                status=503,
+            )
+            response["Retry-After"] = "1"
+            return response
 
         if page is not None:
             serializer = self.get_serializer(page, many=True)
