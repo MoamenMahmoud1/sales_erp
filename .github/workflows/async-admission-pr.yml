@@ -128,9 +128,7 @@ jobs:
                 kill -0 "$OLD_PID" 2>/dev/null || break
                 sleep 1
               done
-              if kill -0 "$OLD_PID" 2>/dev/null; then
-                kill -KILL "$OLD_PID" 2>/dev/null || true
-              fi
+              if kill -0 "$OLD_PID" 2>/dev/null; then kill -KILL "$OLD_PID" 2>/dev/null || true; fi
             fi
             ASYNC_DB_CONCURRENCY="$gate" gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
             echo $! > /tmp/gunicorn.pid
@@ -138,10 +136,7 @@ jobs:
               if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then break; fi
               sleep 1
             done
-            if ! curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then
-              cat /tmp/gunicorn-admission.log || true
-              exit 1
-            fi
+            if ! curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then cat /tmp/gunicorn-admission.log || true; exit 1; fi
             for concurrency in 50 100; do
               BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 python benchmarks/http_benchmark.py > "benchmark-results/gate${gate}-c${concurrency}.json"
             done
@@ -175,21 +170,18 @@ jobs:
               if p.name == "postgres-plan.json":
                   continue
               case = json.loads(p.read_text())
+              rps = case.get("rps", case.get("successful_rps", 0))
               rows.append(
-                  f"| {p.stem} | {case['concurrency']} | {case['p50_ms']:.2f} | "
-                  f"{case['p95_ms']:.2f} | {case['p99_ms']:.2f} | {case['rps']:.2f} | "
+                  f"| {p.stem} | {case['concurrency']} | {case.get('latency_mean_ms', 0):.2f} | "
+                  f"{case['p50_ms']:.2f} | {case['p95_ms']:.2f} | {case['p99_ms']:.2f} | {rps:.2f} | "
                   f"{case['successful']} | {case['failed']} |"
               )
 
           report = [
-              "# Async DB admission benchmark",
-              "",
-              "HTTP latency is measured entirely outside Django. No request timing middleware, SQL wrappers, ContextVars, response timing headers, or per-request benchmark state are enabled.",
-              "",
-              "| case | concurrency | p50 ms | p95 ms | p99 ms | RPS | successful | failed |",
-              "|---|---:|---:|---:|---:|---:|---:|---:|",
-              *rows,
-              "",
+              "# Async DB admission benchmark", "",
+              "HTTP latency is measured entirely outside Django. No request timing middleware, SQL wrappers, ContextVars, response timing headers, or per-request benchmark state are enabled.", "",
+              "| case | concurrency | mean ms | p50 ms | p95 ms | p99 ms | RPS | successful | failed |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|---:|", *rows, "",
               "PostgreSQL execution plans and pg_stat_statements are included in the uploaded artifact for root-cause analysis.",
           ]
           (root / "report.md").write_text("\n".join(report) + "\n")
