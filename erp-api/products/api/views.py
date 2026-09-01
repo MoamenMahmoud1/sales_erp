@@ -4,7 +4,7 @@ from django.db.models.functions import Coalesce
 from rest_framework import filters
 from rest_framework.response import Response
 
-from common.pagination import AsyncStandardPagination, StandardPagination
+from common.pagination import AsyncStandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
 from common.services.async_serializer import AsyncSerializerService
 
