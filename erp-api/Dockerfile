@@ -2,7 +2,7 @@
 #
 # Build:  docker build -t erp-api:latest .
 # Run:    docker run -p 8000:8000 \
-#           -e DJANGO_SETTINGS_MODULE=core.settings.settings_prod \
+#           -e DJANGO_SETTINGS_MODULE=core.settings.settings_api \
 #           -e DB_HOST=postgres ... erp-api:latest
 ARG PYTHON_VERSION=3.13
 FROM python:${PYTHON_VERSION}-slim AS base
@@ -33,6 +33,8 @@ USER appuser
 RUN DJANGO_SETTINGS_MODULE=core.settings.settings_prod python manage.py collectstatic --noinput
 
 # Gunicorn starts the ASGI application; the checked-in config owns worker sizing.
-# Worker count and DB pool sizing are environment-driven — see gunicorn.conf.py.
+# Worker count and DB pool sizing are environment-driven. The runtime default
+# is the lean API settings module; set DJANGO_SETTINGS_MODULE explicitly for a
+# full web/admin process.
 EXPOSE 8000
-CMD ["sh", "-c", "exec gunicorn -c gunicorn.conf.py core.asgi:application"]
+CMD ["sh", "-c", "export DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE:-core.settings.settings_api}; exec gunicorn -c gunicorn.conf.py core.asgi:application"]
