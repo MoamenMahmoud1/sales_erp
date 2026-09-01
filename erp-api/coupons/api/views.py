@@ -50,7 +50,7 @@ class CouponViewSet(viewsets.ModelViewSet):
     async def adestroy(self, request, *args, **kwargs):
         instance = await self.aget_object()
         try:
-            await DeleteCoupon()(instance=instance)
+            await DeleteCoupon().acall(instance=instance)
         except InvalidBusinessOperation as exc:
             return Response(
                 {"detail": str(exc), "code": "coupon_in_use"},
