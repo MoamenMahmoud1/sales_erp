@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import math
+import os
 import statistics
 import time
 from collections import Counter
@@ -149,17 +150,50 @@ def report(results: list[Result], requests: int, elapsed: float) -> None:
         raise SystemExit(2)
 
 
+def env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    return int(value) if value else default
+
+
+def env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    return float(value) if value else default
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", required=True)
-    parser.add_argument("--token", required=True)
-    parser.add_argument("--requests", type=int, default=600)
-    parser.add_argument("--concurrency", type=int, required=True)
-    parser.add_argument("--deadline", type=float, default=60.0)
-    parser.add_argument("--request-timeout", type=float, default=10.0)
+    parser.add_argument("--url", default=os.getenv("BENCH_URL"))
+    parser.add_argument("--token", default=os.getenv("BENCH_TOKEN"))
+    parser.add_argument("--requests", type=int, default=env_int("BENCH_REQUESTS", 600))
+    parser.add_argument("--concurrency", type=int, default=env_int("BENCH_CONCURRENCY", 1))
+    parser.add_argument("--deadline", type=float, default=env_float("BENCH_DEADLINE", 60.0))
+    parser.add_argument("--request-timeout", type=float, default=env_float("BENCH_TIMEOUT", 10.0))
     args = parser.parse_args()
+
+    if not args.url:
+        parser.error("--url or BENCH_URL is required")
+    if not args.token:
+        parser.error("--token or BENCH_TOKEN is required")
+    if args.requests < 1:
+        parser.error("--requests must be >= 1")
+    if args.concurrency < 1:
+        parser.error("--concurrency must be >= 1")
+    if args.deadline <= 0:
+        parser.error("--deadline must be > 0")
+    if args.request_timeout <= 0:
+        parser.error("--request-timeout must be > 0")
+
     started = time.perf_counter()
-    results = asyncio.run(run_benchmark(url=args.url, token=args.token, requests=args.requests, concurrency=args.concurrency, deadline_s=args.deadline, request_timeout_s=args.request_timeout))
+    results = asyncio.run(
+        run_benchmark(
+            url=args.url,
+            token=args.token,
+            requests=args.requests,
+            concurrency=args.concurrency,
+            deadline_s=args.deadline,
+            request_timeout_s=args.request_timeout,
+        )
+    )
     report(results, args.requests, time.perf_counter() - started)
 
 
