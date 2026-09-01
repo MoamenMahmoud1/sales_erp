@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from common.pagination import AsyncStandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
-from common.services.async_db_gate import db_slot, consume_wait
+from common.services.async_db_gate import db_slot
 from common.services.async_serializer import AsyncSerializerService
 
 from products.api.serializers import (
@@ -60,9 +60,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         # response serialization can proceed independently.
         async with db_slot():
             page = await self.apaginate_queryset(queryset)
-        request._benchmark_db_gate_wait_ms = consume_wait() * 1000
 
-        request._benchmark_serializer_path = "batched_sync_representation"
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             data = await AsyncSerializerService.adata(serializer)
