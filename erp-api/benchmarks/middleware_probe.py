@@ -2,9 +2,7 @@
 
 This module monkey-patches the configured middleware classes only when explicitly
 requested by BENCH_MIDDLEWARE_DIAGNOSTIC=1. It preserves real async middleware
-classification and records inclusive timings for each middleware invocation.
-The outer benchmark middleware later derives exclusive self-time by subtracting
-the next inner middleware's inclusive time.
+classification and records per-request inclusive spans in entry order.
 """
 
 from __future__ import annotations
@@ -14,15 +12,16 @@ import time
 from functools import wraps
 
 
-def _record(metrics: dict, name: str, started: float) -> None:
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    spans = metrics.setdefault("middleware_spans", {})
-    entry = spans.get(name)
-    if entry is None:
-        spans[name] = {"inclusive": elapsed_ms, "count": 1}
-    else:
-        entry["inclusive"] += elapsed_ms
-        entry["count"] += 1
+def _begin_span(metrics: dict, name: str) -> dict:
+    trace = metrics.setdefault("middleware_trace", [])
+    span = {"name": name, "started": time.perf_counter(), "inclusive_ms": None}
+    trace.append(span)
+    return span
+
+
+def _finish_span(span: dict) -> None:
+    span["inclusive_ms"] = (time.perf_counter() - span["started"]) * 1000
+    span.pop("started", None)
 
 
 def _wrap_sync_call(original, name: str):
@@ -34,18 +33,23 @@ def _wrap_sync_call(original, name: str):
         if metrics is None:
             return original(self, request, *args, **kwargs)
 
-        started = time.perf_counter()
-        result = original(self, request, *args, **kwargs)
+        span = _begin_span(metrics, name)
+        try:
+            result = original(self, request, *args, **kwargs)
+        except BaseException:
+            _finish_span(span)
+            raise
+
         if inspect.isawaitable(result):
             async def finish_async():
                 try:
                     return await result
                 finally:
-                    _record(metrics, name, started)
+                    _finish_span(span)
 
             return finish_async()
 
-        _record(metrics, name, started)
+        _finish_span(span)
         return result
 
     return wrapper
@@ -60,11 +64,11 @@ def _wrap_async_call(original, name: str):
         if metrics is None:
             return await original(self, request, *args, **kwargs)
 
-        started = time.perf_counter()
+        span = _begin_span(metrics, name)
         try:
             return await original(self, request, *args, **kwargs)
         finally:
-            _record(metrics, name, started)
+            _finish_span(span)
 
     return wrapper
 
