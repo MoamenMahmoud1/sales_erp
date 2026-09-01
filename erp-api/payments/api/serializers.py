@@ -1,12 +1,13 @@
 from decimal import Decimal
 
-from adrf import serializers
+from adrf import serializers as adrf_serializers
+from rest_framework import serializers
 
 from customers.models import Customer
 from payments.models import PaymentAllocation, PaymentTransaction
 
 
-class CollectionSerializer(serializers.Serializer):
+class CollectionSerializer(adrf_serializers.Serializer):
     """Client input for a collection."""
 
     customer = serializers.PrimaryKeyRelatedField(queryset=Customer.objects.all())
@@ -31,7 +32,7 @@ class CollectionSerializer(serializers.Serializer):
         return attrs
 
 
-class PaymentAllocationSerializer(serializers.ModelSerializer):
+class PaymentAllocationSerializer(adrf_serializers.ModelSerializer):
     invoice = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
@@ -43,7 +44,7 @@ class PaymentAllocationSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class PaymentTransactionSerializer(serializers.ModelSerializer):
+class PaymentTransactionSerializer(adrf_serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     allocations = PaymentAllocationSerializer(many=True, read_only=True)
 
