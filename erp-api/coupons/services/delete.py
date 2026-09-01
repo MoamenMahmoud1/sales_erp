@@ -21,7 +21,10 @@ def delete_coupon_sync(instance):
 class DeleteCoupon:
     """Delete a coupon without allowing protected financial history to change."""
 
-    async def __call__(self, *, instance):
+    def __call__(self, *, instance):
+        return delete_coupon_sync(instance)
+
+    async def acall(self, *, instance):
         return await sync_to_async(
             delete_coupon_sync,
             thread_sensitive=True,
