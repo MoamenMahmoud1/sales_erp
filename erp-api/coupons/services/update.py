@@ -12,9 +12,13 @@ def update_coupon_sync(instance, validated_data):
 
 
 class UpdateCoupon:
-    """Update a coupon off the ASGI event loop."""
+    """Update a coupon from either sync or async application code."""
 
-    async def __call__(self, *, instance, validated_data):
+    def __call__(self, *, instance, validated_data):
+        return update_coupon_sync(instance, validated_data)
+
+    async def acall(self, *, instance, validated_data):
+        """Async entry point; keeps the blocking save off the event loop."""
         return await sync_to_async(
             update_coupon_sync,
             thread_sensitive=True,
