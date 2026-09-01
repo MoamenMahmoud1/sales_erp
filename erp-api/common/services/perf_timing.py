@@ -1,4 +1,4 @@
-"""Low-overhead per-request timing for async DB admission experiments."""
+"""Low-overhead per-request timing for async performance experiments."""
 
 from __future__ import annotations
 
@@ -14,8 +14,10 @@ class PerfTiming:
         self.started_ns = time.perf_counter_ns()
         self.admission_wait_ns = 0
         self.pool_wait_ns = 0
-        self.sql_ns = 0
-        self.sql_count = 0
+        self.db_operation_ns = 0
+        self.db_operation_count = 0
+        self.serializer_wait_ns = 0
+        self.serializer_cpu_ns = 0
 
     @property
     def total_ns(self) -> int:
@@ -27,7 +29,9 @@ class PerfTiming:
             self.total_ns
             - self.admission_wait_ns
             - self.pool_wait_ns
-            - self.sql_ns,
+            - self.db_operation_ns
+            - self.serializer_wait_ns
+            - self.serializer_cpu_ns,
             0,
         )
 
@@ -63,35 +67,34 @@ def add_pool_wait(ns: int) -> None:
         timing.pool_wait_ns += max(ns, 0)
 
 
-def add_sql(ns: int) -> None:
+def add_db_operation(ns: int) -> None:
     timing = current()
     if timing is not None:
-        timing.sql_ns += max(ns, 0)
-        timing.sql_count += 1
+        timing.db_operation_ns += max(ns, 0)
+        timing.db_operation_count += 1
 
 
-class TimingExecuteWrapper:
-    """Measure cursor execution time, excluding connection-pool acquisition."""
-
-    def __call__(self, execute, sql, params, many, context):
-        started = time.perf_counter_ns()
-        try:
-            return execute(sql, params, many, context)
-        finally:
-            add_sql(time.perf_counter_ns() - started)
+def add_serializer_wait(ns: int) -> None:
+    timing = current()
+    if timing is not None:
+        timing.serializer_wait_ns += max(ns, 0)
 
 
-_pool_instrumented = set()
+def add_serializer_cpu(ns: int) -> None:
+    timing = current()
+    if timing is not None:
+        timing.serializer_cpu_ns += max(ns, 0)
+
+
+_pool_instrumented: set[int] = set()
 
 
 def install_pool_instrumentation() -> None:
-    """Wrap Django's psycopg ConnectionPool.getconn() once per pool object.
+    """Measure the actual psycopg pool checkout duration.
 
-    Django's PostgreSQL backend checks out a synchronous psycopg connection
-    from ConnectionPool.getconn() inside its async ORM adapter. ContextVars
-    are propagated across that adapter, so mutating the request's timing object
-    here gives us the actual pool queue/check-out duration rather than an
-    inferred remainder.
+    Django's async PostgreSQL backend obtains synchronous psycopg connections
+    through the pool inside its async adapter. The ContextVar carries the
+    mutable request timing object into that worker thread.
     """
     pool = getattr(connection, "pool", None)
     if pool is None:
@@ -115,6 +118,17 @@ def install_pool_instrumentation() -> None:
 
 
 @contextmanager
-def execute_wrapper(connection):
-    with connection.execute_wrapper(TimingExecuteWrapper()):
+def db_operation():
+    started = time.perf_counter_ns()
+    try:
         yield
+    finally:
+        add_db_operation(time.perf_counter_ns() - started)
+
+
+@contextmanager
+def execute_wrapper(connection):
+    # Kept for synchronous-path diagnostics. Django's async ORM executes SQL
+    # through a worker-thread connection, so this wrapper is not used as the
+    # authoritative async SQL timer.
+    yield
