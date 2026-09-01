@@ -1,7 +1,8 @@
-"""Benchmark-only request, SQL, pool, stack, and ORM timing instrumentation."""
+"""Benchmark-only request, SQL, pool, stack, ORM, and middleware timing instrumentation."""
 
 import asyncio
 import inspect
+import json
 import time
 from contextvars import ContextVar
 
@@ -122,6 +123,7 @@ class BenchmarkTimingMiddleware:
             "db_queries": 0,
             "pool_wait": 0.0,
             "async_orm_ops": set(),
+            "middleware_spans": {},
         }
         token = _metrics.set(metrics)
         started = time.perf_counter()
@@ -153,6 +155,17 @@ class BenchmarkTimingMiddleware:
         view_meta = _resolved_view_metadata(request)
         async_orm_ops = sorted(metrics.get("async_orm_ops", set()))
         serializer_path = getattr(request, "_benchmark_serializer_path", "")
+        middleware = []
+        spans = metrics.get("middleware_spans", {})
+        for name, data in spans.items():
+            middleware.append(
+                {
+                    "name": name,
+                    "inclusive_ms": round(float(data.get("inclusive", 0.0)), 3),
+                    "invocations": int(data.get("count", 0)),
+                }
+            )
+        middleware.sort(key=lambda item: item["inclusive_ms"], reverse=True)
 
         response["Server-Timing"] = (
             f"app;dur={max(total_ms - db_ms - pool_wait_ms - gate_wait_ms, 0):.3f}, "
@@ -181,6 +194,7 @@ class BenchmarkTimingMiddleware:
         response["X-Benchmark-Event-Loop"] = "1" if event_loop else "0"
         response["X-Benchmark-Async-ORM-Ops"] = ",".join(async_orm_ops)
         response["X-Benchmark-Serializer-Path"] = serializer_path
+        response["X-Benchmark-Middleware"] = json.dumps(middleware, separators=(",", ":"))
 
         if event_loop:
             try:
