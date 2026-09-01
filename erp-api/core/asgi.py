@@ -13,4 +13,7 @@ from django.core.asgi import get_asgi_application
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings.settings_dev")
 
+if os.environ.get("DJANGO_SETTINGS_MODULE") == "core.settings.settings_bench":
+    os.environ["BENCH_API_STACK"] = "async"
+
 application = get_asgi_application()
