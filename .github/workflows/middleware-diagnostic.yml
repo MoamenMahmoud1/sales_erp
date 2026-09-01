@@ -7,6 +7,7 @@ on:
       - "erp-api/benchmarks/middleware_probe.py"
       - "erp-api/benchmarks/middleware_diagnostic.py"
       - "erp-api/benchmarks/request_timing_middleware.py"
+      - "erp-api/benchmarks/view_boundary_middleware.py"
       - "erp-api/core/settings/settings_bench.py"
       - ".github/workflows/middleware-diagnostic.yml"
   workflow_dispatch:
@@ -160,7 +161,7 @@ jobs:
           }
 
           # Baselines: direct end-to-end comparison at low and high concurrency.
-          for concurrency in 1 25 100; do
+          for concurrency in 1 25 50 100; do
             start_server 0 ""
             run_case "full-c${concurrency}" "$concurrency" 400
             stop_server
@@ -170,27 +171,30 @@ jobs:
             stop_server
           done
 
-          # Causal leave-one-out tests. Each run removes exactly one production
-          # middleware while keeping the rest of the full async stack unchanged.
-          declare -a MIDDLEWARES=(
+          # Causal leave-one-out tests. Independent middleware are tested alone.
+          declare -a INDEPENDENT_MIDDLEWARES=(
             "core.middleware.RequestCorrelationMiddleware"
             "core.middleware.TrustedProxyHeadersMiddleware"
             "corsheaders.middleware.CorsMiddleware"
             "django.middleware.security.SecurityMiddleware"
-            "django.contrib.sessions.middleware.SessionMiddleware"
             "django.middleware.common.CommonMiddleware"
             "django.middleware.csrf.CsrfViewMiddleware"
-            "django.contrib.auth.middleware.AuthenticationMiddleware"
-            "django.contrib.messages.middleware.MessageMiddleware"
             "django.middleware.clickjacking.XFrameOptionsMiddleware"
           )
 
-          for middleware in "${MIDDLEWARES[@]}"; do
+          for middleware in "${INDEPENDENT_MIDDLEWARES[@]}"; do
             safe="${middleware//./-}"
             start_server 0 "$middleware"
             run_case "loo-${safe}-c50" 50 300
             stop_server
           done
+
+          # Session/Auth/Messages have ordering/dependency relationships. Removing
+          # them individually changes application semantics, so remove the trio.
+          SESSION_GROUP="django.contrib.sessions.middleware.SessionMiddleware,django.contrib.auth.middleware.AuthenticationMiddleware,django.contrib.messages.middleware.MessageMiddleware"
+          start_server 0 "$SESSION_GROUP"
+          run_case "loo-session-auth-messages-c50" 50 300
+          stop_server
 
       - name: Build diagnostic report
         if: always()
@@ -216,7 +220,7 @@ jobs:
               "# Middleware latency diagnostic",
               "",
               "The baseline compares the production middleware stack against the truly minimal async stack.",
-              "Leave-one-out cases remove exactly one production middleware to estimate causal contribution.",
+              "Leave-one-out cases remove exactly one independent middleware, or the dependent Session/Auth/Messages trio.",
               "",
               "## End-to-end cases",
               "",
@@ -234,8 +238,8 @@ jobs:
               "",
               "## Leave-one-out at concurrency 50",
               "",
-              "| removed middleware | p50 | p95 | p99 | delta vs full-c50 | server p50 |",
-              "|---|---:|---:|---:|---:|---:|",
+              "| removed middleware | p50 | p95 | p99 | delta vs full-c50 | server p50 | db p50 | pool p50 | complete |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|---|",
           ]
           full = next((c for c in cases if c.get("case") == "full-c50"), None)
           for case in cases:
@@ -248,7 +252,7 @@ jobs:
               if case.get("p50_ms") is not None and baseline.get("p50_ms") is not None:
                   delta = case["p50_ms"] - baseline["p50_ms"]
               rows.append(
-                  f"| {removed} | {ms(case.get('p50_ms'))} | {ms(case.get('p95_ms'))} | {ms(case.get('p99_ms'))} | {ms(delta)} | {ms(case.get('server_p50_ms'))} |"
+                  f"| {removed} | {ms(case.get('p50_ms'))} | {ms(case.get('p95_ms'))} | {ms(case.get('p99_ms'))} | {ms(delta)} | {ms(case.get('server_p50_ms'))} | {ms(case.get('db_p50_ms'))} | {ms(case.get('pool_p50_ms'))} | {case.get('complete','')} |"
               )
 
           rows += [
