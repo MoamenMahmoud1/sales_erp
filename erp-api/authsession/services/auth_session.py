@@ -2,6 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone as datetime_timezone
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -97,6 +98,13 @@ def get_current_auth_session(*, user_id, access_token, refresh_token, device_id)
     return auth_session
 
 
+async def aget_current_auth_session(**kwargs):
+    return await sync_to_async(
+        get_current_auth_session,
+        thread_sensitive=True,
+    )(**kwargs)
+
+
 def verify_current_auth_session(
     *,
     user,
@@ -137,6 +145,13 @@ def verify_current_auth_session(
         auth_session.save(update_fields=("verified_at",))
 
     return auth_session
+
+
+async def averify_current_auth_session(**kwargs):
+    return await sync_to_async(
+        verify_current_auth_session,
+        thread_sensitive=True,
+    )(**kwargs)
 
 
 def start_auth_session(*, user, client_context: ClientContext):
@@ -181,6 +196,13 @@ def start_auth_session(*, user, client_context: ClientContext):
         access_token=str(access),
         refresh_token=str(refresh),
     )
+
+
+async def astart_auth_session(**kwargs):
+    return await sync_to_async(
+        start_auth_session,
+        thread_sensitive=True,
+    )(**kwargs)
 
 
 def refresh_auth_session(*, refresh_token, client_context: ClientContext):
@@ -264,6 +286,13 @@ def refresh_auth_session(*, refresh_token, client_context: ClientContext):
     )
 
 
+async def arefresh_auth_session(**kwargs):
+    return await sync_to_async(
+        refresh_auth_session,
+        thread_sensitive=True,
+    )(**kwargs)
+
+
 def revoke_auth_session(*, user_id, refresh_token, device_id):
     try:
         refresh = RefreshToken(refresh_token)
@@ -283,8 +312,22 @@ def revoke_auth_session(*, user_id, refresh_token, device_id):
     ).update(revoked_at=timezone.now())
 
 
+async def arevoke_auth_session(**kwargs):
+    return await sync_to_async(
+        revoke_auth_session,
+        thread_sensitive=True,
+    )(**kwargs)
+
+
 def revoke_all_sessions(*, user_id):
     return AuthSession.objects.filter(
         user_id=user_id,
         revoked_at__isnull=True,
     ).update(revoked_at=timezone.now())
+
+
+async def arevoke_all_sessions(**kwargs):
+    return await sync_to_async(
+        revoke_all_sessions,
+        thread_sensitive=True,
+    )(**kwargs)
