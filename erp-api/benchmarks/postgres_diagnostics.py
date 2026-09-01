@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect the exact Product-list query and PostgreSQL state used by benchmarks."""
+"""Inspect the Product-list query and PostgreSQL state used by benchmarks."""
 
 import json
 import os
@@ -29,7 +29,7 @@ TABLES = (
 
 def explain(cursor, sql, params=()):
     cursor.execute(
-        "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, WAL, TIMING, FORMAT JSON) " + sql,
+        "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, WAL, TIMING OFF, FORMAT JSON) " + sql,
         params,
     )
     return cursor.fetchone()[0]
@@ -46,8 +46,7 @@ def main():
             ") ORDER BY name"
         )
         payload["settings"] = [
-            dict(zip(("name", "setting", "unit"), row))
-            for row in cursor.fetchall()
+            dict(zip(("name", "setting", "unit"), row)) for row in cursor.fetchall()
         ]
 
         cursor.execute(
@@ -81,8 +80,7 @@ def main():
         payload["product_page_sql"] = sql
         payload["product_page_plan"] = explain(cursor, sql, params)
         payload["product_count_plan"] = explain(
-            cursor,
-            "SELECT COUNT(*) FROM products_product",
+            cursor, "SELECT COUNT(*) FROM products_product"
         )
 
     print(json.dumps(payload, indent=2, default=str))
