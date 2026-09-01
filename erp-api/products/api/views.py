@@ -8,6 +8,7 @@ from common.pagination import AsyncStandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
 from common.services.async_db_gate import DBAdmissionTimeout, db_slot
 from common.services.async_serializer import AsyncSerializerService
+from common.services.perf_timing import db_operation
 
 from products.api.serializers import (
     CartonPricingSerializer,
@@ -60,7 +61,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         # response serialization can proceed independently.
         try:
             async with db_slot():
-                page = await self.apaginate_queryset(queryset)
+                with db_operation():
+                    page = await self.apaginate_queryset(queryset)
         except DBAdmissionTimeout:
             response = Response(
                 {"detail": "The database is temporarily busy. Please retry."},
@@ -140,6 +142,11 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
         "carton_price",
         "created_at",
         "updated_at",
+    )
+
+    ordering = (
+        "name",
+        "pk",
     )
 
     ordering = (
