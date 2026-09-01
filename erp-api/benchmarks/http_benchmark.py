@@ -64,6 +64,35 @@ def _headers(lines: list[bytes]) -> dict[str, str]:
     return result
 
 
+def _expected_runtime_metadata() -> dict[str, str | None]:
+    stack = os.getenv("BENCH_EXPECT_STACK") or os.getenv("BENCH_API_STACK")
+    expected = {
+        "stack": stack,
+        "router": os.getenv("BENCH_EXPECT_ROUTER"),
+        "handler": os.getenv("BENCH_EXPECT_HANDLER"),
+        "async_callable": os.getenv("BENCH_EXPECT_ASYNC_CALLABLE"),
+        "async_handler": os.getenv("BENCH_EXPECT_ASYNC_HANDLER"),
+        "event_loop": os.getenv("BENCH_EXPECT_EVENT_LOOP"),
+    }
+    if stack == "async":
+        expected.update({
+            "router": expected["router"] or "adrf",
+            "handler": expected["handler"] or "alist",
+            "async_callable": expected["async_callable"] or "1",
+            "async_handler": expected["async_handler"] or "1",
+            "event_loop": expected["event_loop"] or "1",
+        })
+    elif stack == "sync":
+        expected.update({
+            "router": expected["router"] or "drf",
+            "handler": expected["handler"] or "list",
+            "async_callable": expected["async_callable"] or "0",
+            "async_handler": expected["async_handler"] or "0",
+            "event_loop": expected["event_loop"] or "0",
+        })
+    return expected
+
+
 def _validate_stack(headers: dict[str, str], expected: dict[str, str | None]) -> str | None:
     checks = {
         "stack": headers.get("x-benchmark-stack"),
@@ -354,14 +383,9 @@ def main() -> None:
     if args.deadline <= 0 or args.request_timeout <= 0:
         parser.error("--deadline and --request-timeout must be > 0")
 
-    expected = {
-        "stack": os.getenv("BENCH_EXPECT_STACK"),
-        "router": os.getenv("BENCH_EXPECT_ROUTER"),
-        "handler": os.getenv("BENCH_EXPECT_HANDLER"),
-        "async_callable": os.getenv("BENCH_EXPECT_ASYNC_CALLABLE"),
-        "async_handler": os.getenv("BENCH_EXPECT_ASYNC_HANDLER"),
-        "event_loop": os.getenv("BENCH_EXPECT_EVENT_LOOP"),
-    }
+    expected = _expected_runtime_metadata()
+    if expected.get("stack") not in {"sync", "async"}:
+        parser.error("BENCH_API_STACK or BENCH_EXPECT_STACK must be sync or async")
 
     parsed = urlsplit(args.url)
     if parsed.scheme != "http":
