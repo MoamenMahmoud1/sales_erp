@@ -3,7 +3,7 @@ from django.db.models import OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from rest_framework import filters
 
-from common.pagination import StandardPagination
+from common.pagination import AsyncStandardPagination, StandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
 
 from products.api.serializers import (
@@ -18,7 +18,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = (
         ReadAuthenticatedWriteStaffPermission,
     )
-    pagination_class = StandardPagination
+    pagination_class = AsyncStandardPagination
 
     filter_backends = (
         filters.SearchFilter,
@@ -41,6 +41,17 @@ class ProductViewSet(viewsets.ModelViewSet):
         "name",
         "pk",
     )
+
+    async def afilter_queryset(self, queryset):
+        """Apply lazy QuerySet filters without a sync-to-async thread hop.
+
+        DRF's SearchFilter/OrderingFilter only build a lazy QuerySet here; they
+        do not evaluate SQL. The actual database work remains in Django's async
+        ORM evaluation below.
+        """
+        for backend_class in self.filter_backends:
+            queryset = backend_class().filter_queryset(self.request, queryset, self)
+        return queryset
 
     def get_queryset(self):
         # Keep stock and sold totals in independent correlated subqueries so
@@ -91,7 +102,7 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
     permission_classes = (
         ReadAuthenticatedWriteStaffPermission,
     )
-    pagination_class = StandardPagination
+    pagination_class = AsyncStandardPagination
 
     filter_backends = (
         filters.SearchFilter,
@@ -114,6 +125,11 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
         "name",
         "pk",
     )
+
+    async def afilter_queryset(self, queryset):
+        for backend_class in self.filter_backends:
+            queryset = backend_class().filter_queryset(self.request, queryset, self)
+        return queryset
 
     def get_queryset(self):
         return CartonPricing.objects.all()
