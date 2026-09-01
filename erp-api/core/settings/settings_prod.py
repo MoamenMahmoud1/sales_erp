@@ -19,11 +19,19 @@ DB_POOL_MAX_SIZE = config("DB_POOL_MAX_SIZE", default=5, cast=int)
 if DB_POOL_MIN_SIZE < 0 or DB_POOL_MAX_SIZE < 1 or DB_POOL_MIN_SIZE > DB_POOL_MAX_SIZE:
     raise ValueError("DB_POOL_MIN_SIZE and DB_POOL_MAX_SIZE are invalid")
 
-# Optional per-worker application-level bound for async ORM concurrency.
-# Zero keeps the gate disabled. When enabled, keep this <= DB_POOL_MAX_SIZE.
-ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=0, cast=int)
-if ASYNC_DB_CONCURRENCY < 0:
-    raise ValueError("ASYNC_DB_CONCURRENCY must be >= 0")
+# Bound async ORM concurrency per ASGI worker. Keeping the default aligned with
+# the pool size prevents a large async burst from turning the DB pool itself
+# into the primary request queue. Operators can tune it lower for a heavily
+# shared database, but values above the per-worker pool are rejected.
+ASYNC_DB_CONCURRENCY = config(
+    "ASYNC_DB_CONCURRENCY",
+    default=DB_POOL_MAX_SIZE,
+    cast=int,
+)
+if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY > DB_POOL_MAX_SIZE:
+    raise ValueError(
+        "ASYNC_DB_CONCURRENCY must be between 0 and DB_POOL_MAX_SIZE"
+    )
 
 DATABASES = {
     "default": {
