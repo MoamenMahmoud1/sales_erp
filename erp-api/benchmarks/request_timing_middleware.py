@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import json
+import os
 import time
 from contextvars import ContextVar
 
@@ -112,6 +113,12 @@ class BenchmarkTimingMiddleware:
     sync_capable = True
 
     def __init__(self, get_response):
+        if os.getenv("BENCH_MIDDLEWARE_DIAGNOSTIC", "0") == "1":
+            from benchmarks.middleware_probe import install_middleware_probe
+            from django.conf import settings
+
+            install_middleware_probe(settings.MIDDLEWARE)
+
         self.get_response = get_response
         self._is_async = inspect.iscoroutinefunction(get_response)
         if self._is_async:
