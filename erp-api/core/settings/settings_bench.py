@@ -19,6 +19,8 @@ _bench_middleware_exclude = {
     for item in os.getenv("BENCH_MIDDLEWARE_EXCLUDE", "").split(",")
     if item.strip()
 }
+_bench_view_boundary = "benchmarks.view_boundary_middleware.BenchmarkViewBoundaryMiddleware"
+
 if _bench_minimal_middleware:
     # The products benchmark is authenticated by DRF's stateless JWT
     # authentication, so the Django AuthenticationMiddleware/session stack is
@@ -26,19 +28,23 @@ if _bench_minimal_middleware:
     # end-to-end async middleware comparison.
     MIDDLEWARE = [
         "benchmarks.request_timing_middleware.BenchmarkTimingMiddleware",
+        _bench_view_boundary,
+    ] if _bench_middleware_diagnostic else [
+        "benchmarks.request_timing_middleware.BenchmarkTimingMiddleware",
     ]
 else:
     MIDDLEWARE = [
         "benchmarks.request_timing_middleware.BenchmarkTimingMiddleware",
         *MIDDLEWARE,
     ]
-
-if _bench_middleware_exclude:
-    MIDDLEWARE = [
-        path
-        for path in MIDDLEWARE
-        if path not in _bench_middleware_exclude
-    ]
+    if _bench_middleware_exclude:
+        MIDDLEWARE = [
+            path
+            for path in MIDDLEWARE
+            if path not in _bench_middleware_exclude
+        ]
+    if _bench_middleware_diagnostic:
+        MIDDLEWARE.append(_bench_view_boundary)
 
 # Diagnostic mode is deliberately activated from BenchmarkTimingMiddleware.__init__
 # rather than while importing this settings module. At that point Django has
