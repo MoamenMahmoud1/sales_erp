@@ -121,14 +121,27 @@ jobs:
           TOKEN="$(cat bench_token.txt)"
           URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
           for gate in 3 4 5; do
-            kill "$(cat /tmp/gunicorn.pid)" || true
-            wait "$(cat /tmp/gunicorn.pid)" || true
+            OLD_PID="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
+            if [[ -n "$OLD_PID" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
+              kill "$OLD_PID" 2>/dev/null || true
+              for attempt in $(seq 1 30); do
+                kill -0 "$OLD_PID" 2>/dev/null || break
+                sleep 1
+              done
+              if kill -0 "$OLD_PID" 2>/dev/null; then
+                kill -KILL "$OLD_PID" 2>/dev/null || true
+              fi
+            fi
             ASYNC_DB_CONCURRENCY="$gate" gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
             echo $! > /tmp/gunicorn.pid
             for attempt in $(seq 1 60); do
               if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then break; fi
               sleep 1
             done
+            if ! curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then
+              cat /tmp/gunicorn-admission.log || true
+              exit 1
+            fi
             for concurrency in 50 100; do
               BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 python benchmarks/http_benchmark.py > "benchmark-results/gate${gate}-c${concurrency}.json"
             done
@@ -142,7 +155,13 @@ jobs:
         if: always()
         run: |
           if [[ -f /tmp/gunicorn.pid ]]; then
-            kill "$(cat /tmp/gunicorn.pid)" 2>/dev/null || true
+            PID="$(cat /tmp/gunicorn.pid)"
+            kill "$PID" 2>/dev/null || true
+            for attempt in $(seq 1 10); do
+              kill -0 "$PID" 2>/dev/null || exit 0
+              sleep 1
+            done
+            kill -KILL "$PID" 2>/dev/null || true
           fi
       - name: Build report
         run: |
