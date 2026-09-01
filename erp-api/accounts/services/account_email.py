@@ -1,6 +1,7 @@
 import logging
 from urllib.parse import urlencode
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import EmailMultiAlternatives
@@ -33,47 +34,81 @@ def _send_email(*, subject, recipient, template_name, context):
         logger.exception("Could not send account email.")
 
 
+async def _asend_email(*, subject, recipient, template_name, context):
+    """Send email without blocking an ASGI event loop."""
+    await sync_to_async(_send_email, thread_sensitive=True)(
+        subject=subject,
+        recipient=recipient,
+        template_name=template_name,
+        context=context,
+    )
+
+
 def send_password_reset_email(user):
     uid = urlsafe_base64_encode(force_bytes(user.pk))
     token = default_token_generator.make_token(user)
-    reset_url = _frontend_url(
-        "reset-password",
-        uid=uid,
-        token=token,
-    )
+    reset_url = _frontend_url("reset-password", uid=uid, token=token)
     _send_email(
         subject="Reset your password",
         recipient=user.email,
         template_name="accounts/emails/password_reset",
-        context={
-            "user": user,
-            "reset_url": reset_url,
-        },
+        context={"user": user, "reset_url": reset_url},
+    )
+
+
+async def asend_password_reset_email(user):
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    reset_url = _frontend_url("reset-password", uid=uid, token=token)
+    await _asend_email(
+        subject="Reset your password",
+        recipient=user.email,
+        template_name="accounts/emails/password_reset",
+        context={"user": user, "reset_url": reset_url},
     )
 
 
 def send_signup_verification_email(user, verification):
-    verification_url = _frontend_url(
-        "verify-email",
-        token=verification.token,
-    )
+    verification_url = _frontend_url("verify-email", token=verification.token)
     _send_email(
         subject="Verify your email",
         recipient=verification.email,
         template_name="accounts/emails/verify_email",
-        context={
-            "user": user,
-            "verification_url": verification_url,
-        },
+        context={"user": user, "verification_url": verification_url},
+    )
+
+
+async def asend_signup_verification_email(user, verification):
+    verification_url = _frontend_url("verify-email", token=verification.token)
+    await _asend_email(
+        subject="Verify your email",
+        recipient=verification.email,
+        template_name="accounts/emails/verify_email",
+        context={"user": user, "verification_url": verification_url},
     )
 
 
 def send_email_change_verification(user, verification):
     verification_url = _frontend_url(
-        "confirm-email-change",
-        token=verification.token,
+        "confirm-email-change", token=verification.token
     )
     _send_email(
+        subject="Confirm your new email",
+        recipient=verification.email,
+        template_name="accounts/emails/confirm_email_change",
+        context={
+            "user": user,
+            "new_email": verification.email,
+            "verification_url": verification_url,
+        },
+    )
+
+
+async def asend_email_change_verification(user, verification):
+    verification_url = _frontend_url(
+        "confirm-email-change", token=verification.token
+    )
+    await _asend_email(
         subject="Confirm your new email",
         recipient=verification.email,
         template_name="accounts/emails/confirm_email_change",
@@ -90,8 +125,14 @@ def send_email_changed_notice(*, user, old_email, new_email):
         subject="Your account email was changed",
         recipient=old_email,
         template_name="accounts/emails/email_changed",
-        context={
-            "user": user,
-            "new_email": new_email,
-        },
+        context={"user": user, "new_email": new_email},
+    )
+
+
+async def asend_email_changed_notice(*, user, old_email, new_email):
+    await _asend_email(
+        subject="Your account email was changed",
+        recipient=old_email,
+        template_name="accounts/emails/email_changed",
+        context={"user": user, "new_email": new_email},
     )
