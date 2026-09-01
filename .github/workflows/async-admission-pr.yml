@@ -10,6 +10,10 @@ on:
       - "erp-api/products/api/views.py"
       - "erp-api/benchmarks/**"
       - "erp-api/core/settings/settings_bench.py"
+      - "erp-api/core/settings/settings_prod.py"
+      - "erp-api/gunicorn.conf.py"
+      - "erp-api/core/asgi.py"
+      - "erp-api/Dockerfile"
       - ".github/workflows/async-admission-pr.yml"
   workflow_dispatch:
 
@@ -52,17 +56,18 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
       REDIS_URL: redis://127.0.0.1:6379/0
-      DB_POOL_MIN_SIZE: "2"
-      DB_POOL_MAX_SIZE: "10"
-      WEB_CONCURRENCY: "2"
+      # Match the production defaults in settings_prod.py / gunicorn.conf.py.
+      DB_POOL_MIN_SIZE: "1"
+      DB_POOL_MAX_SIZE: "5"
+      WEB_CONCURRENCY: "4"
       TRUST_PROXY_HEADERS: "false"
       BENCH_TIMEOUT: "10"
-      BENCH_DEADLINE: "60"
+      BENCH_DEADLINE: "90"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: "3.13"
           cache: pip
           cache-dependency-path: erp-api/requirements.txt
       - name: Install dependencies
@@ -102,12 +107,10 @@ jobs:
             local minimal="$2"
             export BENCH_API_STACK=async
             export BENCH_MINIMAL_MIDDLEWARE="$minimal"
-            # Keep the admission benchmark free of monkey-patched middleware
-            # timing so instrumentation does not become part of the latency.
             export BENCH_MIDDLEWARE_DIAGNOSTIC=0
             export BENCH_MIDDLEWARE_EXCLUDE=""
             export ASYNC_DB_CONCURRENCY="$gate"
-            gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers 2 --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
+            gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
             SERVER_PID=$!
             for attempt in $(seq 1 60); do
               if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then return; fi
@@ -131,9 +134,11 @@ jobs:
             local case_name="$1"
             local concurrency="$2"
             local requests="$3"
-            BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_CASE="$case_name" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS="$requests" BENCH_WARMUP=50 BENCH_DEADLINE=90 BENCH_TIMEOUT=10 python benchmarks/middleware_diagnostic.py > "benchmark-results/${case_name}.json"
+            BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_EXPECT_STACK=async BENCH_CASE="$case_name" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS="$requests" BENCH_WARMUP=50 BENCH_DEADLINE=90 BENCH_TIMEOUT=10 python benchmarks/http_benchmark.py > "benchmark-results/${case_name}.json"
           }
 
+          # Compare the full production-like middleware stack with the minimal
+          # API stack, using the same Python and worker/pool defaults as prod.
           for stack in full minimal; do
             if [[ "$stack" == "minimal" ]]; then
               minimal=1
@@ -141,7 +146,7 @@ jobs:
               minimal=0
             fi
 
-            for gate in 0 4 5 6; do
+            for gate in 0 3 4 5; do
               start_server "$gate" "$minimal"
               run_case "${stack}-gate${gate}-c50" 50 300
               stop_server
@@ -168,7 +173,7 @@ jobs:
           out = [
               "# Async DB admission benchmark",
               "",
-              "The admission matrix is run against both the production-like full middleware stack and a minimal API stack. Benchmark middleware diagnostics are disabled so the measurement path itself is not monkey-patched.",
+              "The matrix uses the production Python/worker/pool defaults and compares the full production-like middleware stack with a minimal API stack. Benchmark middleware instrumentation is disabled during measurement.",
               "",
               "| stack | gate | concurrency | p50 | p95 | p99 | server p50 | db p50 | pool p50 | gate p50 | gate p95 | gate p99 | successful | failed | complete |",
               "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
@@ -181,9 +186,9 @@ jobs:
               out.append(
                   f"| {stack} | {gate} | {case.get('concurrency')} | "
                   f"{f(case.get('p50_ms'))} | {f(case.get('p95_ms'))} | {f(case.get('p99_ms'))} | "
-                  f"{f(case.get('server_p50_ms'))} | {f(case.get('db_p50_ms'))} | {f(case.get('pool_p50_ms'))} | "
+                  f"{f(case.get('server_p50_ms'))} | {f(case.get('db_p50_ms'))} | {f(case.get('pool_wait_p50_ms'))} | "
                   f"{f(case.get('gate_p50_ms'))} | {f(case.get('gate_p95_ms'))} | {f(case.get('gate_p99_ms'))} | "
-                  f"{case.get('successful')} | {case.get('failed')} | {case.get('complete')} |"
+                  f"{case.get('successful')} | {case.get('failed')} | {case.get('status') == 'complete'} |"
               )
 
           (root / "report.md").write_text("\n".join(out) + "\n")
