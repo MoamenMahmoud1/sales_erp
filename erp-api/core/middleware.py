@@ -7,7 +7,6 @@ from inspect import iscoroutinefunction, markcoroutinefunction
 from django.conf import settings
 
 from core.proxy import is_trusted_proxy, normalize_ip
-from common.services.async_db_gate import db_slot
 from common.services.perf_timing import install_pool_instrumentation, start
 
 CORRELATION_HEADER = "HTTP_X_REQUEST_ID"
