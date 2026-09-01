@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""True end-to-end HTTP benchmark with optional server-side stage timings."""
+"""True end-to-end HTTP benchmark with server-side root-cause timings."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ async def run_requests(
     concurrency: int,
     timeout_s: float,
     progress_every: int = 0,
-) -> tuple[list[float], list[int], Counter[str], dict[str, list[float]], list[int], int]:
+) -> tuple[list[float], list[int], Counter[str], dict[str, list[float]], int]:
     latencies: list[float] = []
     statuses: list[int] = []
     errors: Counter[str] = Counter()
@@ -63,9 +63,10 @@ async def run_requests(
         "app": [],
         "db_admission": [],
         "db_pool": [],
-        "sql": [],
+        "db_operation": [],
+        "serializer_wait": [],
+        "serializer_cpu": [],
     }
-    sql_counts: list[int] = []
     instrumented_responses = 0
     next_index = 0
     completed = 0
@@ -83,10 +84,8 @@ async def run_requests(
         http2=False,
         trust_env=False,
     ) as client:
-
         async def worker() -> None:
             nonlocal next_index, completed, instrumented_responses
-
             while True:
                 async with lock:
                     if next_index >= requests:
@@ -102,39 +101,30 @@ async def run_requests(
                             "Accept": "application/json",
                         },
                     )
-                    # Include body consumption in client-observed latency.
                     response.read()
                     elapsed_ms = (time.perf_counter() - started) * 1000
                     latencies.append(elapsed_ms)
                     statuses.append(response.status_code)
 
-                    header_map = {
+                    headers = {
                         "app": "X-Perf-App-ms",
                         "db_admission": "X-Perf-DB-Admission-ms",
                         "db_pool": "X-Perf-DB-Pool-ms",
-                        "sql": "X-Perf-SQL-ms",
+                        "db_operation": "X-Perf-DB-Operation-ms",
+                        "serializer_wait": "X-Perf-Serializer-Wait-ms",
+                        "serializer_cpu": "X-Perf-Serializer-CPU-ms",
                     }
-                    parsed_all = True
-                    for stage, header in header_map.items():
+                    parsed = True
+                    for stage, header in headers.items():
                         value = response.headers.get(header)
                         if value is None:
-                            parsed_all = False
+                            parsed = False
                             continue
                         try:
                             stage_samples[stage].append(float(value))
                         except ValueError:
-                            parsed_all = False
-
-                    sql_count = response.headers.get("X-Perf-SQL-Count")
-                    if sql_count is None:
-                        parsed_all = False
-                    else:
-                        try:
-                            sql_counts.append(int(sql_count))
-                        except ValueError:
-                            parsed_all = False
-
-                    if parsed_all:
+                            parsed = False
+                    if parsed:
                         instrumented_responses += 1
                 except Exception as exc:
                     latencies.append((time.perf_counter() - started) * 1000)
@@ -145,27 +135,11 @@ async def run_requests(
                     current = completed
 
                 if progress_every and current % progress_every == 0:
-                    print(
-                        json.dumps(
-                            {
-                                "phase": "progress",
-                                "completed": current,
-                                "requests": requests,
-                            }
-                        ),
-                        flush=True,
-                    )
+                    print(json.dumps({"phase": "progress", "completed": current, "requests": requests}), flush=True)
 
         await asyncio.gather(*(worker() for _ in range(concurrency)))
 
-    return (
-        latencies,
-        statuses,
-        errors,
-        stage_samples,
-        sql_counts,
-        instrumented_responses,
-    )
+    return latencies, statuses, errors, stage_samples, instrumented_responses
 
 
 async def main() -> None:
@@ -181,46 +155,24 @@ async def main() -> None:
     if requests <= 0 or concurrency <= 0:
         raise SystemExit("BENCH_REQUESTS and BENCH_CONCURRENCY must be > 0")
 
-    # Warmup is deliberately discarded and never contributes to reported stats.
     if warmup > 0:
-        await run_requests(
-            url,
-            token,
-            warmup,
-            min(concurrency, warmup),
-            timeout_s,
-        )
+        await run_requests(url, token, warmup, min(concurrency, warmup), timeout_s)
 
     started = time.perf_counter()
-    (
-        latencies,
-        statuses,
-        errors,
-        stage_samples,
-        sql_counts,
-        instrumented_responses,
-    ) = await run_requests(
-        url,
-        token,
-        requests,
-        concurrency,
-        timeout_s,
-        progress_every,
+    latencies, statuses, errors, stage_samples, instrumented = await run_requests(
+        url, token, requests, concurrency, timeout_s, progress_every
     )
     elapsed = time.perf_counter() - started
 
     successful = sum(200 <= status < 300 for status in statuses)
     completed = len(latencies)
     failed = completed - successful
-    stage_stats = {
-        stage: summarize(values) for stage, values in stage_samples.items()
-    }
+    stage_stats = {stage: summarize(values) for stage, values in stage_samples.items()}
 
     stack_verified = (
         completed == requests
         and successful == requests
-        and instrumented_responses == requests
-        and len(sql_counts) == requests
+        and instrumented == requests
     )
 
     payload = {
@@ -248,18 +200,18 @@ async def main() -> None:
         "server_p50_ms": stage_stats["app"]["p50_ms"],
         "server_p95_ms": stage_stats["app"]["p95_ms"],
         "server_p99_ms": stage_stats["app"]["p99_ms"],
-        "db_p50_ms": stage_stats["sql"]["p50_ms"],
-        "db_p95_ms": stage_stats["sql"]["p95_ms"],
-        "db_p99_ms": stage_stats["sql"]["p99_ms"],
+        "db_p50_ms": stage_stats["db_operation"]["p50_ms"],
+        "db_p95_ms": stage_stats["db_operation"]["p95_ms"],
+        "db_p99_ms": stage_stats["db_operation"]["p99_ms"],
         "pool_wait_p50_ms": stage_stats["db_pool"]["p50_ms"],
         "pool_wait_p95_ms": stage_stats["db_pool"]["p95_ms"],
         "pool_wait_p99_ms": stage_stats["db_pool"]["p99_ms"],
         "db_admission_p50_ms": stage_stats["db_admission"]["p50_ms"],
         "db_admission_p95_ms": stage_stats["db_admission"]["p95_ms"],
         "db_admission_p99_ms": stage_stats["db_admission"]["p99_ms"],
-        "db_queries_mean": statistics.fmean(sql_counts) if sql_counts else None,
-        "sql_count_mean": statistics.fmean(sql_counts) if sql_counts else None,
-        "instrumented_responses": instrumented_responses,
+        "serializer_wait_p50_ms": stage_stats["serializer_wait"]["p50_ms"],
+        "serializer_cpu_p50_ms": stage_stats["serializer_cpu"]["p50_ms"],
+        "instrumented_responses": instrumented,
         "stack_verified": stack_verified,
         "deadline_sec": deadline_s,
         "deadline_exceeded": bool(deadline_s and elapsed > deadline_s),
