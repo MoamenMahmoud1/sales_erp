@@ -19,6 +19,12 @@ DB_POOL_MAX_SIZE = config("DB_POOL_MAX_SIZE", default=5, cast=int)
 if DB_POOL_MIN_SIZE < 0 or DB_POOL_MAX_SIZE < 1 or DB_POOL_MIN_SIZE > DB_POOL_MAX_SIZE:
     raise ValueError("DB_POOL_MIN_SIZE and DB_POOL_MAX_SIZE are invalid")
 
+# Optional per-worker application-level bound for async ORM concurrency.
+# Zero keeps the gate disabled. When enabled, keep this <= DB_POOL_MAX_SIZE.
+ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=0, cast=int)
+if ASYNC_DB_CONCURRENCY < 0:
+    raise ValueError("ASYNC_DB_CONCURRENCY must be >= 0")
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
