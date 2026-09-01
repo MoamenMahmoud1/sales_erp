@@ -1,6 +1,6 @@
 # Core framework
-Django==6.0.8
-djangorestframework==3.17.2
+Django==6.1
+djangorestframework==3.18.0
 adrf==0.1.14
 django-filter==26.1
 djangorestframework-simplejwt==5.5.1
@@ -10,7 +10,7 @@ drf-spectacular==0.30.0
 psycopg[binary,pool]==3.3.4
 
 # ASGI deployment
-gunicorn==26.0.0
+gunicorn==26.2.0
 uvicorn[standard]==0.52.4
 uvicorn-worker==0.4.0
 
