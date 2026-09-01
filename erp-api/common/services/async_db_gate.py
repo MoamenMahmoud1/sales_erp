@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from django.conf import settings
+from django.db import connection
+
+from common.services.perf_timing import add_admission_wait, add_pool_wait
 
 
 class DBAdmissionTimeout(RuntimeError):
@@ -47,14 +51,34 @@ def _get_gate() -> asyncio.Semaphore:
     return _gate
 
 
+async def _acquire_gate(gate: asyncio.Semaphore, timeout: float | None) -> None:
+    started = time.perf_counter_ns()
+    try:
+        if timeout is None:
+            await gate.acquire()
+        else:
+            await asyncio.wait_for(gate.acquire(), timeout=timeout)
+    except TimeoutError as exc:
+        add_admission_wait(time.perf_counter_ns() - started)
+        raise DBAdmissionTimeout from exc
+    else:
+        add_admission_wait(time.perf_counter_ns() - started)
+
+
+async def _ensure_connection() -> None:
+    """Acquire the backend pool connection before any ORM SQL is executed."""
+    started = time.perf_counter_ns()
+    await connection.aensure_connection()
+    add_pool_wait(time.perf_counter_ns() - started)
+
+
 @asynccontextmanager
 async def db_slot():
     """Bound DB-bound ORM concurrency per ASGI worker.
 
-    The gate is deliberately kept below the per-worker connection-pool max so
-    gated requests don't sit in the Psycopg pool waiting queue. A finite
-    admission timeout turns overload into a fast, explicit 503 rather than
-    allowing requests to accumulate for seconds inside the application.
+    Admission wait is measured before the semaphore. Once admitted, the
+    connection is explicitly acquired so pool wait is a separate stage. SQL
+    execution itself is measured by Django's execute wrapper middleware.
     """
     if not enabled():
         yield
@@ -62,15 +86,10 @@ async def db_slot():
 
     gate = _get_gate()
     timeout = _timeout_seconds()
-    if timeout is None:
-        await gate.acquire()
-    else:
-        try:
-            await asyncio.wait_for(gate.acquire(), timeout=timeout)
-        except TimeoutError as exc:
-            raise DBAdmissionTimeout from exc
+    await _acquire_gate(gate, timeout)
 
     try:
+        await _ensure_connection()
         yield
     finally:
         gate.release()
