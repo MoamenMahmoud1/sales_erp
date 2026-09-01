@@ -1,8 +1,4 @@
-"""Benchmark-only request/DB timing instrumentation.
-
-Loaded only by settings_bench. It measures request wall time and SQL execution
-time without changing production middleware.
-"""
+"""Benchmark-only request, SQL, and DB-pool timing instrumentation."""
 
 import inspect
 import time
@@ -30,7 +26,6 @@ class TimingWrapper:
 def _install_wrapper(connection):
     if getattr(connection, "_benchmark_wrapper_installed", False):
         return
-    # BaseDatabaseWrapper.execute_wrappers is the per-connection wrapper stack.
     connection.execute_wrappers.append(TimingWrapper())
     connection._benchmark_wrapper_installed = True
 
@@ -41,7 +36,12 @@ def _connection_created(sender, connection, **kwargs):
 
 
 class BenchmarkTimingMiddleware:
-    """Measure total request wall time and SQL execution time."""
+    """Measure request wall time, SQL execution time, and derived app time.
+
+    Pool acquisition is intentionally not counted as SQL time. If the backend
+    exposes pool wait telemetry, benchmark code can add it to the same metrics
+    context without conflating it with PostgreSQL execution time.
+    """
 
     async_capable = True
     sync_capable = True
@@ -53,7 +53,11 @@ class BenchmarkTimingMiddleware:
             markcoroutinefunction(self)
 
     def __call__(self, request):
-        metrics = {"db_time": 0.0, "db_queries": 0}
+        metrics = {
+            "db_time": 0.0,
+            "db_queries": 0,
+            "pool_wait": 0.0,
+        }
         token = _metrics.set(metrics)
         started = time.perf_counter()
         try:
@@ -78,11 +82,14 @@ class BenchmarkTimingMiddleware:
     def _finish(self, response, started, token, metrics):
         total_ms = (time.perf_counter() - started) * 1000
         db_ms = metrics["db_time"] * 1000
+        pool_wait_ms = metrics["pool_wait"] * 1000
         response["Server-Timing"] = (
-            f"app;dur={max(total_ms - db_ms, 0):.3f}, "
-            f"db;dur={db_ms:.3f}, dbq;desc=queries;dur={metrics['db_queries']}"
+            f"app;dur={max(total_ms - db_ms - pool_wait_ms, 0):.3f}, "
+            f"db;dur={db_ms:.3f}, pool;dur={pool_wait_ms:.3f}, "
+            f"dbq;desc=queries;dur={metrics['db_queries']}"
         )
         response["X-Benchmark-Request-Ms"] = f"{total_ms:.3f}"
         response["X-Benchmark-DB-Ms"] = f"{db_ms:.3f}"
         response["X-Benchmark-DB-Queries"] = str(metrics["db_queries"])
+        response["X-Benchmark-Pool-Wait-Ms"] = f"{pool_wait_ms:.3f}"
         _metrics.reset(token)
