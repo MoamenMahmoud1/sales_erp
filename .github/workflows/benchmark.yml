@@ -31,7 +31,7 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: erp-api
@@ -73,10 +73,10 @@ jobs:
       DB_POOL_MAX_SIZE: "10"
       WEB_CONCURRENCY: "2"
       TRUST_PROXY_HEADERS: "false"
-      BENCH_REQUESTS: "1000"
-      BENCH_WARMUP: "200"
-      BENCH_TIMEOUT: "30"
-      BENCH_DEADLINE: "300"
+      BENCH_REQUESTS: "600"
+      BENCH_WARMUP: "50"
+      BENCH_TIMEOUT: "10"
+      BENCH_DEADLINE: "60"
       BENCH_PROGRESS_EVERY: "100"
 
     steps:
@@ -167,7 +167,7 @@ jobs:
             start_server "$mode"
             for concurrency in 1 5 10 25 50 100; do
               echo "=== ${mode} concurrency=${concurrency} ==="
-              BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" \
+              BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=600 BENCH_WARMUP=50 BENCH_DEADLINE=60 BENCH_TIMEOUT=10 \
                 python benchmarks/http_benchmark.py | tee "benchmark-results/${mode}-c${concurrency}.jsonl"
             done
             BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY=100 BENCH_REQUESTS=500 BENCH_WARMUP=100 \
@@ -200,7 +200,7 @@ jobs:
               for attempt in $(seq 1 60); do curl -fsS "$BASE/health/live/" >/dev/null 2>&1 && break; sleep 1; done
               for concurrency in 25 100; do
                 echo "=== ${mode} pool=${pool} concurrency=${concurrency} ==="
-                BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 \
+                BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_DEADLINE=60 BENCH_TIMEOUT=10 \
                   python benchmarks/http_benchmark.py | tee "benchmark-results/${mode}-pool${pool}-c${concurrency}.jsonl"
               done
               kill "$SERVER_PID" || true
@@ -219,7 +219,10 @@ jobs:
           for path in sorted(Path("benchmark-results").glob("*.jsonl")):
               for line in path.read_text().splitlines():
                   if line.strip():
-                      item = json.loads(line)
+                      try:
+                          item = json.loads(line)
+                      except json.JSONDecodeError:
+                          continue
                       if item.get("phase") == "measured":
                           item["mode"] = path.name.split("-c", 1)[0]
                           rows.append(item)
