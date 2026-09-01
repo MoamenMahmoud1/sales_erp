@@ -1,4 +1,5 @@
 from adrf import serializers
+from rest_framework.exceptions import ValidationError
 
 from invoices.models import Invoice, InvoiceItem
 
@@ -34,9 +35,7 @@ class InvoiceItemSerializer(serializers.ModelSerializer):
 
     def validate_quantity(self, value):
         if value < 1:
-            raise serializers.ValidationError(
-                "Quantity must be at least 1."
-            )
+            raise ValidationError("Quantity must be at least 1.")
 
         return value
 
@@ -64,11 +63,11 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
     def validate_items(self, items):
         if not items:
-            raise serializers.ValidationError("An invoice must contain at least one item.")
+            raise ValidationError("An invoice must contain at least one item.")
 
         product_ids = [item["product"].pk for item in items]
         if len(product_ids) != len(set(product_ids)):
-            raise serializers.ValidationError("A product cannot appear more than once.")
+            raise ValidationError("A product cannot appear more than once.")
         return items
 
 
