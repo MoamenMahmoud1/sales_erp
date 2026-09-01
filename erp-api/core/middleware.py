@@ -6,8 +6,8 @@ from inspect import iscoroutinefunction, markcoroutinefunction
 
 from django.conf import settings
 
-from core.proxy import is_trusted_proxy, normalize_ip
 from common.services.perf_timing import install_pool_instrumentation, start
+from core.proxy import is_trusted_proxy, normalize_ip
 
 CORRELATION_HEADER = "HTTP_X_REQUEST_ID"
 
@@ -95,14 +95,27 @@ class RequestIdAndPerfMiddleware:
         response["X-Perf-DB-Operation-Count"] = str(timing.db_operation_count)
         response["X-Perf-Serializer-Wait-ms"] = f"{ms(timing.serializer_wait_ns):.3f}"
         response["X-Perf-Serializer-CPU-ms"] = f"{ms(timing.serializer_cpu_ns):.3f}"
-        response["Server-Timing"] = (
-            f"app;dur={ms(timing.app_ns):.3f},"
-            f"db-admission;dur={ms(timing.admission_wait_ns):.3f},"
-            f"db-pool;dur={ms(timing.pool_wait_ns):.3f},"
-            f"db-operation;dur={ms(timing.db_operation_ns):.3f},"
-            f"serializer-wait;dur={ms(timing.serializer_wait_ns):.3f},"
-            f"serializer-cpu;dur={ms(timing.serializer_cpu_ns):.3f}"
-        )
+
+        server_timing = [
+            f"app;dur={ms(timing.app_ns):.3f}",
+            f"db-admission;dur={ms(timing.admission_wait_ns):.3f}",
+            f"db-pool;dur={ms(timing.pool_wait_ns):.3f}",
+            f"db-operation;dur={ms(timing.db_operation_ns):.3f}",
+            f"serializer-wait;dur={ms(timing.serializer_wait_ns):.3f}",
+            f"serializer-cpu;dur={ms(timing.serializer_cpu_ns):.3f}",
+        ]
+
+        # Detailed view timings are opt-in through PERF_TIMING_ENABLED and are
+        # emitted as individual headers so the benchmark can calculate exact
+        # per-stage distributions without guessing from inclusive middleware time.
+        for name, duration_ns in timing.view_stage_ns.items():
+            header_name = "X-Perf-View-" + name.removeprefix("view.").replace(".", "-") + "-ms"
+            response[header_name] = f"{ms(duration_ns):.3f}"
+            server_timing.append(
+                f"{name};dur={ms(duration_ns):.3f}"
+            )
+
+        response["Server-Timing"] = ",".join(server_timing)
 
 
 class RequestCorrelationMiddleware:
