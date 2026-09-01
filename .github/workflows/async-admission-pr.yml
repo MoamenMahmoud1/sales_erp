@@ -1,6 +1,8 @@
 name: Async DB Admission Benchmark (PR)
 
 on:
+  push:
+    branches: [perf/async-db-admission]
   pull_request:
     branches: [main]
     paths:
