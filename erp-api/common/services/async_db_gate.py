@@ -68,9 +68,11 @@ async def _acquire_gate(gate: asyncio.Semaphore, timeout: float | None) -> None:
 async def db_slot():
     """Bound DB-bound ORM concurrency per ASGI worker.
 
-    The gate measures only application admission wait. Psycopg pool checkout
-    is instrumented independently at ConnectionPool.getconn(), and SQL
-    execution is measured by Django's execute wrapper middleware.
+    The admission timer covers only semaphore queueing. The pool timer covers
+    psycopg ConnectionPool.getconn() checkout. The DB-operation timer wraps
+    the complete async pagination/database await, including Django's async
+    ORM adapter and result materialization. PostgreSQL execution plans and
+    pg_stat_statements provide server-side SQL timing separately.
     """
     if not enabled():
         yield
