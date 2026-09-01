@@ -14,7 +14,9 @@ TOKEN = os.environ.get("BENCH_TOKEN", "")
 CONCURRENCY = int(os.environ.get("BENCH_CONCURRENCY", "10"))
 REQUESTS = int(os.environ.get("BENCH_REQUESTS", "1000"))
 TIMEOUT = float(os.environ.get("BENCH_TIMEOUT", "30"))
+DEADLINE = float(os.environ.get("BENCH_DEADLINE", "300"))
 WARMUP = int(os.environ.get("BENCH_WARMUP", "100"))
+PROGRESS_EVERY = max(1, int(os.environ.get("BENCH_PROGRESS_EVERY", "100")))
 
 
 def percentile(values, p):
@@ -35,9 +37,12 @@ async def run_load(client, total, concurrency):
     db_queries = []
     statuses = Counter()
     errors = Counter()
+    completed = 0
+    completed_lock = asyncio.Lock()
     started = time.perf_counter()
 
     async def one_request(index):
+        nonlocal completed
         async with semaphore:
             request_started = time.perf_counter()
             try:
@@ -51,6 +56,8 @@ async def run_load(client, total, concurrency):
                     db_queries.append(int(response.headers["X-Benchmark-DB-Queries"]))
                 except (KeyError, ValueError):
                     errors["missing_timing_headers"] += 1
+            except asyncio.CancelledError:
+                raise
             except httpx.TimeoutException:
                 elapsed = (time.perf_counter() - request_started) * 1000
                 latencies_ms.append(elapsed)
@@ -59,10 +66,34 @@ async def run_load(client, total, concurrency):
                 elapsed = (time.perf_counter() - request_started) * 1000
                 latencies_ms.append(elapsed)
                 errors[type(exc).__name__] += 1
+            finally:
+                async with completed_lock:
+                    completed += 1
+                    if completed % PROGRESS_EVERY == 0 or completed == total:
+                        elapsed = time.perf_counter() - started
+                        print(
+                            f"PROGRESS completed={completed}/{total} "
+                            f"elapsed={elapsed:.3f}s",
+                            flush=True,
+                        )
 
-    await asyncio.gather(*(one_request(i) for i in range(total)))
+    tasks = [asyncio.create_task(one_request(i)) for i in range(total)]
+    try:
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=DEADLINE)
+    except asyncio.TimeoutError:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        elapsed = time.perf_counter() - started
+        print(
+            f"DEADLINE_EXCEEDED completed={completed}/{total} "
+            f"elapsed={elapsed:.3f}s deadline={DEADLINE:.3f}s",
+            flush=True,
+        )
+        raise
+
     wall_time = time.perf_counter() - started
-
     successful = sum(count for status, count in statuses.items() if status.startswith("2"))
     failed_http = total - successful - sum(errors.values())
     failed = failed_http + sum(errors.values())
@@ -108,6 +139,21 @@ async def main():
     )
     timeout = httpx.Timeout(TIMEOUT)
 
+    print(
+        json.dumps(
+            {
+                "phase": "config",
+                "requests": REQUESTS,
+                "concurrency": CONCURRENCY,
+                "request_timeout_sec": TIMEOUT,
+                "global_deadline_sec": DEADLINE,
+                "warmup_requests": WARMUP,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
     async with httpx.AsyncClient(
         headers=headers,
         limits=limits,
@@ -116,7 +162,7 @@ async def main():
     ) as client:
         if WARMUP:
             warmup = await run_load(client, WARMUP, CONCURRENCY)
-            print(json.dumps({"phase": "warmup", **warmup}, sort_keys=True))
+            print(json.dumps({"phase": "warmup", **warmup}, sort_keys=True), flush=True)
         result = await run_load(client, REQUESTS, CONCURRENCY)
         result.update(
             {
@@ -124,9 +170,10 @@ async def main():
                 "concurrency": CONCURRENCY,
                 "url": URL,
                 "warmup_requests": WARMUP,
+                "global_deadline_sec": DEADLINE,
             }
         )
-        print(json.dumps(result, sort_keys=True))
+        print(json.dumps(result, sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":
