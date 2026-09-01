@@ -35,8 +35,8 @@ def _send_email(*, subject, recipient, template_name, context):
 
 
 async def _asend_email(*, subject, recipient, template_name, context):
-    """Send email without blocking an ASGI event loop."""
-    await sync_to_async(_send_email, thread_sensitive=True)(
+    """Run Django's synchronous email backend off the ASGI event loop."""
+    await sync_to_async(_send_email, thread_sensitive=False)(
         subject=subject,
         recipient=recipient,
         template_name=template_name,
