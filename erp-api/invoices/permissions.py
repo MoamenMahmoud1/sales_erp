@@ -1,20 +1,10 @@
-"""Business permissions for invoice operations.
-
-Staff/superuser remains a broad fallback (backwards compatible with the earlier
-coarse model), but fine-grained non-staff roles can now be granted the specific
-``invoices.confirm_invoice`` / ``invoices.cancel_invoice`` /
-``invoices.apply_invoice_coupon`` permissions and act through the API without
-being staff.
-"""
+"""Business permissions for invoice operations."""
 
 from rest_framework.permissions import BasePermission
 
 
 class InvoicePermission(BasePermission):
-    """Read for any authenticated user; writes require a business permission.
-
-    Mapping of view actions to the Django permission codename they require.
-    """
+    """Read for any authenticated user; writes require a business permission."""
 
     ACTION_PERMISSIONS = {
         "create": "invoices.add_invoice",
@@ -24,15 +14,13 @@ class InvoicePermission(BasePermission):
         "apply_coupon": "invoices.apply_invoice_coupon",
     }
 
-    def has_permission(self, request, view):
+    async def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
 
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return True
 
-        # Broad admin fallback retained for backwards compatibility. Business
-        # permissions below are the primary, granular authorization mechanism.
         if request.user.is_staff or request.user.is_superuser:
             return True
 
@@ -40,4 +28,4 @@ class InvoicePermission(BasePermission):
         if not codename:
             return False
 
-        return request.user.has_perm(codename)
+        return await request.user.ahas_perm(codename)
