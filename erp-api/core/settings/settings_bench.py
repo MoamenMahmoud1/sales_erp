@@ -40,13 +40,10 @@ if _bench_middleware_exclude:
         if path not in _bench_middleware_exclude
     ]
 
-# Diagnostic mode patches the configured middleware classes at import time and
-# records inclusive wall time for each invocation. It is opt-in and only used
-# by the disposable benchmark environment.
-if _bench_middleware_diagnostic:
-    from benchmarks.middleware_probe import install_middleware_probe
-
-    install_middleware_probe(MIDDLEWARE)
+# Diagnostic mode is deliberately activated from BenchmarkTimingMiddleware.__init__
+# rather than while importing this settings module. At that point Django has
+# completed app loading and all middleware instances have been constructed,
+# while class-level __call__ patching still affects those live instances.
 
 # Application-level DB concurrency control. Zero disables the gate. When
 # enabled, the async view waits here before entering its DB-bound section,
