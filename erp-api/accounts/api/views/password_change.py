@@ -5,13 +5,13 @@ from rest_framework.response import Response
 
 from accounts.api.serializers.password_change import PasswordChangeSerializer
 from authsession.http import NoStoreResponseMixin, clear_login_cookies
-from authsession.permissions import VerifiedAuthSessionPermission
+from authsession.permissions import VerifiedAuthSessionSyncPermission
 from authentication.throttling import SensitiveActionThrottle
 
 
 class PasswordChangeView(NoStoreResponseMixin, GenericAPIView):
     serializer_class = PasswordChangeSerializer
-    permission_classes = (IsAuthenticated, VerifiedAuthSessionPermission)
+    permission_classes = (IsAuthenticated, VerifiedAuthSessionSyncPermission)
     throttle_classes = (SensitiveActionThrottle,)
 
     def post(self, request, *args, **kwargs):
