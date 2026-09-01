@@ -13,19 +13,32 @@ CSRF_TRUSTED_ORIGINS = config(
     cast=lambda value: [origin.strip() for origin in value.split(",") if origin.strip()],
 )
 
-# PostgreSQL Production
-DB_POOL_MIN_SIZE = config("DB_POOL_MIN_SIZE", default=1, cast=int)
-DB_POOL_MAX_SIZE = config("DB_POOL_MAX_SIZE", default=5, cast=int)
+# PostgreSQL production pooling.
+# Django's async documentation recommends disabling persistent connections
+# under ASGI and sizing the backend pool for the target in-flight query
+# concurrency. Keep a small amount of spare capacity above the application
+# admission limit so unrelated database work does not immediately queue.
+DB_POOL_MIN_SIZE = config("DB_POOL_MIN_SIZE", default=2, cast=int)
+DB_POOL_MAX_SIZE = config("DB_POOL_MAX_SIZE", default=8, cast=int)
 if DB_POOL_MIN_SIZE < 0 or DB_POOL_MAX_SIZE < 1 or DB_POOL_MIN_SIZE > DB_POOL_MAX_SIZE:
     raise ValueError("DB_POOL_MIN_SIZE and DB_POOL_MAX_SIZE are invalid")
 
-# Optional per-worker application-level bound for async ORM concurrency.
-# Keep this disabled by default; benchmark runs can explicitly enable it.
-ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=0, cast=int)
-if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY > DB_POOL_MAX_SIZE:
+# Per-worker application-level bound for async ORM database work. This must be
+# strictly smaller than the pool size so admitted work does not immediately
+# turn into pool wait.
+ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=6, cast=int)
+if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
     raise ValueError(
-        "ASYNC_DB_CONCURRENCY must be between 0 and DB_POOL_MAX_SIZE"
+        "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
     )
+
+# Fail fast when a DB-bound request has been queued behind the application
+# admission gate for too long. Set to 0 to wait without a gate timeout.
+ASYNC_DB_ADMISSION_TIMEOUT_MS = config(
+    "ASYNC_DB_ADMISSION_TIMEOUT_MS", default=250, cast=int
+)
+if ASYNC_DB_ADMISSION_TIMEOUT_MS < 0:
+    raise ValueError("ASYNC_DB_ADMISSION_TIMEOUT_MS must be >= 0")
 
 DATABASES = {
     "default": {
@@ -35,6 +48,8 @@ DATABASES = {
         "PASSWORD": config("DB_PASSWORD"),
         "HOST": config("DB_HOST", default="localhost"),
         "PORT": config("DB_PORT", default="5432"),
+        # Django recommends disabling persistent connections with ASGI and
+        # using the backend's connection pool instead.
         "CONN_MAX_AGE": 0,
         "CONN_HEALTH_CHECKS": True,
         "OPTIONS": {
