@@ -14,7 +14,15 @@ are conservative starting points, not universal performance-optimal values.
 import multiprocessing
 import os
 
-cpu_count = max(1, multiprocessing.cpu_count())
+# Python 3.13+ exposes the CPUs actually usable by the current process. This
+# matters inside containers where the host may have more CPUs than the
+# container is allowed to use.
+_process_cpu_count = getattr(os, "process_cpu_count", None)
+cpu_count = max(
+    1,
+    (_process_cpu_count() if _process_cpu_count is not None else multiprocessing.cpu_count())
+    or 1,
+)
 default_workers = min(4, cpu_count)
 workers = int(os.environ.get("WEB_CONCURRENCY", default_workers))
 if workers < 1:
