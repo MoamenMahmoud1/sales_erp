@@ -132,6 +132,7 @@ jobs:
             free -h
             python --version
             python -c 'import django; print("Django", django.get_version())'
+            python -c 'import adrf; print("ADRF", getattr(adrf, "__version__", "unknown"))'
             python -c 'import httpx; print("httpx", httpx.__version__)'
             PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SHOW server_version; SHOW max_connections; SHOW shared_buffers; SHOW effective_cache_size; SHOW work_mem; SHOW random_page_cost; SHOW effective_io_concurrency; SHOW jit; SHOW track_io_timing;"
           } > benchmark-results/environment.md
@@ -170,7 +171,7 @@ jobs:
               BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=600 BENCH_WARMUP=50 BENCH_DEADLINE=60 BENCH_TIMEOUT=10 \
                 python benchmarks/http_benchmark.py | tee "benchmark-results/${mode}-c${concurrency}.jsonl"
             done
-            BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY=100 BENCH_REQUESTS=500 BENCH_WARMUP=100 \
+            BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY=100 BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_DEADLINE=60 BENCH_TIMEOUT=10 \
               python benchmarks/transport_diagnostics.py | tee "benchmark-results/${mode}-transport-c100.jsonl"
             echo "=== ${mode} server errors ==="
             cat "/tmp/gunicorn-${mode}.log" || true
@@ -214,26 +215,109 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import re
           from pathlib import Path
-          rows = []
-          for path in sorted(Path("benchmark-results").glob("*.jsonl")):
-              for line in path.read_text().splitlines():
-                  if line.strip():
-                      try:
-                          item = json.loads(line)
-                      except json.JSONDecodeError:
-                          continue
-                      if item.get("phase") == "measured":
-                          item["mode"] = path.name.split("-c", 1)[0]
-                          rows.append(item)
-          rows.sort(key=lambda x: (x["mode"], x.get("concurrency", 0)))
-          cols = ["mode", "concurrency", "requests", "successful", "failed", "timeouts", "wall_time_sec", "rps", "p50_ms", "p95_ms", "p99_ms", "max_ms", "error_rate_pct", "server_p50_ms", "server_p95_ms", "server_p99_ms", "db_p50_ms", "db_p95_ms", "db_p99_ms", "db_mean_ms", "db_queries_mean"]
-          with open("benchmark-results/report.md", "w", encoding="utf-8") as f:
-              f.write("# True pure Sync vs Async root-cause benchmark\n\n")
-              f.write("Sync uses DRF + Django sync ORM; Async uses ADRF + Django async ORM. Same endpoint, logic, data, auth and permissions.\n\n")
-              f.write("| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n")
+
+          root = Path("benchmark-results")
+          measured = []
+          transports = []
+          probes = []
+
+          for path in sorted(root.glob("*.jsonl")):
+              match = re.match(r"^(sync|async)(?:-pool(\d+))?-c(\d+)\.jsonl$", path.name)
+              for line in path.read_text(encoding="utf-8").splitlines():
+                  if not line.strip():
+                      continue
+                  try:
+                      item = json.loads(line)
+                  except json.JSONDecodeError:
+                      continue
+                  if item.get("phase") == "measured":
+                      row = dict(item)
+                      if match:
+                          row["mode"] = match.group(1)
+                          row["pool"] = int(match.group(2)) if match.group(2) else None
+                          row["kind"] = "pool" if match.group(2) else "main"
+                          row["file"] = path.name
+                      measured.append(row)
+                  elif item.get("phase") == "transport":
+                      row = dict(item)
+                      row["file"] = path.name
+                      transports.append(row)
+                  elif item.get("phase") == "transport_probe":
+                      row = dict(item)
+                      row["file"] = path.name
+                      probes.append(row)
+
+          measured.sort(key=lambda x: (x["kind"], x["mode"], x.get("pool") or 0, x.get("concurrency", 0)))
+
+          def fmt(value, digits=3):
+              if value is None:
+                  return ""
+              if isinstance(value, bool):
+                  return "yes" if value else "no"
+              if isinstance(value, float):
+                  return f"{value:.{digits}f}"
+              return str(value)
+
+          def table(rows, cols):
+              out = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
               for row in rows:
-                  f.write("| " + " | ".join(str(row.get(c, "")) for c in cols) + " |\n")
+                  out.append("| " + " | ".join(fmt(row.get(c)) for c in cols) + " |")
+              return "\n".join(out)
+
+          main_rows = [r for r in measured if r.get("kind") == "main"]
+          pool_rows = [r for r in measured if r.get("kind") == "pool"]
+
+          report = []
+          report.append("# True pure Sync vs Async root-cause benchmark")
+          report.append("")
+          report.append("The measured endpoint is the same products list. Sync uses DRF + Django sync ORM; Async uses ADRF + Django async ORM. Every response is runtime-validated before it is counted as successful.")
+          report.append("")
+          report.append("## Runtime stack verification")
+          report.append("")
+          report.append("A measurement is considered stack-verified only when the response proves the expected router, bound handler, async callable state, event-loop state, and (for Async) both `acount` and async iteration operations.")
+          report.append("")
+          report.append(table(main_rows, ["mode", "concurrency", "requests", "successful", "failed", "rps", "p50_ms", "p95_ms", "p99_ms", "server_p50_ms", "db_p50_ms", "db_queries_mean", "stack_verified"]))
+          report.append("")
+          report.append("## DB-pool sweep")
+          report.append("")
+          report.append(table(pool_rows, ["mode", "pool", "concurrency", "requests", "successful", "failed", "rps", "p50_ms", "p95_ms", "p99_ms", "server_p50_ms", "db_p50_ms", "db_queries_mean", "stack_verified"]))
+          report.append("")
+
+          report.append("## Transport diagnostics")
+          report.append("")
+          report.append(table(transports, ["file", "concurrency", "requests", "successful", "rps", "http_p50_ms", "server_p50_ms", "db_p50_ms", "transport_minus_server_p50_ms", "stack_verified", "observed_stacks", "observed_routers", "observed_handlers", "observed_event_loops"]))
+          report.append("")
+
+          report.append("## Root-cause signals")
+          report.append("")
+          if main_rows:
+              by_key = {(r["mode"], r["concurrency"]): r for r in main_rows}
+              for concurrency in [1, 5, 10, 25, 50, 100]:
+                  sync = by_key.get(("sync", concurrency))
+                  async_ = by_key.get(("async", concurrency))
+                  if sync and async_:
+                      ratio = async_["rps"] / sync["rps"] if sync.get("rps") else None
+                      report.append(f"- concurrency={concurrency}: Async/Sync RPS ratio = {fmt(ratio, 4)}; Async p99 = {fmt(async_.get('p99_ms'))} ms; Sync p99 = {fmt(sync.get('p99_ms'))} ms.")
+          if pool_rows:
+              async_c100 = [r for r in pool_rows if r.get("mode") == "async" and r.get("concurrency") == 100]
+              if async_c100:
+                  rps_values = [r["rps"] for r in async_c100]
+                  spread = max(rps_values) - min(rps_values)
+                  report.append(f"- Async c100 pool sweep RPS spread across pool=5..40: {fmt(spread, 3)} RPS; this quantifies whether pool size is the dominant limiter.")
+          report.append("- PostgreSQL execution timing is reported separately from request wall time. A low DB timing fraction with a high request wall time points away from PostgreSQL execution as the primary bottleneck.")
+          report.append("- The Async products path uses a batched serializer service boundary (`batched_sync_representation`) so serialization is one executor hop per page rather than ADRF's per-field sync-to-async crossings.")
+          report.append("")
+
+          (root / "report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
+          summary = {
+              "main_rows": main_rows,
+              "pool_rows": pool_rows,
+              "transport_rows": transports,
+              "transport_probes": probes,
+          }
+          (root / "report.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
           PY
 
       - name: Upload benchmark results
