@@ -1,12 +1,14 @@
-"""Core middleware: proxy trusted headers + request correlation IDs."""
+"""Core middleware: proxy trusted headers, request ids, and perf timings."""
 import logging
 import uuid
 from contextvars import ContextVar
 from inspect import iscoroutinefunction, markcoroutinefunction
 
 from django.conf import settings
+from django.db import connection
 
 from core.proxy import is_trusted_proxy, normalize_ip
+from common.services.perf_timing import execute_wrapper, start
 
 CORRELATION_HEADER = "HTTP_X_REQUEST_ID"
 
@@ -43,6 +45,74 @@ class _RequestIdLogRecordFactory:
 logging.setLogRecordFactory(
     _RequestIdLogRecordFactory(logging.getLogRecordFactory())
 )
+
+
+class RequestIdAndPerfMiddleware:
+    """Keep the ASGI path async and expose four measurable server stages.
+
+    The timings are opt-in through PERF_TIMING_ENABLED. The headers are useful
+    for an external benchmark because they are emitted by the application and
+    do not require Django debug instrumentation.
+    """
+
+    async_capable = True
+    sync_capable = True
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self._is_async = iscoroutinefunction(get_response)
+        if self._is_async:
+            markcoroutinefunction(self)
+
+    def __call__(self, request):
+        if self._is_async:
+            return self._async_call(request)
+
+        request_id = request.META.get(CORRELATION_HEADER) or uuid.uuid4().hex
+        request.META[CORRELATION_HEADER] = request_id
+        token = _current_request_id.set(request_id)
+        try:
+            if not getattr(settings, "PERF_TIMING_ENABLED", False):
+                return self.get_response(request)
+            timing = start()
+            with execute_wrapper(connection):
+                response = self.get_response(request)
+            self._add_headers(response, timing)
+            return response
+        finally:
+            _current_request_id.reset(token)
+
+    async def _async_call(self, request):
+        request_id = request.META.get(CORRELATION_HEADER) or uuid.uuid4().hex
+        request.META[CORRELATION_HEADER] = request_id
+        token = _current_request_id.set(request_id)
+        try:
+            if not getattr(settings, "PERF_TIMING_ENABLED", False):
+                response = await self.get_response(request)
+            else:
+                timing = start()
+                with execute_wrapper(connection):
+                    response = await self.get_response(request)
+                self._add_headers(response, timing)
+            response["X-Request-Id"] = request_id
+            return response
+        finally:
+            _current_request_id.reset(token)
+
+    @staticmethod
+    def _add_headers(response, timing):
+        response["X-Perf-Total-ms"] = f"{timing.as_ms(timing.total_ns):.3f}"
+        response["X-Perf-App-ms"] = f"{timing.as_ms(timing.app_ns):.3f}"
+        response["X-Perf-DB-Admission-ms"] = f"{timing.as_ms(timing.admission_wait_ns):.3f}"
+        response["X-Perf-DB-Pool-ms"] = f"{timing.as_ms(timing.pool_wait_ns):.3f}"
+        response["X-Perf-SQL-ms"] = f"{timing.as_ms(timing.sql_ns):.3f}"
+        response["X-Perf-SQL-Count"] = str(timing.sql_count)
+        response["Server-Timing"] = (
+            f"app;dur={timing.as_ms(timing.app_ns):.3f},"
+            f"db-admission;dur={timing.as_ms(timing.admission_wait_ns):.3f},"
+            f"db-pool;dur={timing.as_ms(timing.pool_wait_ns):.3f},"
+            f"sql;dur={timing.as_ms(timing.sql_ns):.3f}"
+        )
 
 
 class RequestCorrelationMiddleware:
