@@ -30,7 +30,8 @@ class PerfTiming:
             0,
         )
 
-    def as_ms(self, value_ns: int) -> float:
+    @staticmethod
+    def as_ms(value_ns: int) -> float:
         return value_ns / 1_000_000.0
 
 
@@ -69,26 +70,12 @@ def add_sql(ns: int) -> None:
 
 
 class TimingExecuteWrapper:
-    """Measure only cursor execution/fetch time, excluding pool acquisition."""
+    """Measure cursor execution time, excluding connection-pool acquisition."""
 
-    def execute(self, execute, sql, params, many, context):
+    def __call__(self, execute, sql, params, many, context):
         started = time.perf_counter_ns()
         try:
             return execute(sql, params, many, context)
-        finally:
-            add_sql(time.perf_counter_ns() - started)
-
-    def executemany(self, execute, sql, param_list, context):
-        started = time.perf_counter_ns()
-        try:
-            return execute(sql, param_list, context)
-        finally:
-            add_sql(time.perf_counter_ns() - started)
-
-    def callproc(self, execute, name, params, many, context):
-        started = time.perf_counter_ns()
-        try:
-            return execute(name, params, many, context)
         finally:
             add_sql(time.perf_counter_ns() - started)
 
