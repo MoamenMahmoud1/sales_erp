@@ -136,7 +136,6 @@ jobs:
       - name: PostgreSQL query diagnostics
         run: |
           set -euo pipefail
-          mkdir -p benchmark-results
           python benchmarks/postgres_diagnostics.py > benchmark-results/postgres-plan.json
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -At -F $'\t' -c "SELECT calls, total_exec_time, mean_exec_time, rows, shared_blks_hit, shared_blks_read, left(query, 1000) FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 30;" > benchmark-results/pg-stat-statements.tsv
       - name: Stop API
@@ -152,36 +151,29 @@ jobs:
           from pathlib import Path
 
           root = Path("benchmark-results")
-          cases = []
+          rows = []
           for p in sorted(root.glob("*.json")):
               if p.name == "postgres-plan.json":
                   continue
-              cases.append(json.loads(p.read_text()))
+              case = json.loads(p.read_text())
+              rows.append(
+                  f"| {p.stem} | {case['concurrency']} | {case['p50_ms']:.2f} | "
+                  f"{case['p95_ms']:.2f} | {case['p99_ms']:.2f} | {case['rps']:.2f} | "
+                  f"{case['successful']} | {case['failed']} |"
+              )
 
-          def f(value):
-              return "" if value is None else f"{value:.2f}"
-
-          out = [
+          report = [
               "# Async DB admission benchmark",
               "",
               "HTTP latency is measured entirely outside Django. No request timing middleware, SQL wrappers, ContextVars, response timing headers, or per-request benchmark state are enabled.",
               "",
               "| case | concurrency | p50 ms | p95 ms | p99 ms | RPS | successful | failed |",
               "|---|---:|---:|---:|---:|---:|---:|---:|",
+              *rows,
+              "",
+              "PostgreSQL execution plans and pg_stat_statements are included in the uploaded artifact for root-cause analysis.",
           ]
-          for case in cases:
-              name = case["status"] if False else "unknown"
-              path = next(root.glob("*.json"), None)
-          for p in sorted(root.glob("*.json")):
-              if p.name == "postgres-plan.json":
-                  continue
-              case = json.loads(p.read_text())
-              out.append(
-                  f"| {p.stem} | {case['concurrency']} | {f(case['p50_ms'])} | {f(case['p95_ms'])} | "
-                  f"{f(case['p99_ms'])} | {f(case['rps'])} | {case['successful']} | {case['failed']} |"
-              )
-
-          (root / "report.md").write_text("\n".join(out) + "\n")
+          (root / "report.md").write_text("\n".join(report) + "\n")
           PY
       - name: Add benchmark summary
         if: always()
