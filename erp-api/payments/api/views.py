@@ -18,7 +18,7 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from common.exceptions import InvalidBusinessOperation, InvalidMoney
-from common.pagination import StandardPagination
+from common.pagination import AsyncStandardPagination
 from common.observability import log_operation
 from customers.models import Customer
 from payments.api.serializers import (
@@ -60,13 +60,9 @@ class CollectionView(APIView):
             "transfer_amount": str(transfer_amount),
         }
 
-        # Pass the authenticated user's PK explicitly — no dynamic attribute.
         user_id = request.user.pk
 
         if idempotency_key:
-            # Transactional idempotency: the key is claimed inside the same
-            # transaction as the financial operation.  Concurrent duplicates
-            # block until the first commits, then return the stored response.
             result = await ProcessCollectionIdempotent()(
                 key=idempotency_key,
                 user_id=user_id,
@@ -85,7 +81,6 @@ class CollectionView(APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
             if result is not None:
-                # result is an IdempotencyKey with stored response.
                 return Response(
                     result.response_body,
                     status=result.response_status,
@@ -99,33 +94,48 @@ class CollectionView(APIView):
                 collected_by_id=user_id,
             )
         except OverpaymentError as exc:
-            log_operation("payment.collection", user=user_id,
-                          customer=customer.pk, result="overpayment_rejected")
+            log_operation(
+                "payment.collection",
+                user=user_id,
+                customer=customer.pk,
+                result="overpayment_rejected",
+            )
             return Response(
                 {"detail": str(exc), "code": "overpayment"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except NoConfirmableInvoicesError as exc:
-            log_operation("payment.collection", user=user_id,
-                          customer=customer.pk, result="no_invoices_rejected")
+            log_operation(
+                "payment.collection",
+                user=user_id,
+                customer=customer.pk,
+                result="no_invoices_rejected",
+            )
             return Response(
                 {"detail": str(exc), "code": "nothing_to_collect"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except (InvalidMoney, InvalidBusinessOperation) as exc:
-            log_operation("payment.collection", user=user_id,
-                          customer=customer.pk, result="invalid_rejected")
+            log_operation(
+                "payment.collection",
+                user=user_id,
+                customer=customer.pk,
+                result="invalid_rejected",
+            )
             return Response(
                 {"detail": str(exc), "code": "invalid_payment"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         if payment is None:
-            log_operation("payment.collection", user=user_id,
-                          customer=customer.pk, result="noop")
+            log_operation(
+                "payment.collection",
+                user=user_id,
+                customer=customer.pk,
+                result="noop",
+            )
             return Response(
-                {"detail": "Zero-value collection is a no-op.",
-                 "code": "noop"},
+                {"detail": "Zero-value collection is a no-op.", "code": "noop"},
                 status=status.HTTP_200_OK,
             )
 
@@ -141,7 +151,7 @@ class TransactionListView(generics.ListAPIView):
     """GET /api/v1/payments/transactions/ — read-only view of collections."""
 
     serializer_class = PaymentTransactionSerializer
-    pagination_class = StandardPagination
+    pagination_class = AsyncStandardPagination
     permission_classes = (TransactionReadPermission,)
 
     def get_queryset(self):
