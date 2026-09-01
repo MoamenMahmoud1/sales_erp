@@ -6,6 +6,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param, replace_query_param
 
+from benchmarks.request_timing_middleware import mark_async_orm_operation
+
 
 class AsyncPage:
     """Small page adapter backed by an async-evaluated QuerySet slice."""
@@ -57,12 +59,7 @@ class AsyncStandardPagination(PageNumberPagination):
 
         raw_page = request.query_params.get(self.page_query_param) or "1"
 
-        benchmark_ops = getattr(request, "_benchmark_async_orm_operations", None)
-        if benchmark_ops is None:
-            benchmark_ops = []
-            request._benchmark_async_orm_operations = benchmark_ops
-
-        benchmark_ops.append("acount")
+        mark_async_orm_operation("acount")
         count = await queryset.acount()
         num_pages = math.ceil(count / page_size) if count else 1
 
@@ -85,7 +82,7 @@ class AsyncStandardPagination(PageNumberPagination):
             )
 
         start = (page_number - 1) * page_size
-        benchmark_ops.append("async_iter")
+        mark_async_orm_operation("async_iter")
         objects = [obj async for obj in queryset[start : start + page_size]]
         self.page = AsyncPage(objects, page_number, count, page_size)
         self.display_page_controls = num_pages > 1 and self.template is not None
@@ -116,4 +113,4 @@ class AsyncStandardPagination(PageNumberPagination):
         page_number = self.page.previous_page_number()
         if page_number == 1:
             return remove_query_param(url, self.page_query_param)
-        return replace_query_param(url, self.page_query_param, page_number)
+        return replace_query_param(self.request.build_absolute_uri(), self.page_query_param, page_number)
