@@ -1,3 +1,4 @@
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
@@ -38,6 +39,48 @@ class VerifiedAuthSessionPermission(CurrentAuthSessionPermission):
     async def has_permission(self, request, view):
         await super().has_permission(request, view)
         auth_session = request.auth_session
+
+        if (
+            auth_session.verified_at is None
+            or auth_session.verified_at
+            < timezone.now() - settings.AUTH_SESSION_VERIFICATION_TTL
+        ):
+            raise PermissionDenied(
+                "Recent session verification is required.",
+                code="session_verification_required",
+            )
+
+        return True
+
+
+class VerifiedAuthSessionSyncPermission(BasePermission):
+    """Sync counterpart for standard DRF views.
+
+    Standard DRF calls ``has_permission`` synchronously, while ADRF awaits
+    permission methods. Keep a dedicated sync adapter so the same stateful
+    session checks work correctly in both execution paths.
+    """
+
+    def has_permission(self, request, view):
+        refresh_token = request.COOKIES.get("refresh_token")
+        device_id = get_device_id(request)
+        user_id = request.user.pk
+        if not refresh_token or device_id is None or user_id is None:
+            raise AuthenticationFailed("Invalid authentication session.")
+
+        try:
+            auth_session = async_to_sync(aget_current_auth_session)(
+                user_id=user_id,
+                access_token=request.auth,
+                refresh_token=refresh_token,
+                device_id=device_id,
+            )
+        except InvalidAuthSession as error:
+            raise AuthenticationFailed(
+                "Invalid authentication session."
+            ) from error
+
+        request.auth_session = auth_session
 
         if (
             auth_session.verified_at is None
