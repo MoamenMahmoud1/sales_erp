@@ -1,7 +1,5 @@
 """Async ASGI views for immutable invoice operations."""
 
-from asgiref.sync import sync_to_async
-from django.db.models import Prefetch
 from adrf import viewsets
 from rest_framework import status
 from rest_framework.decorators import action
@@ -16,6 +14,7 @@ from common.exceptions import (
     InvalidDiscount,
     InvalidStateTransition,
 )
+from common.services.async_serializer import AsyncSerializerService
 from invoices.api.serializers import InvoiceSerializer, InvoiceSummarySerializer
 from invoices.models import Invoice, InvoiceItem
 from invoices.permissions import InvoicePermission
@@ -59,11 +58,7 @@ async def _invoice_response(operation):
         )
 
     serializer = InvoiceSerializer(invoice)
-    data = await sync_to_async(
-        lambda: serializer.data,
-        thread_sensitive=True,
-    )()
-    return Response(data, status=status.HTTP_200_OK)
+    return Response(await serializer.adata, status=status.HTTP_200_OK)
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
@@ -78,10 +73,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             "created_by",
             "coupon",
         ).prefetch_related(
-            Prefetch(
-                "items",
-                queryset=InvoiceItem.objects.select_related("product"),
-            )
+            "items__product",
         )
 
     def get_serializer_class(self):
@@ -90,23 +82,19 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return InvoiceSerializer
 
     async def acreate(self, request, *args, **kwargs):
-        """Validate synchronously, then create through one transaction boundary."""
+        """Validate input, then delegate persistence to the invoice service."""
         serializer = self.get_serializer(data=request.data)
-        await sync_to_async(
-            serializer.is_valid,
-            thread_sensitive=True,
-        )(raise_exception=True)
+        await AsyncSerializerService.ais_valid(serializer, raise_exception=True)
 
         invoice = await CreateInvoice()(
             created_by_id=request.user.pk,
             validated_data=serializer.validated_data,
         )
         response_serializer = InvoiceSerializer(invoice)
-        data = await sync_to_async(
-            lambda: response_serializer.data,
-            thread_sensitive=True,
-        )()
-        return Response(data, status=status.HTTP_201_CREATED)
+        return Response(
+            await response_serializer.adata,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"], throttle_classes=[SensitiveActionThrottle])
     async def confirm(self, request, pk=None):
