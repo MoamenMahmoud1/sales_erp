@@ -14,19 +14,18 @@ CSRF_TRUSTED_ORIGINS = config(
 )
 
 # PostgreSQL production pooling.
-# Django's async documentation recommends disabling persistent connections
-# under ASGI and sizing the backend pool for the target in-flight query
-# concurrency. Keep a small amount of spare capacity above the application
-# admission limit so unrelated database work does not immediately queue.
+# Keep a small, explicit per-worker pool. The benchmarked async API path uses
+# a separate admission limit below, so application concurrency cannot turn
+# directly into unbounded database connection contention.
 DB_POOL_MIN_SIZE = config("DB_POOL_MIN_SIZE", default=2, cast=int)
 DB_POOL_MAX_SIZE = config("DB_POOL_MAX_SIZE", default=8, cast=int)
 if DB_POOL_MIN_SIZE < 0 or DB_POOL_MAX_SIZE < 1 or DB_POOL_MIN_SIZE > DB_POOL_MAX_SIZE:
     raise ValueError("DB_POOL_MIN_SIZE and DB_POOL_MAX_SIZE are invalid")
 
-# Per-worker application-level bound for async ORM database work. This must be
-# strictly smaller than the pool size so admitted work does not immediately
-# turn into pool wait.
-ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=6, cast=int)
+# Evidence-backed default from the C50/C100 benchmark matrix: gate=4 had the
+# best p95/p99 tail among the tested admission limits while preserving high
+# successful throughput. Keep the gate strictly below the pool size.
+ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=4, cast=int)
 if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
     raise ValueError(
         "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
