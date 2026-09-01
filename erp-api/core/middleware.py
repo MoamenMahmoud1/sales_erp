@@ -5,10 +5,10 @@ from contextvars import ContextVar
 from inspect import iscoroutinefunction, markcoroutinefunction
 
 from django.conf import settings
-from django.db import connection
 
 from core.proxy import is_trusted_proxy, normalize_ip
-from common.services.perf_timing import execute_wrapper, install_pool_instrumentation, start
+from common.services.async_db_gate import db_slot
+from common.services.perf_timing import install_pool_instrumentation, start
 
 CORRELATION_HEADER = "HTTP_X_REQUEST_ID"
 
@@ -18,13 +18,10 @@ _current_request_id: ContextVar[str | None] = ContextVar(
 
 
 def get_current_request_id() -> str | None:
-    """Return the request id of the current request (or ``None``)."""
     return _current_request_id.get()
 
 
 class _RequestIdLogRecordFactory:
-    """Wrap the default LogRecord factory to inject ``request_id``."""
-
     def __init__(self, factory):
         self._factory = factory
 
@@ -64,8 +61,7 @@ class RequestIdAndPerfMiddleware:
             else:
                 install_pool_instrumentation()
                 timing = start()
-                with execute_wrapper(connection):
-                    response = self.get_response(request)
+                response = self.get_response(request)
                 self._add_headers(response, timing)
             response["X-Request-Id"] = request_id
             return response
@@ -82,8 +78,7 @@ class RequestIdAndPerfMiddleware:
             else:
                 install_pool_instrumentation()
                 timing = start()
-                with execute_wrapper(connection):
-                    response = await self.get_response(request)
+                response = await self.get_response(request)
                 self._add_headers(response, timing)
             response["X-Request-Id"] = request_id
             return response
@@ -92,23 +87,26 @@ class RequestIdAndPerfMiddleware:
 
     @staticmethod
     def _add_headers(response, timing):
-        response["X-Perf-Total-ms"] = f"{timing.as_ms(timing.total_ns):.3f}"
-        response["X-Perf-App-ms"] = f"{timing.as_ms(timing.app_ns):.3f}"
-        response["X-Perf-DB-Admission-ms"] = f"{timing.as_ms(timing.admission_wait_ns):.3f}"
-        response["X-Perf-DB-Pool-ms"] = f"{timing.as_ms(timing.pool_wait_ns):.3f}"
-        response["X-Perf-SQL-ms"] = f"{timing.as_ms(timing.sql_ns):.3f}"
-        response["X-Perf-SQL-Count"] = str(timing.sql_count)
+        ms = timing.as_ms
+        response["X-Perf-Total-ms"] = f"{ms(timing.total_ns):.3f}"
+        response["X-Perf-App-ms"] = f"{ms(timing.app_ns):.3f}"
+        response["X-Perf-DB-Admission-ms"] = f"{ms(timing.admission_wait_ns):.3f}"
+        response["X-Perf-DB-Pool-ms"] = f"{ms(timing.pool_wait_ns):.3f}"
+        response["X-Perf-DB-Operation-ms"] = f"{ms(timing.db_operation_ns):.3f}"
+        response["X-Perf-DB-Operation-Count"] = str(timing.db_operation_count)
+        response["X-Perf-Serializer-Wait-ms"] = f"{ms(timing.serializer_wait_ns):.3f}"
+        response["X-Perf-Serializer-CPU-ms"] = f"{ms(timing.serializer_cpu_ns):.3f}"
         response["Server-Timing"] = (
-            f"app;dur={timing.as_ms(timing.app_ns):.3f},"
-            f"db-admission;dur={timing.as_ms(timing.admission_wait_ns):.3f},"
-            f"db-pool;dur={timing.as_ms(timing.pool_wait_ns):.3f},"
-            f"sql;dur={timing.as_ms(timing.sql_ns):.3f}"
+            f"app;dur={ms(timing.app_ns):.3f},"
+            f"db-admission;dur={ms(timing.admission_wait_ns):.3f},"
+            f"db-pool;dur={ms(timing.pool_wait_ns):.3f},"
+            f"db-operation;dur={ms(timing.db_operation_ns):.3f},"
+            f"serializer-wait;dur={ms(timing.serializer_wait_ns):.3f},"
+            f"serializer-cpu;dur={ms(timing.serializer_cpu_ns):.3f}"
         )
 
 
 class RequestCorrelationMiddleware:
-    """Hybrid middleware that preserves the ASGI async path without adaptation."""
-
     response_header = "X-Request-Id"
     async_capable = True
     sync_capable = True
@@ -122,7 +120,6 @@ class RequestCorrelationMiddleware:
     def __call__(self, request):
         if self._is_async:
             return self._async_call(request)
-
         request_id = request.META.get(CORRELATION_HEADER) or uuid.uuid4().hex
         request.META[CORRELATION_HEADER] = request_id
         token = _current_request_id.set(request_id)
@@ -146,8 +143,6 @@ class RequestCorrelationMiddleware:
 
 
 class TrustedProxyHeadersMiddleware:
-    """Hybrid middleware that normalizes forwarded headers without sync adaptation."""
-
     forwarded_headers = (
         "HTTP_FORWARDED",
         "HTTP_X_FORWARDED_FOR",
