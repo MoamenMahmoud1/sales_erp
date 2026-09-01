@@ -1,12 +1,12 @@
 from django.conf import settings
-from asgiref.sync import sync_to_async
 from django.utils import timezone
 from adrf import mixins, viewsets
+from adrf.views import APIView
+from asgiref.sync import sync_to_async
 from rest_framework import status
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from authsession.api.serializers import (
     AuthSessionSerializer,
@@ -18,8 +18,8 @@ from authsession.permissions import CurrentAuthSessionPermission
 from authsession.services import (
     AuthSessionTooNew,
     InvalidAuthSession,
-    verify_current_auth_session,
 )
+from authsession.services.auth_session import averify_current_auth_session
 from authentication.throttling import SensitiveActionThrottle
 
 
@@ -27,21 +27,21 @@ class AuthSessionVerificationView(NoStoreResponseMixin, APIView):
     permission_classes = (IsAuthenticated,)
     throttle_classes = (SensitiveActionThrottle,)
 
-    def post(self, request, *args, **kwargs):
+    async def post(self, request, *args, **kwargs):
         serializer = AuthSessionVerificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         refresh_token = request.COOKIES.get("refresh_token")
         device_id = get_device_id(request)
 
         # The stateless JWT TokenUser lacks the password hash needed by the
-        # authsession verification.  Fetch the real user explicitly — this is
-        # a business lookup for the stateful session system, not a JWT auth check.
-        user = self._resolve_user(request)
+        # authsession verification. Fetch the real user explicitly without
+        # blocking the ASGI event loop.
+        user = await self._resolve_user(request)
 
         try:
             if not refresh_token or device_id is None:
                 raise InvalidAuthSession
-            auth_session = verify_current_auth_session(
+            auth_session = await averify_current_auth_session(
                 user=user,
                 access_token=request.auth,
                 refresh_token=refresh_token,
@@ -49,7 +49,7 @@ class AuthSessionVerificationView(NoStoreResponseMixin, APIView):
                 password=serializer.validated_data["current_password"],
             )
         except AuthSessionTooNew as error:
-            response = Response(
+            return Response(
                 {
                     "detail": "This session is not old enough.",
                     "code": "session_too_new",
@@ -57,18 +57,16 @@ class AuthSessionVerificationView(NoStoreResponseMixin, APIView):
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
-            return response
         except InvalidAuthSession:
-            response = Response(
+            return Response(
                 {
                     "detail": "Invalid authentication session or password.",
                     "code": "invalid_session_verification",
                 },
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-            return response
 
-        response = Response(
+        return Response(
             {
                 "verified_until": (
                     auth_session.verified_at
@@ -77,9 +75,9 @@ class AuthSessionVerificationView(NoStoreResponseMixin, APIView):
             },
             status=status.HTTP_200_OK,
         )
-        return response
 
-    def _resolve_user(self, request):
+    @staticmethod
+    async def _resolve_user(request):
         """Return the database User needed for stateful session verification."""
         from django.contrib.auth import get_user_model
 
@@ -88,7 +86,7 @@ class AuthSessionVerificationView(NoStoreResponseMixin, APIView):
         if user_pk is None:
             raise AuthenticationFailed("Invalid authentication session.")
         try:
-            return User.objects.get(pk=user_pk)
+            return await User.objects.aget(pk=user_pk)
         except User.DoesNotExist as error:
             raise AuthenticationFailed(
                 "Invalid authentication session."
@@ -106,8 +104,6 @@ class AuthSessionViewSet(
     permission_classes = (IsAuthenticated, CurrentAuthSessionPermission)
 
     def get_queryset(self):
-        # Use request.user.pk directly — the stateless JWT TokenUser exposes
-        # its identity claim without any database lookup.
         return AuthSession.objects.filter(
             user_id=self.request.user.pk,
             revoked_at__isnull=True,
