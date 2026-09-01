@@ -6,8 +6,6 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from django.db import connection
-
 
 class PerfTiming:
     def __init__(self) -> None:
@@ -25,10 +23,10 @@ class PerfTiming:
 
     @property
     def app_ns(self) -> int:
+        # db_operation already contains admission + pool + SQL/ORM execution,
+        # so those sub-stages must not be subtracted a second time.
         return max(
             self.total_ns
-            - self.admission_wait_ns
-            - self.pool_wait_ns
             - self.db_operation_ns
             - self.serializer_wait_ns
             - self.serializer_cpu_ns,
@@ -90,12 +88,9 @@ _pool_instrumented: set[int] = set()
 
 
 def install_pool_instrumentation() -> None:
-    """Measure the actual psycopg pool checkout duration.
+    """Measure actual psycopg pool checkout duration."""
+    from django.db import connection
 
-    Django's async PostgreSQL backend obtains synchronous psycopg connections
-    through the pool inside its async adapter. The ContextVar carries the
-    mutable request timing object into that worker thread.
-    """
     pool = getattr(connection, "pool", None)
     if pool is None:
         return
@@ -124,11 +119,3 @@ def db_operation():
         yield
     finally:
         add_db_operation(time.perf_counter_ns() - started)
-
-
-@contextmanager
-def execute_wrapper(connection):
-    # Kept for synchronous-path diagnostics. Django's async ORM executes SQL
-    # through a worker-thread connection, so this wrapper is not used as the
-    # authoritative async SQL timer.
-    yield
