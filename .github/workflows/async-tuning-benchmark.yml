@@ -5,9 +5,13 @@ on:
     branches: [main]
     paths:
       - "erp-api/benchmarks/**"
+      - "erp-api/core/middleware.py"
+      - "erp-api/core/settings/settings_base.py"
       - "erp-api/core/settings/settings_bench.py"
+      - "erp-api/core/settings/settings_prod.py"
       - "erp-api/products/api/views.py"
       - "erp-api/common/services/async_db_gate.py"
+      - "erp-api/common/services/perf_timing.py"
       - ".github/workflows/async-tuning-benchmark.yml"
   workflow_dispatch:
 
@@ -62,6 +66,7 @@ jobs:
       TRUST_PROXY_HEADERS: "false"
       BENCH_TIMEOUT: "10"
       BENCH_DEADLINE: "60"
+      BENCH_PROGRESS_EVERY: "100"
 
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +80,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install httpx
+          pip install httpx uvicorn-worker
 
       - name: Migrate
         run: python manage.py migrate --noinput
@@ -87,10 +92,13 @@ jobs:
         run: |
           set -euo pipefail
           PG_CONTAINER="$(docker ps --filter 'ancestor=postgres:16' --format '{{.ID}}' | head -n1)"
+          test -n "$PG_CONTAINER"
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_buffers='512MB';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET effective_cache_size='2GB';"
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET work_mem='16MB';"
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET random_page_cost='1.1';"
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET jit='off';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET track_io_timing='on';"
           docker restart "$PG_CONTAINER"
           for attempt in $(seq 1 60); do
             if PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SELECT 1" >/dev/null 2>&1; then break; fi
@@ -146,6 +154,7 @@ jobs:
             BENCH_REQUESTS=500 \
             BENCH_WARMUP=100 \
             BENCH_DEADLINE=60 \
+            BENCH_PROGRESS_EVERY=100 \
             BENCH_TIMEOUT=10 \
               python benchmarks/http_benchmark.py | tee "benchmark-results/${name}.jsonl"
           }
@@ -162,9 +171,9 @@ jobs:
           run_case async-minimal-c100 100
           stop_server
 
-          # Full middleware plus bounded DB concurrency. Pool stays at 10 so
-          # the gate, rather than a larger pool, controls DB concurrency.
-          for gate in 4 8 12 16; do
+          # Full middleware plus bounded DB concurrency. Never configure the
+          # application gate above the per-worker pool size of 10.
+          for gate in 4 6 8 10; do
             start_server 0 "$gate"
             run_case "async-gate${gate}-c100" 100
             stop_server
@@ -197,26 +206,27 @@ jobs:
           report = [
               "# Async middleware + DB gate benchmark",
               "",
-              "All successful measurements must be stack-verified and complete.",
-              "The DB gate is held only across ORM count + page evaluation, then released before serialization.",
+              "Every measured case must complete successfully and be runtime-instrumented.",
+              "The HTTP benchmark measures from the client before the request until the response body is consumed.",
               "",
-              "| case | concurrency | rps | p50 ms | p95 ms | p99 ms | server p50 | db p50 | pool wait p50 | pool waiting | retries | successful | failed | verified |",
+              "| case | concurrency | rps | http p50 | http p95 | http p99 | app p50 | admission p50 | pool p50 | sql p50 | sql queries | successful | failed | verified |",
               "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
           ]
           for row in rows:
+              timing = row.get("server_timing", {})
               report.append(
-                  "| {case} | {concurrency} | {rps} | {p50} | {p95} | {p99} | {server} | {db} | {pool} | {waiting} | {retries} | {successful} | {failed} | {verified} |".format(
+                  "| {case} | {concurrency} | {rps} | {p50} | {p95} | {p99} | {app} | {admission} | {pool} | {sql} | {queries} | {successful} | {failed} | {verified} |".format(
                       case=row["case"],
                       concurrency=row.get("concurrency"),
                       rps=f(row.get("rps")),
                       p50=f(row.get("p50_ms")),
                       p95=f(row.get("p95_ms")),
                       p99=f(row.get("p99_ms")),
-                      server=f(row.get("server_p50_ms")),
-                      db=f(row.get("db_p50_ms")),
-                      pool=f(row.get("pool_wait_p50_ms")),
-                      waiting=f(row.get("pool_requests_waiting_mean")),
-                      retries=row.get("transport_retries", 0),
+                      app=f(timing.get("app", {}).get("p50_ms")),
+                      admission=f(timing.get("db_admission", {}).get("p50_ms")),
+                      pool=f(timing.get("db_pool", {}).get("p50_ms")),
+                      sql=f(timing.get("sql", {}).get("p50_ms")),
+                      queries=f(row.get("db_queries_mean")),
                       successful=row.get("successful"),
                       failed=row.get("failed"),
                       verified=row.get("stack_verified"),
