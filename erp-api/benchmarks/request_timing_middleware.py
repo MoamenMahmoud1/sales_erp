@@ -12,19 +12,33 @@ from django.dispatch import receiver
 _metrics: ContextVar[dict | None] = ContextVar("benchmark_metrics", default=None)
 
 
+ASYNC_ROUTER_ACTIONS = {
+    "alist",
+    "aretrieve",
+    "acreate",
+    "aupdate",
+    "apatch",
+    "adestroy",
+}
+
+
 def _resolved_view_metadata(request):
-    """Return runtime metadata from Django's resolved endpoint callable."""
+    """Return runtime metadata from Django's resolved endpoint callable.
+
+    ADRF's router proves itself through the resolved action: for a ModelViewSet
+    GET-list route it maps to ``alist`` rather than DRF's ``list``. This is more
+    reliable than inspecting the view MRO because router-generated callables can
+    hide the original class hierarchy.
+    """
     resolver = getattr(request, "resolver_match", None)
     func = getattr(resolver, "func", None)
     view_class = getattr(func, "view_class", None)
     actions = getattr(func, "actions", {}) or {}
     action = actions.get(request.method.lower())
-    handler = getattr(view_class, action, None) if view_class and action else None
 
     async_callable = bool(func and inspect.iscoroutinefunction(func))
-    async_handler = bool(handler and inspect.iscoroutinefunction(handler))
-    mro = getattr(view_class, "__mro__", ()) if view_class else ()
-    router = "adrf" if any(cls.__module__.startswith("adrf.") for cls in mro) else "drf"
+    router = "adrf" if action in ASYNC_ROUTER_ACTIONS else "drf"
+    async_handler = bool(async_callable and action in ASYNC_ROUTER_ACTIONS)
     class_name = (
         f"{view_class.__module__}.{view_class.__name__}" if view_class else ""
     )
