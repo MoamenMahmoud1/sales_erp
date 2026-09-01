@@ -1,20 +1,16 @@
 """ASGI entry point for the ERP backend.
 
 In production this module is loaded by a proper ASGI server (uvicorn/gunicorn
-workers). The development ``manage.py runserver`` sets the development
-settings module before importing this application.
+workers).  The development ``manage.py runserver`` also uses ASGI.
 
-Never use ``manage.py runserver`` in production.
+Never use ``manage.py runserver`` in production — see
+``deployment/nginx.conf`` and the Dockerfile for the intended gunicorn +
+ASGI-worker deployment path.
 """
 import os
 
 from django.core.asgi import get_asgi_application
 
-# Fail safe toward production when the ASGI module is invoked directly. Local
-# ``manage.py runserver`` still selects settings_dev before importing ASGI.
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings.settings_prod")
-
-if os.environ.get("DJANGO_SETTINGS_MODULE") == "core.settings.settings_bench":
-    os.environ["BENCH_API_STACK"] = "async"
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings.settings_dev")
 
 application = get_asgi_application()
