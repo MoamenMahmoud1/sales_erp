@@ -14,6 +14,11 @@ ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 # through response headers; it is never enabled by production settings.
 _bench_minimal_middleware = os.getenv("BENCH_MINIMAL_MIDDLEWARE", "0") == "1"
 _bench_middleware_diagnostic = os.getenv("BENCH_MIDDLEWARE_DIAGNOSTIC", "0") == "1"
+_bench_middleware_exclude = {
+    item.strip()
+    for item in os.getenv("BENCH_MIDDLEWARE_EXCLUDE", "").split(",")
+    if item.strip()
+}
 if _bench_minimal_middleware:
     # The products benchmark is authenticated by DRF's stateless JWT
     # authentication, so the Django AuthenticationMiddleware/session stack is
@@ -26,6 +31,13 @@ else:
     MIDDLEWARE = [
         "benchmarks.request_timing_middleware.BenchmarkTimingMiddleware",
         *MIDDLEWARE,
+    ]
+
+if _bench_middleware_exclude:
+    MIDDLEWARE = [
+        path
+        for path in MIDDLEWARE
+        if path not in _bench_middleware_exclude
     ]
 
 # Diagnostic mode patches the configured middleware classes at import time and
