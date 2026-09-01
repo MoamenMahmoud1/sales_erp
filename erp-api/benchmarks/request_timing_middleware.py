@@ -105,7 +105,7 @@ def _connection_created(sender, connection, **kwargs):
 
 
 class BenchmarkTimingMiddleware:
-    """Measure request wall time, SQL time, pool wait, and runtime stack identity."""
+    """Measure request wall time, SQL time, pool wait, DB gate wait, and stack."""
 
     async_capable = True
     sync_capable = True
@@ -148,31 +148,30 @@ class BenchmarkTimingMiddleware:
         total_ms = (time.perf_counter() - started) * 1000
         db_ms = metrics["db_time"] * 1000
         pool_wait_ms = metrics["pool_wait"] * 1000
+        gate_wait_ms = float(getattr(request, "_benchmark_db_gate_wait_ms", 0.0) or 0.0)
         pool_stats = _pool_stats(connection)
         view_meta = _resolved_view_metadata(request)
         async_orm_ops = sorted(metrics.get("async_orm_ops", set()))
         serializer_path = getattr(request, "_benchmark_serializer_path", "")
 
         response["Server-Timing"] = (
-            f"app;dur={max(total_ms - db_ms - pool_wait_ms, 0):.3f}, "
-            f"db;dur={db_ms:.3f}, pool;dur={pool_wait_ms:.3f}, "
+            f"app;dur={max(total_ms - db_ms - pool_wait_ms - gate_wait_ms, 0):.3f}, "
+            f"db;dur={db_ms:.3f}, pool;dur={pool_wait_ms:.3f}, gate;dur={gate_wait_ms:.3f}, "
             f"dbq;desc=queries;dur={metrics['db_queries']}"
         )
         response["X-Benchmark-Request-Ms"] = f"{total_ms:.3f}"
         response["X-Benchmark-DB-Ms"] = f"{db_ms:.3f}"
         response["X-Benchmark-DB-Queries"] = str(metrics["db_queries"])
         response["X-Benchmark-Pool-Wait-Ms"] = f"{pool_wait_ms:.3f}"
+        response["X-Benchmark-DB-Gate-Wait-Ms"] = f"{gate_wait_ms:.3f}"
+        response["X-Benchmark-DB-Gate-Limit"] = str(
+            getattr(__import__("django.conf", fromlist=["settings"]).settings, "ASYNC_DB_CONCURRENCY", 0)
+        )
         response["X-Benchmark-Pool-Size"] = str(pool_stats.get("pool_size", 0))
         response["X-Benchmark-Pool-Available"] = str(pool_stats.get("pool_available", 0))
-        response["X-Benchmark-Pool-Requests-Waiting"] = str(
-            pool_stats.get("requests_waiting", 0)
-        )
-        response["X-Benchmark-Pool-Requests-Queued"] = str(
-            pool_stats.get("requests_queued", 0)
-        )
-        response["X-Benchmark-Pool-Requests-Wait-Ms"] = str(
-            pool_stats.get("requests_wait_ms", 0)
-        )
+        response["X-Benchmark-Pool-Requests-Waiting"] = str(pool_stats.get("requests_waiting", 0))
+        response["X-Benchmark-Pool-Requests-Queued"] = str(pool_stats.get("requests_queued", 0))
+        response["X-Benchmark-Pool-Requests-Wait-Ms"] = str(pool_stats.get("requests_wait_ms", 0))
         response["X-Benchmark-Stack"] = view_meta["stack"]
         response["X-Benchmark-Router"] = view_meta["router"]
         response["X-Benchmark-Handler"] = view_meta["handler"]
