@@ -2,7 +2,6 @@
 #
 # Build:  docker build -t erp-api:latest .
 # Run:    docker run -p 8000:8000 \
-#           -e DJANGO_SETTINGS_MODULE=core.settings.settings_prod \
 #           -e DB_HOST=postgres ... erp-api:latest
 ARG PYTHON_VERSION=3.13
 FROM python:${PYTHON_VERSION}-slim AS base
@@ -14,7 +13,8 @@ RUN apt-get update && \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    POETRY_VIRTUALENVS_CREATE=false
+    POETRY_VIRTUALENVS_CREATE=false \
+    DJANGO_SETTINGS_MODULE=core.settings.settings_prod
 
 WORKDIR /app
 
@@ -30,7 +30,7 @@ RUN useradd --create-home appuser && chown -R appuser:appuser /app
 USER appuser
 
 # Collect static files (needed for ManifestStaticFilesStorage in prod).
-RUN DJANGO_SETTINGS_MODULE=core.settings.settings_prod python manage.py collectstatic --noinput
+RUN python manage.py collectstatic --noinput
 
 # Gunicorn starts the ASGI application; the checked-in config owns worker sizing.
 # Worker count and DB pool sizing are environment-driven — see gunicorn.conf.py.
