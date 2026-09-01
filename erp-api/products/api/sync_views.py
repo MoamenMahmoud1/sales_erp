@@ -1,16 +1,15 @@
-"""Pure synchronous DRF implementation used only by the benchmark.
+"""Pure synchronous DRF implementation used only by the benchmark."""
 
-This intentionally mirrors products.api.views.ProductViewSet one-for-one,
-but uses DRF's synchronous ModelViewSet and synchronous Django ORM. It is
-selected only when BENCH_API_STACK=sync; production routing is unchanged.
-"""
+import time
 
 from django.db.models import OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from rest_framework import filters, viewsets
+from rest_framework.response import Response
 
 from common.pagination import StandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
+from common.services.perf_timing import add_serializer_cpu, db_operation
 
 from products.api.serializers import CartonPricingSerializer, ProductSerializer
 from products.models import CartonPricing, Product
@@ -31,6 +30,28 @@ class ProductViewSet(viewsets.ModelViewSet):
         "updated_at",
     )
     ordering = ("name", "pk")
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        with db_operation():
+            page = self.paginate_queryset(queryset)
+
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            started = time.perf_counter_ns()
+            try:
+                data = serializer.data
+            finally:
+                add_serializer_cpu(time.perf_counter_ns() - started)
+            return self.get_paginated_response(data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        started = time.perf_counter_ns()
+        try:
+            data = serializer.data
+        finally:
+            add_serializer_cpu(time.perf_counter_ns() - started)
+        return Response(data, status=200)
 
     def get_queryset(self):
         sold_subquery = self._confirmed_invoice_item_qty()
