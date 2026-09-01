@@ -1,4 +1,4 @@
-"""Core middleware: proxy trusted headers, request ids, and perf timings."""
+"""Core middleware: proxy headers, request ids, and perf timings."""
 import logging
 import uuid
 from contextvars import ContextVar
@@ -8,7 +8,7 @@ from django.conf import settings
 from django.db import connection
 
 from core.proxy import is_trusted_proxy, normalize_ip
-from common.services.perf_timing import execute_wrapper, start
+from common.services.perf_timing import execute_wrapper, install_pool_instrumentation, start
 
 CORRELATION_HEADER = "HTTP_X_REQUEST_ID"
 
@@ -20,14 +20,6 @@ _current_request_id: ContextVar[str | None] = ContextVar(
 def get_current_request_id() -> str | None:
     """Return the request id of the current request (or ``None``)."""
     return _current_request_id.get()
-
-
-class _RequestIdFilter(logging.Filter):
-    """Add ``request_id`` to every log record for structured formatters."""
-
-    def filter(self, record):
-        record.request_id = get_current_request_id() or "-"
-        return True
 
 
 class _RequestIdLogRecordFactory:
@@ -48,12 +40,7 @@ logging.setLogRecordFactory(
 
 
 class RequestIdAndPerfMiddleware:
-    """Keep the ASGI path async and expose four measurable server stages.
-
-    The timings are opt-in through PERF_TIMING_ENABLED. The headers are useful
-    for an external benchmark because they are emitted by the application and
-    do not require Django debug instrumentation.
-    """
+    """Keep the ASGI path async and expose independent server-side stages."""
 
     async_capable = True
     sync_capable = True
@@ -73,11 +60,14 @@ class RequestIdAndPerfMiddleware:
         token = _current_request_id.set(request_id)
         try:
             if not getattr(settings, "PERF_TIMING_ENABLED", False):
-                return self.get_response(request)
-            timing = start()
-            with execute_wrapper(connection):
                 response = self.get_response(request)
-            self._add_headers(response, timing)
+            else:
+                install_pool_instrumentation()
+                timing = start()
+                with execute_wrapper(connection):
+                    response = self.get_response(request)
+                self._add_headers(response, timing)
+            response["X-Request-Id"] = request_id
             return response
         finally:
             _current_request_id.reset(token)
@@ -90,6 +80,7 @@ class RequestIdAndPerfMiddleware:
             if not getattr(settings, "PERF_TIMING_ENABLED", False):
                 response = await self.get_response(request)
             else:
+                install_pool_instrumentation()
                 timing = start()
                 with execute_wrapper(connection):
                     response = await self.get_response(request)
