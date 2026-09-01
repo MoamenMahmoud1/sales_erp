@@ -54,6 +54,7 @@ class RequestIdAndPerfMiddleware:
         request_id = request.META.get(CORRELATION_HEADER) or uuid.uuid4().hex
         request.META[CORRELATION_HEADER] = request_id
         token = _current_request_id.set(request_id)
+        deep_profile = self._start_deep_profile(request, request_id)
         try:
             if not getattr(settings, "PERF_TIMING_ENABLED", False):
                 response = self.get_response(request)
@@ -65,12 +66,14 @@ class RequestIdAndPerfMiddleware:
             response["X-Request-Id"] = request_id
             return response
         finally:
+            self._stop_deep_profile(deep_profile)
             _current_request_id.reset(token)
 
     async def _async_call(self, request):
         request_id = request.META.get(CORRELATION_HEADER) or uuid.uuid4().hex
         request.META[CORRELATION_HEADER] = request_id
         token = _current_request_id.set(request_id)
+        deep_profile = self._start_deep_profile(request, request_id)
         try:
             if not getattr(settings, "PERF_TIMING_ENABLED", False):
                 response = await self.get_response(request)
@@ -82,7 +85,24 @@ class RequestIdAndPerfMiddleware:
             response["X-Request-Id"] = request_id
             return response
         finally:
+            self._stop_deep_profile(deep_profile)
             _current_request_id.reset(token)
+
+    @staticmethod
+    def _start_deep_profile(request, request_id):
+        if not getattr(settings, "DEEP_PROFILE_ENABLED", False):
+            return None
+        from common.services.deep_profile import profile_requested, start_profile
+
+        kind = profile_requested(request)
+        if kind is None:
+            return None
+        return start_profile(kind, request_id)
+
+    @staticmethod
+    def _stop_deep_profile(profile):
+        if profile is not None:
+            profile.stop()
 
     @staticmethod
     def _add_headers(response, timing):
@@ -111,9 +131,7 @@ class RequestIdAndPerfMiddleware:
         for name, duration_ns in timing.view_stage_ns.items():
             header_name = "X-Perf-View-" + name.removeprefix("view.").replace(".", "-") + "-ms"
             response[header_name] = f"{ms(duration_ns):.3f}"
-            server_timing.append(
-                f"{name};dur={ms(duration_ns):.3f}"
-            )
+            server_timing.append(f"{name};dur={ms(duration_ns):.3f}")
 
         response["Server-Timing"] = ",".join(server_timing)
 
