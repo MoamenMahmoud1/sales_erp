@@ -16,6 +16,7 @@ class PerfTiming:
         self.db_operation_count = 0
         self.serializer_wait_ns = 0
         self.serializer_cpu_ns = 0
+        self.view_stage_ns: dict[str, int] = {}
 
     @property
     def total_ns(self) -> int:
@@ -82,6 +83,23 @@ def add_serializer_cpu(ns: int) -> None:
     timing = current()
     if timing is not None:
         timing.serializer_cpu_ns += max(ns, 0)
+
+
+def add_view_stage(name: str, ns: int) -> None:
+    """Accumulate wall-clock time for an individual view stage."""
+    timing = current()
+    if timing is not None:
+        timing.view_stage_ns[name] = timing.view_stage_ns.get(name, 0) + max(ns, 0)
+
+
+@contextmanager
+def view_stage(name: str):
+    """Measure one non-overlapping or nested stage inside a view."""
+    started = time.perf_counter_ns()
+    try:
+        yield
+    finally:
+        add_view_stage(name, time.perf_counter_ns() - started)
 
 
 _pool_instrumented: set[int] = set()
