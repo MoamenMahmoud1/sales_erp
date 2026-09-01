@@ -1,0 +1,279 @@
+name: Middleware Latency Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "erp-api/benchmarks/middleware_probe.py"
+      - "erp-api/benchmarks/middleware_diagnostic.py"
+      - "erp-api/benchmarks/request_timing_middleware.py"
+      - "erp-api/core/settings/settings_bench.py"
+      - ".github/workflows/middleware-diagnostic.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: middleware-diagnostic
+  cancel-in-progress: true
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: erp-api
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: erp_bench
+          POSTGRES_USER: erp_bench
+          POSTGRES_PASSWORD: erp_bench
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U erp_bench -d erp_bench"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    env:
+      DJANGO_SETTINGS_MODULE: core.settings.settings_bench
+      SECRET_KEY: bench-secret-key-please-use-32-or-more-random-characters-2026
+      JWT_SIGNING_KEY: bench-jwt-signing-key-please-use-32-or-more-random-characters-2026
+      ALLOWED_HOSTS: 127.0.0.1,localhost
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      CSRF_TRUSTED_ORIGINS: http://localhost:3000
+      DB_NAME: erp_bench
+      DB_USER: erp_bench
+      DB_PASSWORD: erp_bench
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      REDIS_URL: redis://127.0.0.1:6379/0
+      DB_POOL_MIN_SIZE: "2"
+      DB_POOL_MAX_SIZE: "10"
+      WEB_CONCURRENCY: "2"
+      TRUST_PROXY_HEADERS: "false"
+      BENCH_TIMEOUT: "10"
+      BENCH_DEADLINE: "60"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: erp-api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx
+
+      - name: Migrate
+        run: python manage.py migrate --noinput
+
+      - name: Seed benchmark database
+        run: python benchmarks/seed_benchmark_data.py
+
+      - name: Configure PostgreSQL
+        run: |
+          set -euo pipefail
+          PG_CONTAINER="$(docker ps --filter 'ancestor=postgres:16' --format '{{.ID}}' | head -n1)"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_buffers='512MB';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET work_mem='16MB';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET random_page_cost='1.1';"
+          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET jit='off';"
+          docker restart "$PG_CONTAINER"
+          for attempt in $(seq 1 60); do
+            if PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "SELECT 1" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "ANALYZE;"
+
+      - name: Run middleware attribution matrix
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-results
+          TOKEN="$(cat bench_token.txt)"
+          BASE="http://127.0.0.1:8000"
+          URL="${BASE}/api/v1/products/?page=1&page_size=20"
+          SERVER_PID=""
+
+          start_server() {
+            local minimal="$1"
+            local exclude="$2"
+            export BENCH_API_STACK=async
+            export BENCH_MINIMAL_MIDDLEWARE="$minimal"
+            export BENCH_MIDDLEWARE_DIAGNOSTIC=1
+            export BENCH_MIDDLEWARE_EXCLUDE="$exclude"
+            export ASYNC_DB_CONCURRENCY=0
+            gunicorn core.asgi:application \
+              --bind 127.0.0.1:8000 \
+              --workers 2 \
+              --worker-class uvicorn_worker.UvicornWorker \
+              --timeout 30 \
+              --access-logfile /dev/null \
+              --error-logfile /tmp/gunicorn-middleware-diagnostic.log \
+              --log-level warning &
+            SERVER_PID=$!
+            for attempt in $(seq 1 60); do
+              if curl -fsS "$BASE/health/live/" >/dev/null 2>&1; then return; fi
+              sleep 1
+            done
+            cat /tmp/gunicorn-middleware-diagnostic.log || true
+            exit 1
+          }
+
+          stop_server() {
+            if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
+              kill "$SERVER_PID" || true
+              wait "$SERVER_PID" || true
+            fi
+            SERVER_PID=""
+          }
+          trap 'stop_server' EXIT
+
+          run_case() {
+            local name="$1"
+            local concurrency="$2"
+            local requests="$3"
+            BENCH_URL="$URL" \
+            BENCH_TOKEN="$TOKEN" \
+            BENCH_CASE="$name" \
+            BENCH_CONCURRENCY="$concurrency" \
+            BENCH_REQUESTS="$requests" \
+            BENCH_WARMUP=75 \
+            BENCH_DEADLINE=90 \
+            BENCH_TIMEOUT=10 \
+              python benchmarks/middleware_diagnostic.py | tee "benchmark-results/${name}.json"
+          }
+
+          # Baselines: direct end-to-end comparison at low and high concurrency.
+          for concurrency in 1 25 100; do
+            start_server 0 ""
+            run_case "full-c${concurrency}" "$concurrency" 400
+            stop_server
+
+            start_server 1 ""
+            run_case "minimal-c${concurrency}" "$concurrency" 400
+            stop_server
+          done
+
+          # Causal leave-one-out tests. Each run removes exactly one production
+          # middleware while keeping the rest of the full async stack unchanged.
+          declare -a MIDDLEWARES=(
+            "core.middleware.RequestCorrelationMiddleware"
+            "core.middleware.TrustedProxyHeadersMiddleware"
+            "corsheaders.middleware.CorsMiddleware"
+            "django.middleware.security.SecurityMiddleware"
+            "django.contrib.sessions.middleware.SessionMiddleware"
+            "django.middleware.common.CommonMiddleware"
+            "django.middleware.csrf.CsrfViewMiddleware"
+            "django.contrib.auth.middleware.AuthenticationMiddleware"
+            "django.contrib.messages.middleware.MessageMiddleware"
+            "django.middleware.clickjacking.XFrameOptionsMiddleware"
+          )
+
+          for middleware in "${MIDDLEWARES[@]}"; do
+            safe="${middleware//./-}"
+            start_server 0 "$middleware"
+            run_case "loo-${safe}-c50" 50 300
+            stop_server
+          done
+
+      - name: Build diagnostic report
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("benchmark-results")
+          cases = []
+          for path in sorted(root.glob("*.json")):
+              try:
+                  data = json.loads(path.read_text(encoding="utf-8"))
+              except Exception:
+                  continue
+              data["file"] = path.name
+              cases.append(data)
+
+          def ms(value):
+              return "" if value is None else f"{value:.3f}"
+
+          rows = [
+              "# Middleware latency diagnostic",
+              "",
+              "The baseline compares the production middleware stack against the truly minimal async stack.",
+              "Leave-one-out cases remove exactly one production middleware to estimate causal contribution.",
+              "",
+              "## End-to-end cases",
+              "",
+              "| case | concurrency | p50 | p95 | p99 | server p50 | db p50 | pool p50 | failed | complete |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+          ]
+          for case in cases:
+              if case.get("case", "").startswith("loo-"):
+                  continue
+              rows.append(
+                  f"| {case.get('case','')} | {case.get('concurrency','')} | {ms(case.get('p50_ms'))} | {ms(case.get('p95_ms'))} | {ms(case.get('p99_ms'))} | {ms(case.get('server_p50_ms'))} | {ms(case.get('db_p50_ms'))} | {ms(case.get('pool_p50_ms'))} | {case.get('failed','')} | {case.get('complete','')} |"
+              )
+
+          rows += [
+              "",
+              "## Leave-one-out at concurrency 50",
+              "",
+              "| removed middleware | p50 | p95 | p99 | delta vs full-c50 | server p50 |",
+              "|---|---:|---:|---:|---:|---:|",
+          ]
+          full = next((c for c in cases if c.get("case") == "full-c25"), None)
+          for case in cases:
+              name = case.get("case", "")
+              if not name.startswith("loo-"):
+                  continue
+              removed = name[len("loo-"):-len("-c50")]
+              baseline = full or {}
+              delta = None
+              if case.get("p50_ms") is not None and baseline.get("p50_ms") is not None:
+                  delta = case["p50_ms"] - baseline["p50_ms"]
+              rows.append(
+                  f"| {removed} | {ms(case.get('p50_ms'))} | {ms(case.get('p95_ms'))} | {ms(case.get('p99_ms'))} | {ms(delta)} | {ms(case.get('server_p50_ms'))} |"
+              )
+
+          rows += [
+              "",
+              "## Per-middleware timing from full-c50",
+              "",
+              "| middleware | inclusive p50 | inclusive p95 | exclusive p50 | exclusive p95 | coverage |",
+              "|---|---:|---:|---:|---:|---:|",
+          ]
+          full50 = next((c for c in cases if c.get("case") == "full-c25"), None)
+          if full50:
+              for name, metrics in sorted(
+                  full50.get("middleware", {}).items(),
+                  key=lambda item: item[1].get("exclusive_p50_ms") or 0,
+                  reverse=True,
+              ):
+                  rows.append(
+                      f"| {name} | {ms(metrics.get('inclusive_p50_ms'))} | {ms(metrics.get('inclusive_p95_ms'))} | {ms(metrics.get('exclusive_p50_ms'))} | {ms(metrics.get('exclusive_p95_ms'))} | {ms(metrics.get('coverage_pct'))}% |"
+                  )
+
+          (root / "report.md").write_text("\n".join(rows) + "\n", encoding="utf-8")
+          (root / "report.json").write_text(json.dumps(cases, indent=2, sort_keys=True), encoding="utf-8")
+          PY
+
+      - name: Upload diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: middleware-latency-diagnostic
+          path: erp-api/benchmark-results/
+          if-no-files-found: warn
