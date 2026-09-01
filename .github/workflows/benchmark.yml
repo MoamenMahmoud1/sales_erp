@@ -31,7 +31,7 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: erp-api
@@ -76,6 +76,8 @@ jobs:
       BENCH_REQUESTS: "1000"
       BENCH_WARMUP: "200"
       BENCH_TIMEOUT: "30"
+      BENCH_DEADLINE: "300"
+      BENCH_PROGRESS_EVERY: "100"
 
     steps:
       - uses: actions/checkout@v4
@@ -164,6 +166,7 @@ jobs:
           for mode in sync async; do
             start_server "$mode"
             for concurrency in 1 5 10 25 50 100; do
+              echo "=== ${mode} concurrency=${concurrency} ==="
               BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" \
                 python benchmarks/http_benchmark.py | tee "benchmark-results/${mode}-c${concurrency}.jsonl"
             done
@@ -196,6 +199,7 @@ jobs:
               SERVER_PID=$!
               for attempt in $(seq 1 60); do curl -fsS "$BASE/health/live/" >/dev/null 2>&1 && break; sleep 1; done
               for concurrency in 25 100; do
+                echo "=== ${mode} pool=${pool} concurrency=${concurrency} ==="
                 BENCH_URL="${BASE}${ENDPOINT}" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 \
                   python benchmarks/http_benchmark.py | tee "benchmark-results/${mode}-pool${pool}-c${concurrency}.jsonl"
               done
