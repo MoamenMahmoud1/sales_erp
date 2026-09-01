@@ -1,9 +1,10 @@
 """Async boundaries for synchronous DRF serializer operations."""
 
+import time
+
 from asgiref.sync import sync_to_async
 
 from common.services.perf_timing import add_serializer_cpu, add_serializer_wait
-import time
 
 
 class AsyncSerializerService:
