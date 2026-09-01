@@ -109,6 +109,7 @@ jobs:
       - name: Benchmark baseline
         run: |
           set -euo pipefail
+          rm -rf benchmark-results
           mkdir -p benchmark-results
           TOKEN="$(cat bench_token.txt)"
           URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
@@ -166,10 +167,11 @@ jobs:
 
           root = Path("benchmark-results")
           rows = []
-          for p in sorted(root.glob("*.json")):
-              if p.name == "postgres-plan.json":
-                  continue
+          inputs = sorted(root.glob("baseline-c*.json")) + sorted(root.glob("gate*-c*.json"))
+          for p in inputs:
               case = json.loads(p.read_text())
+              if not isinstance(case, dict):
+                  raise TypeError(f"unexpected benchmark payload in {p}: {type(case).__name__}")
               rps = case.get("rps", case.get("successful_rps", 0))
               rows.append(
                   f"| {p.stem} | {case['concurrency']} | {case.get('latency_mean_ms', 0):.2f} | "
