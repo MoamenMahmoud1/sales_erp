@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
 
 from django.conf import settings
 
 _gate: asyncio.Semaphore | None = None
 _gate_loop: asyncio.AbstractEventLoop | None = None
 _gate_limit: int | None = None
-_gate_wait: ContextVar[float] = ContextVar("async_db_gate_wait", default=0.0)
 
 
 def _limit() -> int:
@@ -21,16 +18,6 @@ def _limit() -> int:
 
 def enabled() -> bool:
     return _limit() > 0
-
-
-def configured_limit() -> int:
-    return _limit()
-
-
-def consume_wait() -> float:
-    waited = _gate_wait.get()
-    _gate_wait.set(0.0)
-    return waited
 
 
 def _get_gate() -> asyncio.Semaphore:
@@ -54,12 +41,8 @@ async def db_slot():
         yield
         return
 
-    started = time.perf_counter()
     gate = _get_gate()
     await gate.acquire()
-    waited = time.perf_counter() - started
-    if waited:
-        _gate_wait.set(_gate_wait.get() + waited)
     try:
         yield
     finally:
