@@ -21,6 +21,17 @@ def get_stock(product, location):
     )["quantity"]
 
 
+async def aget_stock(product, location):
+    """Async-native current on-hand quantity."""
+    return (
+        await StockBalance.objects.filter(
+            product=product,
+            location=location,
+        ).values("quantity").afirst()
+        or {"quantity": 0}
+    )["quantity"]
+
+
 def get_total_stock(product):
     """Aggregated current on-hand quantity across every StockLocation."""
     return (
@@ -31,13 +42,30 @@ def get_total_stock(product):
     )
 
 
-def get_available_stock(product, location):
-    """Quantity available for a new sale/transfer at ``location``.
+async def aget_total_stock(product):
+    """Async-native aggregate of current on-hand quantity."""
+    return (
+        await StockBalance.objects.filter(product=product).aaggregate(
+            total=Sum("quantity")
+        )
+    )["total"] or 0
 
-    Stock is only released when an invoice is confirmed (a SALE movement), so the
-    current balance at a location is the available quantity there.
-    """
+
+def get_available_stock(product, location):
+    """Quantity available for a new sale/transfer at ``location``."""
     return get_stock(product, location)
 
 
-__all__ = ("get_stock", "get_total_stock", "get_available_stock")
+async def aget_available_stock(product, location):
+    """Async-native available stock query."""
+    return await aget_stock(product, location)
+
+
+__all__ = (
+    "get_stock",
+    "aget_stock",
+    "get_total_stock",
+    "aget_total_stock",
+    "get_available_stock",
+    "aget_available_stock",
+)
