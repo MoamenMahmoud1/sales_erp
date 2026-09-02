@@ -1,6 +1,14 @@
 name: Saturated DB Pool Sync vs Async
 
 on:
+  push:
+    branches: [perf/async-db-admission]
+    paths:
+      - "erp-api/products/**"
+      - "erp-api/common/**"
+      - "erp-api/core/settings/**"
+      - "erp-api/benchmarks/**"
+      - ".github/workflows/saturated-pool-capacity.yml"
   pull_request:
     branches: [main]
     paths:
