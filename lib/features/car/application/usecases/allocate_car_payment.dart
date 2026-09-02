@@ -15,14 +15,18 @@ class AllocateCarPayment {
   Future<CarPaymentAllocationPlan> call({
     required CarPaymentTransaction transaction,
     required List<CarTrip> trips,
+    int? salesCarId,
+    int? warehouseId,
   }) async {
     final plan = allocator.allocate(
       transaction: transaction,
       trips: trips,
+      salesCarId: salesCarId,
+      warehouseId: warehouseId,
     );
     if (!plan.isFullyAllocated) {
       throw StateError(
-        'Payment exceeds the outstanding Car balance by ${plan.unallocated.units.toStringAsFixed(2)}.',
+        'Payment exceeds the outstanding balance for the selected Car + Warehouse group by ${plan.unallocated.units.toStringAsFixed(2)}.',
       );
     }
     await repository.persistPayment(
