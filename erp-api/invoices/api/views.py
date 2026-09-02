@@ -1,6 +1,10 @@
 """Async ASGI views for immutable invoice operations."""
 
+from decimal import Decimal
+
 from adrf import viewsets
+from django.db.models import Sum, Value
+from django.db.models.functions import Coalesce
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -68,12 +72,26 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     http_method_names = ("get", "post", "head", "options")
 
     def get_queryset(self):
-        return Invoice.objects.select_related(
-            "customer",
-            "created_by",
-            "coupon",
-        ).prefetch_related(
-            "items__product",
+        paid_amount = (
+            Coalesce(
+                Sum("payment_allocations__cash_amount"),
+                Value(Decimal("0")),
+            )
+            + Coalesce(
+                Sum("payment_allocations__transfer_amount"),
+                Value(Decimal("0")),
+            )
+        )
+        return (
+            Invoice.objects.select_related(
+                "customer",
+                "created_by",
+                "coupon",
+            )
+            .prefetch_related(
+                "items__product",
+            )
+            .annotate(_paid_amount=paid_amount)
         )
 
     def get_serializer_class(self):
