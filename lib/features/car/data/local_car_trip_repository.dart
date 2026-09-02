@@ -10,12 +10,12 @@ import '../domain/entities/car_trip_summary_view.dart';
 import '../domain/repositories/car_trip_repository.dart';
 import '../domain/services/car_calculator.dart';
 import '../domain/services/car_payment_evaluator.dart';
+import '../domain/services/display_number.dart';
 import 'car_mappers.dart';
 
 /// Local trip persistence backed by the application's single AppDatabase.
-///
-/// List reads use summary rows and batch-load child items to avoid N+1 reads.
-/// Detail reads load the selected trip's items only.
+/// List reads use compact summary rows; child items are batch-loaded only for
+/// callers that explicitly request full trip details.
 class LocalCarTripRepository implements CarTripRepository {
   LocalCarTripRepository({Future<Database> Function()? database})
       : _database = database ?? (() => AppDatabase.database);
@@ -23,30 +23,45 @@ class LocalCarTripRepository implements CarTripRepository {
   final Future<Database> Function() _database;
   static const _calculator = CarCalculator();
   static const _evaluator = CarPaymentEvaluator();
+  static const _displayNumbers = CarDisplayNumber();
   static const _mappers = CarMappers();
 
   @override
   Future<CarTrip> createTrip(CarTrip trip) async {
-    final db = await _database();
     _ensureOpen(trip);
+    final db = await _database();
     final summary = _calculator.summary(trip);
+    final placeholder = 'pending-${DateTime.now().microsecondsSinceEpoch}';
+    final draft = trip.copyWith(displayNumber: placeholder);
 
     return db.transaction((txn) async {
       final id = await txn.insert(
         'car_trips',
-        _mappers.tripToRow(trip, summary, updatedAt: DateTime.now()),
+        _mappers.tripToRow(draft, summary, updatedAt: DateTime.now()),
       );
-      await _insertItems(txn, id, trip.items);
-      return trip.copyWith(id: id);
+      final displayNumber = _displayNumbers.create(
+        year: draft.openedAt.year,
+        sequence: id,
+      );
+      await txn.update(
+        'car_trips',
+        {'display_number': displayNumber},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await _insertItems(txn, id, draft.items);
+      return draft.copyWith(id: id, displayNumber: displayNumber);
     });
   }
 
   @override
-  Future<CarTrip> updateTrip(CarTrip trip) async {
+  Future<CarTrip> updateDraft(CarTrip trip) async {
     if (trip.id <= 0) throw ArgumentError('A saved trip must have an id.');
     _ensureOpen(trip);
     final issues = _calculator.validate(trip);
-    if (issues.isNotEmpty) throw ArgumentError(issues.first.message);
+    // Empty drafts are allowed; validation becomes mandatory on confirmation.
+    final blocking = issues.where((issue) => issue.message.contains('cannot')).toList();
+    if (blocking.isNotEmpty) throw ArgumentError(blocking.first.message);
 
     final db = await _database();
     final summary = _calculator.summary(trip);
@@ -61,7 +76,11 @@ class LocalCarTripRepository implements CarTripRepository {
       );
       if (updated == 0) throw StateError('Open car trip was not found.');
 
-      await txn.delete('car_trip_items', where: 'trip_id = ?', whereArgs: [trip.id]);
+      await txn.delete(
+        'car_trip_items',
+        where: 'trip_id = ?',
+        whereArgs: [trip.id],
+      );
       await _insertItems(txn, trip.id, trip.items);
       return trip;
     });
@@ -107,8 +126,9 @@ class LocalCarTripRepository implements CarTripRepository {
         orderBy: 'revision_number DESC',
         limit: 1,
       );
-      final revisionNumber =
-          latest.isEmpty ? 1 : (latest.first['revision_number'] as int) + 1;
+      final revisionNumber = latest.isEmpty
+          ? 1
+          : (latest.first['revision_number'] as int) + 1;
 
       await _insertRevision(
         txn,
@@ -118,8 +138,62 @@ class LocalCarTripRepository implements CarTripRepository {
           triggeredBy: triggeredBy,
         ),
       );
-
       return finalized;
+    });
+  }
+
+  @override
+  Future<CarTrip> reviseClosedTrip(
+    CarTrip trip, {
+    String? triggeredBy,
+  }) async {
+    if (trip.id <= 0) throw ArgumentError('A saved trip must have an id.');
+    final issues = _calculator.validate(trip);
+    if (issues.isNotEmpty) throw ArgumentError(issues.first.message);
+
+    final db = await _database();
+    final now = DateTime.now().toUtc();
+    final revised = trip.copyWith(
+      status: CarTripStatus.closed,
+      closedAt: trip.closedAt ?? now,
+    );
+    final summary = _calculator.summary(revised);
+
+    return db.transaction((txn) async {
+      final updated = await txn.update(
+        'car_trips',
+        _mappers.tripToRow(revised, summary, updatedAt: now)
+          ..remove('created_at'),
+        where: 'id = ? AND status = ?',
+        whereArgs: [trip.id, CarTripStatus.closed.value],
+      );
+      if (updated == 0) {
+        throw StateError('Only a closed car trip can be revised.');
+      }
+
+      await txn.delete('car_trip_items', where: 'trip_id = ?', whereArgs: [trip.id]);
+      await _insertItems(txn, trip.id, revised.items);
+
+      final latest = await txn.query(
+        'car_revisions',
+        columns: ['revision_number'],
+        where: 'trip_id = ?',
+        whereArgs: [trip.id],
+        orderBy: 'revision_number DESC',
+        limit: 1,
+      );
+      final revisionNumber = latest.isEmpty
+          ? 1
+          : (latest.first['revision_number'] as int) + 1;
+      await _insertRevision(
+        txn,
+        _revisionFrom(
+          revised,
+          revisionNumber: revisionNumber,
+          triggeredBy: triggeredBy,
+        ),
+      );
+      return revised;
     });
   }
 
@@ -154,31 +228,22 @@ class LocalCarTripRepository implements CarTripRepository {
 
   @override
   Future<List<CarTrip>> getTrips({CarTripFilter? filter}) async {
+    final summaries = await getTripSummaries(filter: filter);
+    if (summaries.isEmpty) return const [];
     final db = await _database();
-    final (where, args) = _buildWhere(filter);
+    final ids = summaries.map((summary) => summary.id).toList(growable: false);
+    final itemsByTrip = await _loadItems(db, ids);
     final rows = await db.query(
       'car_trips',
-      where: where.isEmpty ? null : where,
-      whereArgs: args.isEmpty ? null : args,
-      orderBy: 'opened_at DESC',
+      where: 'id IN (${List.filled(ids.length, '?').join(',')})',
+      whereArgs: ids,
     );
-
-    final now = DateTime.now();
-    final matchingRows = rows.where((row) {
-      if (filter?.paymentStatus == null) return true;
-      final view = _mappers.tripSummaryFromRow(row);
-      return view.paymentStatus(_evaluator, now) == filter!.paymentStatus;
-    }).toList(growable: false);
-    if (matchingRows.isEmpty) return const [];
-
-    final ids = matchingRows.map((row) => row['id'] as int).toList(growable: false);
-    final itemsByTrip = await _loadItems(db, ids);
-
+    final byId = {for (final row in rows) row['id'] as int: row};
     return [
-      for (final row in matchingRows)
+      for (final summary in summaries)
         _mappers.tripFromRow(
-          row,
-          itemsByTrip[row['id'] as int] ?? const [],
+          byId[summary.id]!,
+          itemsByTrip[summary.id] ?? const [],
         ),
     ];
   }
@@ -212,10 +277,8 @@ class LocalCarTripRepository implements CarTripRepository {
       orderBy: 'revision_number ASC',
     );
     if (rows.isEmpty) return const [];
-    final itemsByRevision = await _loadRevisionItems(
-      db,
-      rows.map((row) => row['id'] as int).toList(growable: false),
-    );
+    final ids = rows.map((row) => row['id'] as int).toList(growable: false);
+    final itemsByRevision = await _loadRevisionItems(db, ids);
     return rows
         .map(
           (row) => _mappers.revisionFromRow(
@@ -281,7 +344,7 @@ class LocalCarTripRepository implements CarTripRepository {
         tripId: trip.id,
         displayNumber: trip.displayNumber,
         revisionNumber: revisionNumber,
-        createdAt: trip.closedAt ?? DateTime.now().toUtc(),
+        createdAt: DateTime.now().toUtc(),
         triggeredBy: triggeredBy,
         salesCarId: trip.salesCarId,
         salesCarName: trip.salesCarName,
@@ -340,7 +403,6 @@ class LocalCarTripRepository implements CarTripRepository {
     if (filter == null || filter.isEmpty) return ('', const []);
     final clauses = <String>[];
     final args = <Object?>[];
-
     if (filter.status != null) {
       clauses.add('status = ?');
       args.add(filter.status!.value);
