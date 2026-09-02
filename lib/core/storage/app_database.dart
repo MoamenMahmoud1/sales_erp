@@ -5,14 +5,11 @@ import 'app_migrations.dart';
 import 'app_schema.dart';
 
 /// The application's single SQLite database.
-///
-/// Feature modules may own repositories and data sources, but database
-/// lifecycle, migrations and fresh-install schema are centralized here.
 class AppDatabase {
   AppDatabase._();
 
   static const databaseName = 'sales_erp.db';
-  static const version = 12;
+  static const version = 13;
 
   static Database? _database;
   static Future<Database>? _opening;
