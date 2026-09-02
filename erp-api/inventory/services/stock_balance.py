@@ -5,9 +5,16 @@ from inventory.models import StockBalance
 
 
 class StockBalanceService:
+    """Atomic stock mutations with transaction-safe internal primitives.
+
+    ``increase()``/``decrease()`` remain independently atomic for standalone
+    callers. Domain workflows that already hold an outer transaction should
+    use the ``*_in_transaction()`` variants to avoid creating a SAVEPOINT for
+    every stock row touched inside a larger transaction.
+    """
+
     @staticmethod
-    @transaction.atomic
-    def increase(*, location, product, quantity):
+    def _increase(*, location, product, quantity):
         if quantity <= 0:
             raise ValueError("Quantity must be greater than zero.")
 
@@ -26,15 +33,7 @@ class StockBalanceService:
         return balance
 
     @staticmethod
-    async def aincrease(*, location, product, quantity):
-        return await sync_to_async(
-            StockBalanceService.increase,
-            thread_sensitive=True,
-        )(location=location, product=product, quantity=quantity)
-
-    @staticmethod
-    @transaction.atomic
-    def decrease(*, location, product, quantity):
+    def _decrease(*, location, product, quantity):
         if quantity <= 0:
             raise ValueError("Quantity must be greater than zero.")
 
@@ -51,6 +50,49 @@ class StockBalanceService:
         balance.quantity -= quantity
         balance.save(update_fields=["quantity", "updated_at"])
         return balance
+
+    @staticmethod
+    @transaction.atomic
+    def increase(*, location, product, quantity):
+        return StockBalanceService._increase(
+            location=location,
+            product=product,
+            quantity=quantity,
+        )
+
+    @staticmethod
+    def increase_in_transaction(*, location, product, quantity):
+        """Mutate stock inside an already-open transaction without a savepoint."""
+        return StockBalanceService._increase(
+            location=location,
+            product=product,
+            quantity=quantity,
+        )
+
+    @staticmethod
+    async def aincrease(*, location, product, quantity):
+        return await sync_to_async(
+            StockBalanceService.increase,
+            thread_sensitive=True,
+        )(location=location, product=product, quantity=quantity)
+
+    @staticmethod
+    @transaction.atomic
+    def decrease(*, location, product, quantity):
+        return StockBalanceService._decrease(
+            location=location,
+            product=product,
+            quantity=quantity,
+        )
+
+    @staticmethod
+    def decrease_in_transaction(*, location, product, quantity):
+        """Mutate stock inside an already-open transaction without a savepoint."""
+        return StockBalanceService._decrease(
+            location=location,
+            product=product,
+            quantity=quantity,
+        )
 
     @staticmethod
     async def adecrease(*, location, product, quantity):
