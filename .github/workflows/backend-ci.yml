@@ -1,4 +1,5 @@
 name: Backend CI
+# Keep backend validation attached to the latest PR commit after CI-only fixes.
 
 on:
   push:
