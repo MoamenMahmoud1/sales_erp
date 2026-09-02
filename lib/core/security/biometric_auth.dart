@@ -1,5 +1,8 @@
 import 'package:local_auth/local_auth.dart';
 
+/// The biometric modality the user selected in the app UI.
+enum BiometricMethod { face, fingerprint, generic }
+
 /// Result of a local device authentication attempt.
 enum BiometricResult {
   success,
@@ -39,9 +42,13 @@ class BiometricAuth {
     }
   }
 
-  /// Uses an enrolled biometric. The OS chooses the enrolled biometric UI.
+  /// Requests biometric authentication.
+  ///
+  /// [method] is the method selected by the app UI and controls the prompt
+  /// wording. The underlying OS still controls the physical biometric sensor
+  /// when more than one biometric is enrolled.
   Future<BiometricResult> authenticateBiometric({
-    String reason = 'Unlock Sales ERP to protect your business data',
+    BiometricMethod method = BiometricMethod.generic,
   }) async {
     try {
       final available = await availableBiometrics();
@@ -49,8 +56,13 @@ class BiometricAuth {
         return BiometricResult.unavailable;
       }
 
+      final label = switch (method) {
+        BiometricMethod.face => 'Face',
+        BiometricMethod.fingerprint => 'fingerprint',
+        BiometricMethod.generic => 'biometric authentication',
+      };
       final ok = await _auth.authenticate(
-        localizedReason: reason,
+        localizedReason: 'Use $label to unlock Sales ERP.',
         biometricOnly: true,
         persistAcrossBackgrounding: false,
         sensitiveTransaction: false,
@@ -64,7 +76,7 @@ class BiometricAuth {
   /// Uses the device credential flow (PIN, pattern, password or passcode).
   /// The credential is entered in the OS UI and is never exposed to the app.
   Future<BiometricResult> authenticateDeviceCredential({
-    String reason = 'Unlock Sales ERP with your phone PIN or password',
+    String reason = 'Unlock Sales ERP with your phone PIN or password.',
   }) async {
     if (!await isDeviceSupported()) return BiometricResult.unavailable;
 
