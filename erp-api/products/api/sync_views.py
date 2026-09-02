@@ -1,13 +1,14 @@
 """Pure synchronous DRF implementation used by production-compatible tests/benchmarks."""
 
 import os
+import time
 
 from rest_framework import filters, viewsets
 from rest_framework.response import Response
 
-from common.pagination import StandardPagination, InfiniteScrollPagination
+from common.pagination import InfiniteScrollPagination, StandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
-from common.services.perf_timing import db_operation, timed_function, view_stage
+from common.services.perf_timing import add_serializer_cpu, db_operation, timed_function, view_stage
 from products.api.serializers import CartonPricingSerializer, ProductSerializer
 from products.models import CartonPricing
 from products.services.metrics import ProductMetricsQueryService
@@ -55,14 +56,22 @@ class ProductViewSet(viewsets.ModelViewSet):
                 with view_stage("view.serializer.instantiate"):
                     serializer = self.get_serializer(page, many=True)
                 with view_stage("view.serializer.data"):
-                    data = serializer.data
+                    started = time.perf_counter_ns()
+                    try:
+                        data = serializer.data
+                    finally:
+                        add_serializer_cpu(time.perf_counter_ns() - started)
                 with view_stage("view.response.paginated"):
                     return self.get_paginated_response(data)
 
             with view_stage("view.serializer.instantiate"):
                 serializer = self.get_serializer(queryset, many=True)
             with view_stage("view.serializer.data"):
-                data = serializer.data
+                started = time.perf_counter_ns()
+                try:
+                    data = serializer.data
+                finally:
+                    add_serializer_cpu(time.perf_counter_ns() - started)
             with view_stage("view.response.unpaginated"):
                 return Response(data, status=200)
 
@@ -82,7 +91,6 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
     ordering_fields = (
         "name",
         "units_per_carton",
-        "carton_price",
         "created_at",
         "updated_at",
     )
@@ -99,7 +107,7 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
                 data = serializer.data
                 return self.get_paginated_response(data)
             serializer = self.get_serializer(queryset, many=True)
-            return Response(serializer.data, status=200)
+            return Response(data, status=200)
 
     def get_queryset(self):
         return CartonPricing.objects.all()
