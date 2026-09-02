@@ -84,7 +84,7 @@ void main() {
       );
       final summary = calculator.summary(t);
       expect(evaluator.statusOf(t, summary, now), CarPaymentStatus.overdue);
-      expect(evaluator.daysOverdue(t, now), 17);
+      expect(evaluator.daysOverdue(t, now, summary: summary), 17);
     });
 
     test('not overdue when fully paid even past due date', () {
@@ -104,7 +104,8 @@ void main() {
         payment: const CarPayment(cashAmount: CarMoney(40000)),
         dueDate: DateTime(2026, 1, 20),
       );
-      expect(evaluator.daysOverdue(t, now), 0);
+      final summary = calculator.summary(t);
+      expect(evaluator.daysOverdue(t, now, summary: summary), 0);
     });
   });
 
