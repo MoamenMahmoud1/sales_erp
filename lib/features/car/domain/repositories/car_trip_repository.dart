@@ -5,6 +5,7 @@ import '../entities/car_trip_summary_view.dart';
 
 abstract interface class CarTripRepository {
   Future<CarTrip> createTrip(CarTrip trip);
+  Future<CarTrip> createAndConfirmTrip(CarTrip trip, {String? triggeredBy});
   Future<CarTrip> updateDraft(CarTrip trip);
   Future<CarTrip> confirmTrip(CarTrip trip, {String? triggeredBy});
   Future<CarTrip> reviseClosedTrip(CarTrip trip, {String? triggeredBy});
