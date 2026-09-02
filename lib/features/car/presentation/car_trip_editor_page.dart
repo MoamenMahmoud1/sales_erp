@@ -216,11 +216,11 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       await Navigator.of(context).push(
         PageRouteBuilder(
           opaque: true,
-          pageBuilder: (_, _, _) => CarClosingAnimation(
+          pageBuilder: (context, animation, secondaryAnimation) => CarClosingAnimation(
             displayNumber: persisted.displayNumber,
             summary: summary,
           ),
-          transitionsBuilder: (_, animation, _, child) => FadeTransition(opacity: animation, child: child),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(opacity: animation, child: child),
           transitionDuration: const Duration(milliseconds: 180),
         ),
       );
@@ -468,37 +468,131 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Column(children: [
-          Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(product.name, style: const TextStyle(fontWeight: FontWeight.w800)),
-              const SizedBox(height: 3),
-              Text('${product.price.toStringAsFixed(2)} EGP / carton', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
-            ])),
-            IconButton(tooltip: 'Remove product', onPressed: () => setState(() { _loaded.remove(id); _returned.remove(id); _discounts.remove(id); }), icon: Icon(Icons.close_rounded, color: scheme.error)),
-          ]),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: _quantityField(label: 'Loaded', value: loaded, onChanged: (v) => setState(() => _loaded[id] = v))),
-            const SizedBox(width: 8),
-            Expanded(child: _quantityField(label: 'Returned', value: returned, max: loaded, onChanged: (v) => setState(() => _returned[id] = v))),
-          ]),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: TextFormField(initialValue: discount.toStringAsFixed(2), key: ValueKey('discount-$id-$discount'), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Product discount %', suffixText: '%', border: OutlineInputBorder()), onChanged: (value) { final parsed = double.tryParse(value); if (parsed != null) setState(() => _discounts[id] = parsed.clamp(0, 100).toDouble()); }})),
-            const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text('$sold sold', style: const TextStyle(fontWeight: FontWeight.w900)), const SizedBox(height: 3), Text(_money(line.netValue), style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w900))])),
-          ]),
-        ]),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(product.name, style: const TextStyle(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${product.price.toStringAsFixed(2)} EGP / carton',
+                        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remove product',
+                  onPressed: () => setState(() {
+                    _loaded.remove(id);
+                    _returned.remove(id);
+                    _discounts.remove(id);
+                  }),
+                  icon: Icon(Icons.close_rounded, color: scheme.error),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _quantityField(
+                    label: 'Loaded',
+                    value: loaded,
+                    onChanged: (v) => setState(() => _loaded[id] = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _quantityField(
+                    label: 'Returned',
+                    value: returned,
+                    max: loaded,
+                    onChanged: (v) => setState(() => _returned[id] = v),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    initialValue: discount.toStringAsFixed(2),
+                    key: ValueKey('discount-$id-$discount'),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Product discount %',
+                      suffixText: '%',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (value) {
+                      final parsed = double.tryParse(value);
+                      if (parsed == null) return;
+                      setState(() => _discounts[id] = parsed.clamp(0, 100).toDouble());
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('$sold sold', style: const TextStyle(fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 3),
+                      Text(
+                        _money(line.netValue),
+                        style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w900),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _quantityField({required String label, required int value, required ValueChanged<int> onChanged, int? max}) => Row(children: [
-    IconButton(onPressed: value <= 0 ? null : () => onChanged(value - 1), icon: const Icon(Icons.remove_circle_outline_rounded)),
-    Expanded(child: TextFormField(key: ValueKey('$label-$value'), initialValue: '$value', textAlign: TextAlign.center, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()), onChanged: (raw) { final parsed = int.tryParse(raw); if (parsed == null) return; onChanged(parsed.clamp(0, max ?? 1000000)); })),
-    IconButton(onPressed: max != null && value >= max ? null : () => onChanged(value + 1), icon: const Icon(Icons.add_circle_outline_rounded)),
-  ]);
+  Widget _quantityField({
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+    int? max,
+  }) {
+    final cappedMax = max ?? 1000000;
+    return Row(
+      children: [
+        IconButton(
+          onPressed: value <= 0 ? null : () => onChanged(value - 1),
+          icon: const Icon(Icons.remove_circle_outline_rounded),
+        ),
+        Expanded(
+          child: TextFormField(
+            key: ValueKey('$label-$value'),
+            initialValue: '$value',
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+            onChanged: (raw) {
+              final parsed = int.tryParse(raw);
+              if (parsed == null) return;
+              onChanged(parsed.clamp(0, cappedMax).toInt());
+            },
+          ),
+        ),
+        IconButton(
+          onPressed: value >= cappedMax ? null : () => onChanged(value + 1),
+          icon: const Icon(Icons.add_circle_outline_rounded),
+        ),
+      ],
+    );
+  }
 
   Widget _buildDiscountSection() => Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [
     Expanded(child: TextFormField(controller: _globalDiscountController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Global discount %', suffixText: '%', border: OutlineInputBorder()), onChanged: (raw) { final parsed = double.tryParse(raw); if (parsed != null) setState(() => _globalDiscountPercent = parsed.clamp(0, 100).toDouble()); }})),
