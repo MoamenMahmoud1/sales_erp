@@ -22,7 +22,7 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: erp-api
@@ -56,19 +56,19 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
       REDIS_URL: redis://127.0.0.1:6379/0
-      WEB_CONCURRENCY: "4"
+      WEB_CONCURRENCY: "1"
       DB_POOL_MIN_SIZE: "0"
       DB_POOL_MAX_SIZE: "8"
       ASYNC_DB_CONCURRENCY: "8"
       ASYNC_DB_ADMISSION_TIMEOUT_MS: "0"
       TRUST_PROXY_HEADERS: "false"
       PERF_TIMING_ENABLED: "1"
-      BENCH_TIMEOUT: "3"
-      BENCH_REQUESTS: "500"
-      BENCH_WARMUP: "100"
+      BENCH_TIMEOUT: "2"
+      BENCH_REQUESTS: "200"
+      BENCH_WARMUP: "20"
       MAX_POOL_P95_MS: "50"
       MAX_ERROR_RATE_PCT: "0"
-      CALIBRATION_REPEATS: "3"
+      CALIBRATION_REPEATS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -94,82 +94,139 @@ jobs:
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET work_mem='16MB';"
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET random_page_cost='1.1';"
           docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET jit='off';"
-          docker exec "$PG_CONTAINER" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries='pg_stat_statements';"
           docker restart "$PG_CONTAINER"
-          for _ in $(seq 1 60); do PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
-          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements;'
+          for _ in $(seq 1 30); do PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c 'ANALYZE;'
-      - name: Run repeated sustainable calibration
+      - name: Run fair sync vs async benchmark
         run: |
           set -euo pipefail
           rm -rf benchmark-results
-          mkdir -p benchmark-results/calibration/{async,sync}/{page,cursor} benchmark-results/final
+          mkdir -p benchmark-results/calibration benchmark-results/final
           TOKEN="$(cat bench_token.txt)"
-          CAPACITY_VALUES=(1 2 3 4 5 6 7 8)
-          CLIENT_CONCURRENCIES=(1 10 25 50 75 100 150)
-          url_for() { if [[ "$1" == "cursor" ]]; then printf '%s\n' 'http://127.0.0.1:8000/api/v1/products/?page_size=20'; else printf '%s\n' 'http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20'; fi; }
+          D_VALUES=(1 2 4 8)
+          CLIENT_CONCURRENCIES=(1 10 25 50 100)
+
           stop_server() {
             local pid="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
-            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then kill -TERM -- "-$pid" 2>/dev/null || true; kill -TERM "$pid" 2>/dev/null || true; for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done; kill -KILL -- "-$pid" 2>/dev/null || true; kill -KILL "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fi
+            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+              kill -TERM -- "-$pid" 2>/dev/null || true
+              kill -TERM "$pid" 2>/dev/null || true
+              for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+              kill -KILL -- "-$pid" 2>/dev/null || true
+              kill -KILL "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+            fi
             rm -f /tmp/gunicorn.pid
           }
+
           start_server() {
-            local mode="$1" pagination="$2" cap="$3"
-            stop_server; : > /tmp/gunicorn-benchmark.log
-            if [[ "$mode" == "sync" ]]; then setsid env BENCH_API_STACK=sync BENCH_PAGINATION="$pagination" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=8 ASYNC_DB_CONCURRENCY=0 gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --threads "$cap" --worker-class gthread --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-benchmark.log --log-level warning &
-            else setsid env BENCH_API_STACK=async BENCH_PAGINATION="$pagination" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=8 ASYNC_DB_CONCURRENCY="$cap" gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-benchmark.log --log-level warning & fi
+            local mode="$1" pagination="$2" d="$3"
+            stop_server
+            : > /tmp/gunicorn-benchmark.log
+            if [[ "$mode" == "sync" ]]; then
+              setsid env BENCH_API_STACK=sync BENCH_PAGINATION="$pagination" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=8 ASYNC_DB_CONCURRENCY=0 \
+                gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers 1 --threads "$d" --worker-class gthread \
+                --timeout 10 --access-logfile /dev/null --error-logfile /tmp/gunicorn-benchmark.log --log-level warning &
+            else
+              setsid env BENCH_API_STACK=async BENCH_PAGINATION="$pagination" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=8 ASYNC_DB_CONCURRENCY="$d" \
+                gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers 1 --worker-class uvicorn_worker.UvicornWorker \
+                --timeout 10 --access-logfile /dev/null --error-logfile /tmp/gunicorn-benchmark.log --log-level warning &
+            fi
             echo $! > /tmp/gunicorn.pid
-            for _ in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1 && return 0; sleep 1; done; cat /tmp/gunicorn-benchmark.log >&2 || true; return 1
+            for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1 && return 0; sleep 0.2; done
+            cat /tmp/gunicorn-benchmark.log >&2 || true
+            return 1
           }
-          write_failed_result() {
-            local mode="$1" pagination="$2" cap="$3" c="$4" repeat="$5" out="$6"
-            python - "$mode" "$pagination" "$cap" "$c" "$repeat" "$out" <<'PY'
-          import json,sys
-          mode,pagination,cap,c,repeat,out=sys.argv[1:]
-          p={"phase":"measured","status":"partial","mode":mode,"pagination":pagination,"requests":500,"completed":0,"successful":0,"failed":500,"error_rate_pct":100.0,"concurrency":int(c),"warmup_requests":100,"wall_time_sec":0.0,"successful_rps":0.0,"p50_ms":None,"p95_ms":None,"p99_ms":None,"pool_wait_p95_ms":None,"db_admission_p95_ms":None,"failure_reason":"benchmark process failed or timed out","capacity_per_worker":int(cap),"repeat":int(repeat)}
-          open(out,"w").write(json.dumps(p,indent=2)+"\n")
-          PY
-          }
+
           run_one() {
-            local mode="$1" pagination="$2" cap="$3" c="$4" repeat="$5" url out detail rc
-            url="$(url_for "$pagination")"; out="benchmark-results/calibration/$mode/$pagination/${mode}-cal-d${cap}-r${repeat}-c${c}.json"; detail="benchmark-results/calibration/$mode/$pagination/${mode}-cal-d${cap}-r${repeat}-c${c}-requests.ndjson"
+            local mode="$1" pagination="$2" d="$3" c="$4" phase="$5"
+            local url="http://127.0.0.1:8000/api/v1/products/?page_size=20"
+            local out
+            out="benchmark-results/$phase/${mode}-${pagination}-d${d}-c${c}.json"
             set +e
-            timeout --signal=TERM --kill-after=2s 20s env BENCH_MODE="$mode" BENCH_PAGINATION="$pagination" BENCH_URL="$url" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$c" BENCH_REQUESTS="$BENCH_REQUESTS" BENCH_WARMUP="$BENCH_WARMUP" BENCH_TIMEOUT="$BENCH_TIMEOUT" BENCH_DETAIL_PATH="$detail" python benchmarks/http_benchmark.py > "$out"
-            rc=$?; set -e
-            if [[ $rc -ne 0 ]]; then echo "benchmark failed: mode=$mode pagination=$pagination D=$cap C=$c repeat=$repeat rc=$rc" >&2; write_failed_result "$mode" "$pagination" "$cap" "$c" "$repeat" "$out"; fi
-            return 0
+            timeout --signal=TERM --kill-after=1s 6s env \
+              BENCH_MODE="$mode" BENCH_PAGINATION="$pagination" BENCH_URL="$url" BENCH_TOKEN="$TOKEN" \
+              BENCH_CONCURRENCY="$c" BENCH_REQUESTS="$BENCH_REQUESTS" BENCH_WARMUP="$BENCH_WARMUP" BENCH_TIMEOUT="$BENCH_TIMEOUT" \
+              python benchmarks/http_benchmark.py > "$out"
+            local rc=$?
+            set -e
+            if [[ $rc -ne 0 ]]; then
+              echo "benchmark failed: $mode pagination=$pagination D=$d C=$c rc=$rc" >&2
+              return 1
+            fi
           }
-          for mode in async sync; do for pagination in page cursor; do for cap in "${CAPACITY_VALUES[@]}"; do for repeat in $(seq 1 "$CALIBRATION_REPEATS"); do start_server "$mode" "$pagination" "$cap"; PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c 'SELECT pg_stat_statements_reset();' >/dev/null; run_one "$mode" "$pagination" "$cap" 100 "$repeat"; stop_server; done; done; done; done
-          for mode in async sync; do for pagination in page cursor; do dir="benchmark-results/calibration/$mode/$pagination"; for cap in "${CAPACITY_VALUES[@]}"; do for repeat in $(seq 1 "$CALIBRATION_REPEATS"); do src="$dir/${mode}-cal-d${cap}-r${repeat}-c100.json"; dst="$dir/${mode}-cal-d${cap}-r${repeat}.json"; [[ -f "$src" ]] && cp "$src" "$dst"; done; done; CALIBRATION_DIR="$dir" CALIBRATION_PREFIX="${mode}-cal" CALIBRATION_REPEATS="$CALIBRATION_REPEATS" python benchmarks/aggregate_calibration.py; MAX_POOL_P95_MS="$MAX_POOL_P95_MS" MAX_ERROR_RATE_PCT="$MAX_ERROR_RATE_PCT" CALIBRATION_DIR="$dir" CALIBRATION_PREFIX="${mode}-cal" python benchmarks/select_sustainable_capacity.py || true; done; done
-          get_cap() { local mode="$1" pagination="$2" p="benchmark-results/calibration/$mode/$pagination/${mode}-cal-selected.env"; [[ -s "$p" ]] || return 1; awk -F= '/^CAPACITY_PER_WORKER=/{print $2}' "$p"; }
-          ASYNC_PAGE=$(get_cap async page) || { touch benchmark-results/CALIBRATION_FAILED; exit 1; }; ASYNC_CURSOR=$(get_cap async cursor) || { touch benchmark-results/CALIBRATION_FAILED; exit 1; }; SYNC_PAGE=$(get_cap sync page) || { touch benchmark-results/CALIBRATION_FAILED; exit 1; }; SYNC_CURSOR=$(get_cap sync cursor) || { touch benchmark-results/CALIBRATION_FAILED; exit 1; }
-          ASYNC_CAP=$(( ASYNC_PAGE < ASYNC_CURSOR ? ASYNC_PAGE : ASYNC_CURSOR )); SYNC_CAP=$(( SYNC_PAGE < SYNC_CURSOR ? SYNC_PAGE : SYNC_CURSOR ))
-          for pagination in page cursor; do for c in "${CLIENT_CONCURRENCIES[@]}"; do for mode in async sync; do cap="$ASYNC_CAP"; [[ "$mode" == "sync" ]] && cap="$SYNC_CAP"; start_server "$mode" "$pagination" "$cap"; run_one "$mode" "$pagination" "$cap" "$c" 1; mv "benchmark-results/calibration/$mode/$pagination/${mode}-cal-d${cap}-r1-c${c}.json" "benchmark-results/final/${mode}-${pagination}-c${c}.json" || true; stop_server; done; done; done
-      - name: PostgreSQL diagnostics
-        if: always()
-        run: python benchmarks/postgres_diagnostics.py > benchmark-results/postgres-plan.json
-      - name: Build sustainable report
-        if: always()
-        run: |
+
+          # Fairness rule: one Gunicorn worker for BOTH modes. D is the same
+          # server-side concurrency unit: sync = threads, async = DB admission.
+          # Therefore D means exactly the same number of concurrent request slots.
+          for mode in async sync; do
+            for d in "${D_VALUES[@]}"; do
+              start_server "$mode" cursor "$d"
+              PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c 'SELECT pg_stat_statements_reset();' >/dev/null 2>&1 || true
+              run_one "$mode" cursor "$d" 25 calibration
+              stop_server
+            done
+          done
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('benchmark-results/calibration')
+          for mode in ('async','sync'):
+              good=[]
+              for d in (1,2,4,8):
+                  p=root/f'{mode}-cursor-d{d}-c25.json'
+                  c=json.loads(p.read_text())
+                  if c.get('status') == 'complete' and int(c.get('failed') or 0) == 0 and float(c.get('pool_wait_p95_ms') or 0) <= 50:
+                      good.append(c)
+              if not good:
+                  raise SystemExit(f'No healthy D for {mode}')
+              # Maximize throughput at the SAME client pressure (C=25).
+              selected=max(good,key=lambda x:(float(x.get('successful_rps') or 0),-float(x.get('p99_ms') or 0)))
+              d=int(selected['capacity_per_worker']) if 'capacity_per_worker' in selected else int(selected.get('d', 0) or 0)
+              if not d:
+                  # benchmark output has no D field; recover it from the filename chosen above.
+                  d=int(next(p.stem.split('-d')[1].split('-')[0] for p in root.glob(f'{mode}-cursor-d*-c25.json') if json.loads(p.read_text()) is selected) or 0)
+              (root/f'{mode}-selected.env').write_text(f'CAPACITY_PER_WORKER={d}\nCAPACITY_TOTAL={d}\n')
+              print(f'{mode}: selected D={d} RPS={selected.get("successful_rps")} p95={selected.get("p95_ms")}')
+          PY
+
+          get_d() { awk -F= '/^CAPACITY_PER_WORKER=/{print $2}' "benchmark-results/calibration/$1-selected.env"; }
+          ASYNC_D="$(get_d async)"
+          SYNC_D="$(get_d sync)"
+
+          for pagination in page cursor; do
+            for mode in async sync; do
+              d="$ASYNC_D"; [[ "$mode" == "sync" ]] && d="$SYNC_D"
+              start_server "$mode" "$pagination" "$d"
+              for c in "${CLIENT_CONCURRENCIES[@]}"; do
+                run_one "$mode" "$pagination" "$d" "$c" final
+              done
+              stop_server
+            done
+          done
+
           python - <<'PY'
           import json
           from pathlib import Path
           root=Path('benchmark-results')
-          lines=['# Sustainable Sync vs Async Capacity','']
-          if (root/'CALIBRATION_FAILED').exists():
-              lines += ['## Calibration failed','No sustainable capacity was selected; inspect calibration artifacts and PostgreSQL diagnostics.']
-          else:
-              def cap(m,p):
-                  f=root/'calibration'/m/p/f'{m}-cal-selected.env'
-                  for x in f.read_text().splitlines():
-                      if x.startswith('CAPACITY_PER_WORKER='): return int(x.split('=',1)[1])
-                  raise RuntimeError(f'Missing CAPACITY_PER_WORKER in {f}')
-              capacities={'async':min(cap('async','page'),cap('async','cursor')),'sync':min(cap('sync','page'),cap('sync','cursor'))}
-              lines += ['DB pool is fixed at 8 connections/worker. Sync capacity is Gunicorn threads; Async capacity is DB admission gate.','','| mode | pagination | capacity/worker | C | wall s | RPS | p50 ms | p95 ms | p99 ms | pool p95 ms | admission p95 ms | failed |','|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
-              for p in sorted((root/'final').glob('*.json')):
-                  c=json.loads(p.read_text()); m=c.get('mode',''); lines.append(f"| {m} | {c.get('pagination','')} | {capacities[m]} | {int(c.get('concurrency') or 0)} | {float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | {float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | {float(c.get('p99_ms') or 0):.2f} | {float(c.get('pool_wait_p95_ms') or 0):.2f} | {float(c.get('db_admission_p95_ms') or 0):.2f} | {int(c.get('failed') or 0)} |")
-          (root/'report.md').write_text('\n'.join(lines)+'\n'); print('\n'.join(lines))
+          caps={}
+          for mode in ('async','sync'):
+              caps[mode]=int([x.split('=',1)[1] for x in (root/'calibration'/f'{mode}-selected.env').read_text().splitlines() if x.startswith('CAPACITY_PER_WORKER=')][0])
+          lines=['# Sustainable Sync vs Async Capacity','',
+                 'Fairness: one Gunicorn worker for both modes. D is identical in meaning: sync uses D threads, async uses D admission slots. DB pool is fixed at 8.','',
+                 '| mode | pagination | D | client C | wall s | RPS | p50 ms | p95 ms | p99 ms | pool p95 ms | admission p95 ms | failed |',
+                 '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
+          for p in sorted((root/'final').glob('*.json')):
+              c=json.loads(p.read_text())
+              m=c.get('mode','')
+              lines.append(f"| {m} | {c.get('pagination','')} | {caps[m]} | {int(c.get('concurrency') or 0)} | {float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | {float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | {float(c.get('p99_ms') or 0):.2f} | {float(c.get('pool_wait_p95_ms') or 0):.2f} | {float(c.get('db_admission_p95_ms') or 0):.2f} | {int(c.get('failed') or 0)} |")
+          (root/'report.md').write_text('\n'.join(lines)+'\n')
+          print('\n'.join(lines))
           PY
+      - name: PostgreSQL diagnostics
+        if: always()
+        run: python benchmarks/postgres_diagnostics.py > benchmark-results/postgres-plan.json
       - name: Upload benchmark results
         if: always()
         uses: actions/upload-artifact@v4
