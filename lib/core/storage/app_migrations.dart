@@ -2,10 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'car_tables.dart';
 
-Future<void> runAppMigrations(
-  Database db,
-  int oldVersion,
-) async {
+Future<void> runAppMigrations(Database db, int oldVersion) async {
   if (oldVersion < 2) await _migrateToVersion2(db);
   if (oldVersion < 3) await _migrateToVersion3(db);
   if (oldVersion < 4) await _migrateToVersion4(db);
@@ -17,6 +14,7 @@ Future<void> runAppMigrations(
   if (oldVersion < 10) await _migrateToVersion10(db);
   if (oldVersion < 11) await _migrateToVersion11(db);
   if (oldVersion < 12) await _migrateToVersion12(db);
+  if (oldVersion < 13) await _migrateToVersion13(db);
 }
 
 Future<void> _migrateToVersion2(Database db) async {
@@ -246,6 +244,88 @@ Future<void> _migrateToVersion12(Database db) async {
             (SELECT warehouse_name FROM car_trips WHERE car_trips.id = car_revisions.trip_id)
           )
     ''');
+  });
+}
+
+Future<void> _migrateToVersion13(Database db) async {
+  await db.transaction((txn) async {
+    if (await _tableExists(txn, 'invoice_revisions')) return;
+
+    await txn.execute('''
+      CREATE TABLE invoice_revisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id INTEGER NOT NULL,
+        revision_number INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        customer_id INTEGER NOT NULL,
+        customer_name TEXT NOT NULL,
+        subtotal REAL NOT NULL,
+        coupon_discount REAL NOT NULL,
+        total REAL NOT NULL,
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE RESTRICT,
+        UNIQUE(invoice_id, revision_number)
+      )
+    ''');
+    await txn.execute('CREATE INDEX idx_invoice_revisions_invoice_id ON invoice_revisions(invoice_id)');
+    await txn.execute('CREATE INDEX idx_invoice_revisions_created_at ON invoice_revisions(created_at)');
+
+    await txn.execute('''
+      CREATE TABLE invoice_revision_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        revision_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        quantity INTEGER NOT NULL CHECK (quantity >= 0),
+        unit_price REAL NOT NULL,
+        FOREIGN KEY (revision_id) REFERENCES invoice_revisions(id) ON DELETE CASCADE
+      )
+    ''');
+    await txn.execute('CREATE INDEX idx_invoice_revision_items_revision_id ON invoice_revision_items(revision_id)');
+
+    final invoices = await txn.rawQuery('''
+      SELECT i.id, i.customer_id, c.name AS customer_name,
+             i.created_at, i.subtotal, i.coupon_discount, i.total
+      FROM invoices i
+      INNER JOIN customers c ON c.id = i.customer_id
+    ''');
+
+    for (final invoice in invoices) {
+      final revisionId = await txn.insert('invoice_revisions', {
+        'invoice_id': invoice['id'],
+        'revision_number': 1,
+        'created_at': invoice['created_at'],
+        'customer_id': invoice['customer_id'],
+        'customer_name': invoice['customer_name'],
+        'subtotal': invoice['subtotal'],
+        'coupon_discount': invoice['coupon_discount'],
+        'total': invoice['total'],
+      });
+
+      final items = await txn.query(
+        'invoice_items',
+        where: 'invoice_id = ?',
+        whereArgs: [invoice['id']],
+        orderBy: 'id ASC',
+      );
+      for (final item in items) {
+        final productRows = await txn.query(
+          'products',
+          columns: ['name'],
+          where: 'id = ?',
+          whereArgs: [item['product_id']],
+          limit: 1,
+        );
+        if (productRows.isEmpty) continue;
+        await txn.insert('invoice_revision_items', {
+          'revision_id': revisionId,
+          'product_id': item['product_id'],
+          'product_name': productRows.first['name'],
+          'quantity': item['quantity'],
+          'unit_price': item['unit_price'],
+        });
+      }
+    }
   });
 }
 
