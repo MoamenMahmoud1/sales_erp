@@ -4,6 +4,7 @@ from rest_framework.pagination import Cursor, CursorPagination
 from rest_framework.response import Response
 
 from common.services.async_db_gate import db_slot
+from common.services.async_executor import run_sync
 from common.services.perf_timing import db_operation, view_stage
 
 
@@ -15,7 +16,7 @@ def _reverse_ordering(ordering):
 
 
 class AsyncCursorPagination(CursorPagination):
-    """Forward/backward cursor pagination with async queryset evaluation."""
+    """Cursor pagination with an explicit async benchmark executor."""
 
     page_size = 20
     page_size_query_param = "page_size"
@@ -24,9 +25,6 @@ class AsyncCursorPagination(CursorPagination):
     offset_cutoff = 1000
 
     def get_ordering(self, request, queryset, view=None):
-        # Keep cursor pagination on one unique, indexed ordering. The regular
-        # Product endpoint supports arbitrary OrderingFilter fields, but a
-        # cursor should remain stable and seekable.
         return (self.ordering,) if isinstance(self.ordering, str) else tuple(self.ordering)
 
     async def paginate_queryset(self, queryset, request, view=None):
@@ -44,8 +42,6 @@ class AsyncCursorPagination(CursorPagination):
         else:
             offset, reverse, current_position = self.cursor
 
-        # Query construction, cursor decoding, and filtering are local work and
-        # do not need a database slot. Keep the gate strictly around execution.
         with view_stage("view.pagination.cursor.prepare"):
             queryset = queryset.order_by(
                 *_reverse_ordering(self.ordering) if reverse else self.ordering
@@ -64,13 +60,11 @@ class AsyncCursorPagination(CursorPagination):
         with view_stage("view.pagination.cursor.fetch"):
             async with db_slot():
                 with db_operation():
-                    results = [
-                        obj
-                        async for obj in queryset[offset : offset + self.page_size + 1]
-                    ]
+                    def fetch_objects():
+                        return list(queryset[offset : offset + self.page_size + 1])
 
-        # Cursor metadata is pure Python and should never occupy an admission
-        # slot while the request is heading toward serialization.
+                    results = await run_sync(fetch_objects)
+
         with view_stage("view.pagination.cursor.page_object"):
             self.page = results[: self.page_size]
             self.has_following_position = len(results) > len(self.page)
