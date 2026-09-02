@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""True end-to-end HTTP benchmark with per-request queue and server timings."""
+"""End-to-end HTTP benchmark with per-request queue and server timings."""
 
 from __future__ import annotations
 
@@ -59,11 +59,15 @@ async def run_requests(
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     results: list[dict[str, object]] = []
     server_results: list[dict[str, object]] = []
-    queue = asyncio.Queue[int]()
-    for index in range(requests):
-        await queue.put(index)
+    queue: asyncio.Queue[tuple[int, float]] = asyncio.Queue()
 
     batch_started = time.perf_counter()
+    for index in range(requests):
+        # All logical requests are considered enqueued at batch start. This
+        # makes queue_wait_ms a real client-side load-generator wait, rather
+        # than the time between a worker polling the queue and dispatching.
+        await queue.put((index, batch_started))
+
     limits = httpx.Limits(
         max_connections=concurrency,
         max_keepalive_connections=concurrency,
@@ -79,17 +83,16 @@ async def run_requests(
         async def worker(worker_id: int) -> None:
             while True:
                 try:
-                    index = queue.get_nowait()
+                    index, enqueued_at = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     return
 
-                queued_at = time.perf_counter()
                 request_started = time.perf_counter()
-                queue_wait_ms = (request_started - batch_started) * 1000
+                queue_wait_ms = (request_started - enqueued_at) * 1000
                 row: dict[str, object] = {
                     "request_index": index,
                     "worker_id": worker_id,
-                    "queued_at_offset_ms": (queued_at - batch_started) * 1000,
+                    "enqueue_offset_ms": (enqueued_at - batch_started) * 1000,
                     "request_start_offset_ms": (request_started - batch_started) * 1000,
                     "queue_wait_ms": queue_wait_ms,
                 }
@@ -104,11 +107,11 @@ async def run_requests(
                     )
                     response.read()
                     finished = time.perf_counter()
-                    wire_ms = (finished - request_started) * 1000
+                    request_wire_ms = (finished - request_started) * 1000
                     row.update(
                         {
                             "status_code": response.status_code,
-                            "request_wire_ms": wire_ms,
+                            "request_wire_ms": request_wire_ms,
                             "request_end_offset_ms": (finished - batch_started) * 1000,
                             "server_total_ms": _header_float(response, "X-Perf-Total-ms"),
                             "server_app_ms": _header_float(response, "X-Perf-App-ms"),
@@ -183,22 +186,17 @@ def _extract_instrumentation(response: httpx.Response) -> dict[str, object]:
             if parsed is not None:
                 row[f"view.{key}"] = parsed
         elif lower.startswith("x-perf-sql-"):
+            parts = header_name.split("-")
             if lower.endswith("-total-ms"):
-                parts = header_name.split("-")
                 key = "-".join(parts[3:-2]).lower()
                 parsed = _safe_float(value)
                 if parsed is not None:
                     row[f"sql.{key}.total"] = parsed
             elif lower.endswith("-max-ms"):
-                parts = header_name.split("-")
                 key = "-".join(parts[3:-2]).lower()
                 parsed = _safe_float(value)
                 if parsed is not None:
                     row[f"sql.{key}.max"] = parsed
-            elif lower.endswith("-count"):
-                parts = header_name.split("-")
-                key = "-".join(parts[3:-1]).lower()
-                row[f"sql.{key}.count"] = int(value)
         elif lower.startswith("x-perf-fn-") and lower.endswith("-total-ms"):
             name = header_name[10:-9].replace("-", ".")
             parsed = _safe_float(value)
@@ -230,7 +228,7 @@ async def main() -> None:
     progress_every = env_int("BENCH_PROGRESS_EVERY", 0)
     benchmark_mode = os.getenv("BENCH_MODE", "unknown")
     pagination_mode = os.getenv("BENCH_PAGINATION", "page")
-    detail_path = Path(os.getenv("BENCH_DETAIL_PATH", "")) if os.getenv("BENCH_DETAIL_PATH") else None
+    detail_path = Path(os.environ["BENCH_DETAIL_PATH"]) if os.getenv("BENCH_DETAIL_PATH") else None
 
     if requests <= 0 or concurrency <= 0:
         raise SystemExit("BENCH_REQUESTS and BENCH_CONCURRENCY must be > 0")
@@ -246,7 +244,9 @@ async def main() -> None:
 
     request_rows.sort(key=lambda row: int(row["request_index"]))
     successful_rows = [
-        row for row in request_rows if isinstance(row.get("status_code"), int) and 200 <= row["status_code"] < 300
+        row
+        for row in request_rows
+        if isinstance(row.get("status_code"), int) and 200 <= row["status_code"] < 300
     ]
     latencies = [float(row["request_wire_ms"]) for row in successful_rows]
     queue_waits = [float(row["queue_wait_ms"]) for row in request_rows]
@@ -278,7 +278,7 @@ async def main() -> None:
         if row.get("app") is not None:
             instrumented += 1
 
-    stage_stats = {stage: summarize(values) for stage, values in stage_samples.items()}
+    stage_stats = {stage: summarize(values) for stage, values in sorted(stage_samples.items())}
     view_stage_stats = {stage: summarize(values) for stage, values in sorted(view_stage_samples.items())}
     sql_stats = {stage: summarize(values) for stage, values in sorted(sql_samples.items())}
     function_stats = {name: summarize(values) for name, values in sorted(function_samples.items())}
