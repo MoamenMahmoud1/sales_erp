@@ -4,11 +4,10 @@ import 'package:sqflite/sqflite.dart';
 import 'app_migrations.dart';
 import 'app_schema.dart';
 
-/// Single SQLite database for the entire application.
+/// The application's single SQLite database.
 ///
-/// Features own repositories/data sources, but database lifecycle, schema
-/// creation, migrations, foreign-key configuration and reset are centralized
-/// here.
+/// Feature modules may own repositories and data sources, but database
+/// lifecycle, migrations and fresh-install schema are centralized here.
 class AppDatabase {
   AppDatabase._();
 
@@ -22,8 +21,8 @@ class AppDatabase {
     final existing = _database;
     if (existing != null && existing.isOpen) return existing;
 
-    final opening = _opening;
-    if (opening != null) return opening;
+    final inFlight = _opening;
+    if (inFlight != null) return inFlight;
 
     final future = _open();
     _opening = future;
@@ -35,8 +34,8 @@ class AppDatabase {
   }
 
   static Future<Database> _open() async {
-    final databasePath = await getDatabasesPath();
-    final path = join(databasePath, databaseName);
+    final root = await getDatabasesPath();
+    final path = join(root, databaseName);
 
     final database = await openDatabase(
       path,
@@ -54,11 +53,11 @@ class AppDatabase {
   }
 
   static Future<void> _cleanupExpiredInvoiceChanges(Database db) async {
-    final tables = await db.rawQuery('''
+    final rows = await db.rawQuery('''
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name = 'invoice_changes'
     ''');
-    if (tables.isEmpty) return;
+    if (rows.isEmpty) return;
 
     await db.delete(
       'invoice_changes',
@@ -71,17 +70,17 @@ class AppDatabase {
     await _cleanupExpiredInvoiceChanges(await database);
   }
 
-  /// Development-only reset. Production flows should use explicit migrations.
+  /// Development-only reset. Normal application flows must use migrations.
   static Future<void> resetDatabase() async {
-    final databasePath = await getDatabasesPath();
-    final path = join(databasePath, databaseName);
-
+    final root = await getDatabasesPath();
+    final path = join(root, databaseName);
     final existing = _database;
+
     _database = null;
+    _opening = null;
     if (existing != null && existing.isOpen) {
       await existing.close();
     }
-    _opening = null;
     await deleteDatabase(path);
   }
 }
