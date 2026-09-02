@@ -21,7 +21,11 @@ DB_POOL_MAX_SIZE = config("DB_POOL_MAX_SIZE", default=12, cast=int)
 if DB_POOL_MIN_SIZE < 0 or DB_POOL_MAX_SIZE < 1 or DB_POOL_MIN_SIZE > DB_POOL_MAX_SIZE:
     raise ValueError("DB_POOL_MIN_SIZE and DB_POOL_MAX_SIZE are invalid")
 
-ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=8, cast=int)
+ASYNC_DB_CONCURRENCY = config(
+    "ASYNC_DB_CONCURRENCY",
+    default=max(0, min(8, DB_POOL_MAX_SIZE - 1)),
+    cast=int,
+)
 if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
     raise ValueError(
         "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
