@@ -20,8 +20,7 @@ class PerfTiming:
         self.db_operation_count = 0
         self.sql_samples: list[dict[str, object]] = []
         self.transaction_samples: list[dict[str, object]] = []
-        self.function_ns: dict[str, int] = {}
-        self.function_count: dict[str, int] = {}
+        self.function_samples: dict[str, list[float]] = defaultdict(list)
         self.serializer_wait_ns = 0
         self.serializer_cpu_ns = 0
         self.view_stage_ns: dict[str, int] = {}
@@ -71,19 +70,18 @@ class PerfTiming:
         return dict(grouped)
 
     def function_stats(self) -> dict[str, dict[str, float | int]]:
-        return {
-            name: {
-                "count": self.function_count[name],
-                "total_ms": self.as_ms(duration_ns),
-                "max_ms": self.as_ms(duration_ns),
+        output = {}
+        for name, samples in self.function_samples.items():
+            output[name] = {
+                "count": len(samples),
+                "total_ms": sum(samples),
+                "mean_ms": sum(samples) / len(samples),
+                "max_ms": max(samples),
             }
-            for name, duration_ns in self.function_ns.items()
-        }
+        return output
 
 
-_current: ContextVar[PerfTiming | None] = ContextVar(
-    "erp_perf_timing", default=None
-)
+_current: ContextVar[PerfTiming | None] = ContextVar("erp_perf_timing", default=None)
 _transaction_stack: ContextVar[tuple[int, ...]] = ContextVar(
     "erp_perf_transaction_stack", default=()
 )
@@ -141,8 +139,7 @@ def add_view_stage(name: str, ns: int) -> None:
 def add_function_time(name: str, ns: int) -> None:
     timing = current()
     if timing is not None:
-        timing.function_ns[name] = timing.function_ns.get(name, 0) + max(ns, 0)
-        timing.function_count[name] = timing.function_count.get(name, 0) + 1
+        timing.function_samples[name].append(ns / 1_000_000.0)
 
 
 def timed_function(name: str | None = None):
@@ -196,14 +193,12 @@ def _record_sql(sql, params, duration_ns: int) -> None:
     timing = current()
     if timing is None:
         return
-    timing.sql_samples.append(
-        {
-            "kind": _classify_sql(sql),
-            "duration_ms": duration_ns / 1_000_000.0,
-            "sql": " ".join(str(sql).split()),
-            "params_repr": repr(params),
-        }
-    )
+    timing.sql_samples.append({
+        "kind": _classify_sql(sql),
+        "duration_ms": duration_ns / 1_000_000.0,
+        "sql": " ".join(str(sql).split()),
+        "params_repr": repr(params),
+    })
 
 
 def _timed_execute(self, sql, params=None):
@@ -261,13 +256,11 @@ def _transaction_exit(self, exc_type, exc_value, traceback):
         timing = current()
         if timing is not None:
             depth = len(stack)
-            timing.transaction_samples.append(
-                {
-                    "kind": "transaction" if depth == 1 else "savepoint",
-                    "duration_ms": (time.perf_counter_ns() - started) / 1_000_000.0,
-                    "depth": depth,
-                }
-            )
+            timing.transaction_samples.append({
+                "kind": "transaction" if depth == 1 else "savepoint",
+                "duration_ms": (time.perf_counter_ns() - started) / 1_000_000.0,
+                "depth": depth,
+            })
 
 
 def install_transaction_instrumentation() -> None:
