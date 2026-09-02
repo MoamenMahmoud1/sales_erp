@@ -242,6 +242,24 @@ jobs:
           import json
           from pathlib import Path
           root = Path('benchmark-results')
+
+          def selected_capacity(mode):
+              selected = []
+              for pagination in ('page', 'cursor'):
+                  env_path = root / 'calibration' / mode / pagination / f'{mode}-cal-selected.env'
+                  for line in env_path.read_text().splitlines():
+                      if line.startswith('CAPACITY_PER_WORKER='):
+                          selected.append(int(line.split('=', 1)[1]))
+                          break
+                  else:
+                      raise RuntimeError(f'CAPACITY_PER_WORKER missing from {env_path}')
+              return min(selected)
+
+          capacities = {
+              'async': selected_capacity('async'),
+              'sync': selected_capacity('sync'),
+          }
+
           lines = ['# Sustainable Sync vs Async Capacity', '',
                    'DB pool is fixed at 8 connections/worker. Sync capacity is Gunicorn threads; Async capacity is DB admission gate.',
                    'Calibration uses 3 repeats at C=100. Pool p95 > 50 ms or any error makes a capacity unhealthy.', '',
@@ -250,7 +268,10 @@ jobs:
                    '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
           for p in sorted((root/'final').glob('*.json')):
               c=json.loads(p.read_text())
-              lines.append(f"| {c.get('mode','')} | {c.get('pagination','')} | {c.get('concurrency','')} | {c.get('concurrency','')} | {float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | {float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | {float(c.get('p99_ms') or 0):.2f} | {float(c.get('pool_wait_p95_ms') or 0):.2f} | {float(c.get('db_admission_p95_ms') or 0):.2f} | {int(c.get('failed') or 0)} |")
+              mode = c.get('mode', '')
+              client_concurrency = int(c.get('concurrency') or 0)
+              capacity = capacities[mode]
+              lines.append(f"| {mode} | {c.get('pagination','')} | {capacity} | {client_concurrency} | {float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | {float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | {float(c.get('p99_ms') or 0):.2f} | {float(c.get('pool_wait_p95_ms') or 0):.2f} | {float(c.get('db_admission_p95_ms') or 0):.2f} | {int(c.get('failed') or 0)} |")
           (root/'report.md').write_text('\n'.join(lines)+'\n')
           PY
           cat benchmark-results/report.md >> "$GITHUB_STEP_SUMMARY"
