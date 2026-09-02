@@ -2,25 +2,23 @@ import 'car_load_item.dart';
 import 'car_payment.dart';
 import 'car_trip_status.dart';
 
-/// An immutable snapshot of a car trip at a point in time.
+/// Immutable snapshot of a car trip at a point in time.
 ///
-/// Editing a trip or closing it does **not** overwrite history: a new
-/// [CarRevision] is created for every meaningful change. Because every field
-/// (items, quantities, prices, discounts, payments, status, display number)
-/// is stored, an old revision can be reproduced exactly — later product price
-/// or name edits can never mutate it.
+/// Every field required to reconstruct the historical transaction is frozen
+/// here. Future edits to the current car, warehouse, products, prices or
+/// discounts must never change an existing revision.
 class CarRevision {
   final int id;
   final int tripId;
   final String displayNumber;
-
-  /// Sequential revision number; 1 is the original, each edit increments it.
   final int revisionNumber;
-
   final DateTime createdAt;
-
-  /// Free-text cause/actor label when the source system supports it.
   final String? triggeredBy;
+
+  final int salesCarId;
+  final String salesCarName;
+  final int warehouseId;
+  final String warehouseName;
 
   final CarTripStatus status;
   final DateTime openedAt;
@@ -37,6 +35,10 @@ class CarRevision {
     required this.revisionNumber,
     required this.createdAt,
     this.triggeredBy,
+    required this.salesCarId,
+    required this.salesCarName,
+    required this.warehouseId,
+    required this.warehouseName,
     required this.status,
     required this.openedAt,
     this.closedAt,
