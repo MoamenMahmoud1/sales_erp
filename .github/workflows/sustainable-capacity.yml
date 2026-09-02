@@ -156,7 +156,11 @@ jobs:
             local url="http://127.0.0.1:8000/api/v1/products/?page_size=20"
             local out="benchmark-results/$phase/${mode}-w${workers}-d${d}-${pagination}-c${c}.json"
             set +e
-            timeout --signal=TERM --kill-after=1s 6s env \
+            # Do not cap a run at a fixed 6s: with C=1, 200 requests may need
+            # longer even when every individual request is healthy. The
+            # benchmark has its own per-request timeout and the job has a
+            # global 15-minute timeout.
+            timeout --signal=TERM --kill-after=5s 120s env \
               BENCH_MODE="$mode" BENCH_PAGINATION="$pagination" BENCH_URL="$url" BENCH_TOKEN="$TOKEN" \
               BENCH_CONCURRENCY="$c" BENCH_REQUESTS="$BENCH_REQUESTS" BENCH_WARMUP="$BENCH_WARMUP" BENCH_TIMEOUT="$BENCH_TIMEOUT" \
               BENCH_REQUIRE_INSTRUMENTATION="$require_instrumentation" python benchmarks/http_benchmark.py > "$out"
