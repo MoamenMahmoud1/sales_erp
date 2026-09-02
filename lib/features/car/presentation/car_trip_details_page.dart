@@ -68,9 +68,26 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
   }
 
   String _money(int minor) => 'EGP ${(minor / 100).toStringAsFixed(2)}';
+
   String _formatDate(DateTime value) {
     final local = value.toLocal();
     return '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year}';
+  }
+
+  String _tripTitle(DateTime value) {
+    final local = value.toLocal();
+    final today = DateTime.now();
+    final yesterday = today.subtract(const Duration(days: 1));
+    final formatted = _formatDate(value);
+    final isToday = local.year == today.year &&
+        local.month == today.month &&
+        local.day == today.day;
+    final isYesterday = local.year == yesterday.year &&
+        local.month == yesterday.month &&
+        local.day == yesterday.day;
+    if (isToday) return 'Today · $formatted';
+    if (isYesterday) return 'Yesterday · $formatted';
+    return formatted;
   }
 
   ({StatusType type, String label}) _status(CarTrip trip) {
@@ -95,12 +112,10 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
     final trip = _trip;
     if (_error != null || trip == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Car invoice')),
+        appBar: AppBar(title: const Text('Car trip')),
         body: EmptyState(
           icon: Icons.receipt_long_outlined,
-          title: _error == null
-              ? 'Car invoice not found'
-              : 'Unable to load Car invoice',
+          title: _error == null ? 'Car trip not found' : 'Unable to load Car trip',
           message: _error ?? 'This transaction is no longer available.',
           actionLabel: 'Retry',
           onAction: _load,
@@ -115,7 +130,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(trip.displayNumber),
+        title: Text(_tripTitle(trip.openedAt)),
         actions: [
           IconButton(
             tooltip: trip.isClosed ? 'Edit and create revision' : 'Edit draft',
@@ -129,7 +144,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
           children: [
-            _headerCard(trip, status),
+            _headerCard(trip, status, summary),
             const SizedBox(height: 12),
             _flowCard(summary),
             const SizedBox(height: 12),
@@ -160,8 +175,15 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
     );
   }
 
-  Widget _headerCard(CarTrip trip, ({StatusType type, String label}) status) {
+  Widget _headerCard(
+    CarTrip trip,
+    ({StatusType type, String label}) status,
+    dynamic summary,
+  ) {
     final scheme = Theme.of(context).colorScheme;
+    final productNames = summary.items
+        .map((line) => line.item.productName as String)
+        .join(', ');
     return AppCard(
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -187,7 +209,9 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      trip.displayNumber,
+                      _tripTitle(trip.openedAt),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w900,
@@ -196,14 +220,33 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                     const SizedBox(height: 4),
                     Text(
                       '${trip.salesCarName} · ${trip.warehouseName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
               StatusBadge(type: status.type, label: status.label),
             ],
           ),
+          if (productNames.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Loaded: $productNames',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
@@ -228,19 +271,21 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
   }
 
   Widget _info(String label, String value) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        label,
-        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
-      ),
-      const SizedBox(height: 3),
-      Text(
-        value,
-        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
-      ),
-    ],
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+          ),
+        ],
+      );
 
   Widget _flowCard(dynamic summary) {
     final scheme = Theme.of(context).colorScheme;
@@ -255,26 +300,11 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
           const SizedBox(height: 12),
           Row(
             children: [
-              _flowMetric(
-                'Loaded',
-                summary.totalLoadedCartons,
-                Icons.outbox_rounded,
-                scheme.primary,
-              ),
+              _flowMetric('Loaded', summary.totalLoadedCartons, Icons.outbox_rounded, scheme.primary),
               const Icon(Icons.arrow_forward_rounded, size: 18),
-              _flowMetric(
-                'Returned',
-                summary.totalReturnedCartons,
-                Icons.assignment_return_rounded,
-                scheme.error,
-              ),
+              _flowMetric('Returned', summary.totalReturnedCartons, Icons.assignment_return_rounded, scheme.error),
               const Icon(Icons.arrow_forward_rounded, size: 18),
-              _flowMetric(
-                'Sold',
-                summary.totalSoldCartons,
-                Icons.point_of_sale_rounded,
-                scheme.primary,
-              ),
+              _flowMetric('Sold', summary.totalSoldCartons, Icons.point_of_sale_rounded, scheme.primary),
             ],
           ),
         ],
@@ -329,10 +359,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                       ),
                       Text(
                         _money(line.netValue.minorUnits),
-                        style: TextStyle(
-                          color: scheme.primary,
-                          fontWeight: FontWeight.w900,
-                        ),
+                        style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w900),
                       ),
                     ],
                   ),
@@ -342,18 +369,12 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                       Expanded(
                         child: Text(
                           '${line.item.loadedCartons} loaded · ${line.item.returnedCartons} returned · ${line.soldCartons} sold',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: scheme.onSurfaceVariant,
-                          ),
+                          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                         ),
                       ),
                       Text(
                         '${line.item.discountPercent.toStringAsFixed(2)}% off',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: scheme.onSurfaceVariant,
-                        ),
+                        style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                       ),
                     ],
                   ),
@@ -363,16 +384,14 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                     children: [
                       Text(
                         '${_money(line.item.unitPrice.minorUnits)} / carton',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: scheme.onSurfaceVariant,
-                        ),
+                        style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                       ),
-                      Text(
-                        'Gross ${_money(line.grossValue.minorUnits)} · Discount ${_money(line.discountAmount.minorUnits)}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: scheme.onSurfaceVariant,
+                      Flexible(
+                        child: Text(
+                          'Gross ${_money(line.grossValue.minorUnits)} · Discount ${_money(line.discountAmount.minorUnits)}',
+                          textAlign: TextAlign.end,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                         ),
                       ),
                     ],
@@ -387,38 +406,30 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
   }
 
   Widget _financialCard(dynamic summary) => AppCard(
-    child: Column(
-      children: [
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            'Financial summary',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-          ),
+        child: Column(
+          children: [
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Financial summary',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+              ),
+            ),
+            const SizedBox(height: 10),
+            _amountRow('Gross sold value', summary.grossSubtotal),
+            _amountRow('Product discounts', summary.productDiscountTotal),
+            _amountRow('After product discounts', summary.subtotalAfterProducts),
+            _amountRow(
+              'Global discount (${summary.globalDiscountPercent.toStringAsFixed(2)}%)',
+              summary.globalDiscountAmount,
+            ),
+            const Divider(height: 22),
+            _amountRow('Actual sold value', summary.finalTotalSoldValue, strong: true),
+          ],
         ),
-        const SizedBox(height: 10),
-        _amountRow('Gross sold value', summary.grossSubtotal),
-        _amountRow('Product discounts', summary.productDiscountTotal),
-        _amountRow('After product discounts', summary.subtotalAfterProducts),
-        _amountRow(
-          'Global discount (${summary.globalDiscountPercent.toStringAsFixed(2)}%)',
-          summary.globalDiscountAmount,
-        ),
-        const Divider(height: 22),
-        _amountRow(
-          'Actual sold value',
-          summary.finalTotalSoldValue,
-          strong: true,
-        ),
-      ],
-    ),
-  );
+      );
 
-  Widget _paymentCard(
-    CarTrip trip,
-    dynamic remaining,
-    CarPaymentStatus status,
-  ) {
+  Widget _paymentCard(CarTrip trip, dynamic remaining, CarPaymentStatus status) {
     final scheme = Theme.of(context).colorScheme;
     final statusLabel = switch (status) {
       CarPaymentStatus.paid => 'Paid',
@@ -455,9 +466,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: _info('Paid', _money(trip.payment.totalPaid.minorUnits)),
-              ),
+              Expanded(child: _info('Paid', _money(trip.payment.totalPaid.minorUnits))),
               Expanded(child: _info('Remaining', _money(remaining.minorUnits))),
             ],
           ),
@@ -465,10 +474,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
             const SizedBox(height: 10),
             Text(
               '$days days overdue',
-              style: TextStyle(
-                color: scheme.error,
-                fontWeight: FontWeight.w800,
-              ),
+              style: TextStyle(color: scheme.error, fontWeight: FontWeight.w800),
             ),
           ],
         ],
@@ -477,38 +483,38 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
   }
 
   Widget _revisionCard(List<dynamic> revisions) => AppCard(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Revision history',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 8),
-        if (revisions.isEmpty)
-          const Text('No revisions recorded yet.')
-        else
-          for (final revision in revisions.reversed)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: CircleAvatar(child: Text('${revision.revisionNumber}')),
-              title: Text(
-                'Revision ${revision.revisionNumber}',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              subtitle: Text(
-                '${_formatDate(revision.createdAt)} · ${revision.salesCarName} · ${revision.warehouseName}',
-              ),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => CarRevisionDetailsPage(revision: revision),
-                ),
-              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Revision history',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
             ),
-      ],
-    ),
-  );
+            const SizedBox(height: 8),
+            if (revisions.isEmpty)
+              const Text('No revisions recorded yet.')
+            else
+              for (final revision in revisions.reversed)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: CircleAvatar(child: Text('${revision.revisionNumber}')),
+                  title: Text(
+                    'Revision ${revision.revisionNumber}',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    '${_formatDate(revision.createdAt)} · ${revision.salesCarName} · ${revision.warehouseName}',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => CarRevisionDetailsPage(revision: revision),
+                    ),
+                  ),
+                ),
+          ],
+        ),
+      );
 
   Widget _amountRow(String label, dynamic amount, {bool strong = false}) =>
       Padding(
@@ -516,12 +522,15 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: strong ? FontWeight.w800 : FontWeight.w500,
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: strong ? FontWeight.w800 : FontWeight.w500),
               ),
             ),
+            const SizedBox(width: 10),
             Text(
               _money(amount.minorUnits),
               style: TextStyle(
@@ -533,4 +542,3 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
         ),
       );
 }
-
