@@ -25,7 +25,7 @@ void main() {
       warehouseName: 'Warehouse',
       openedAt: DateTime(2026, 1, openedDay),
       status: status,
-      payment: CarPaymentForTest.fromTotals(paid),
+      payment: CarPayment(cashAmount: paid),
       items: [
         CarLoadItem(
           productId: id,
@@ -45,8 +45,6 @@ void main() {
       createdAt: DateTime(2026, 1, 3),
     );
 
-    // Unit-price values above are already minor units. The payment therefore
-    // covers the two trip totals exactly.
     final plan = allocator.allocate(
       transaction: transaction,
       trips: [second, first],
@@ -82,7 +80,7 @@ void main() {
     expect(plan.allocations.single.tripId, 2);
   });
 
-  test('reports remaining amount when payment is insufficient', () {
+  test('reports payment as fully allocated when it covers part of an invoice', () {
     final first = trip(id: 1, openedDay: 1, value: 5000);
     final transaction = CarPaymentTransaction(
       cashAmount: CarMoney(3000),
@@ -95,16 +93,8 @@ void main() {
     );
 
     expect(plan.isFullyAllocated, isTrue);
+    expect(plan.unallocated, CarMoney.zero);
     expect(plan.allocations.single.totalAmount, const CarMoney(3000));
+    expect(plan.updatedTrips.single.payment.totalPaid, const CarMoney(3000));
   });
-}
-
-/// Test-only helper so payment construction remains explicit while the Car
-/// domain keeps its production payment model unchanged.
-class CarPaymentForTest {
-  const CarPaymentForTest._();
-
-  static dynamic fromTotals(CarMoney paid) {
-    throw UnimplementedError('Replaced by a generated fixture at test compile time.');
-  }
 }
