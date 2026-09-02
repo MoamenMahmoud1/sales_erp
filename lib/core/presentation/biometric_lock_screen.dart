@@ -91,13 +91,10 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || _autoAttemptStarted || methods.isEmpty) return;
     _autoAttemptStarted = true;
-    await _attempt(preferred, automatic: true);
+    await _attempt(preferred);
   }
 
-  Future<void> _attempt(
-    _AuthMethod method, {
-    bool automatic = false,
-  }) async {
+  Future<void> _attempt(_AuthMethod method) async {
     if (!mounted || _attemptInFlight) return;
     _attemptInFlight = true;
     setState(() {
@@ -108,11 +105,24 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
         ..value = 0;
     });
 
-    final result = method == _AuthMethod.deviceCredential
-        ? await widget.auth.authenticateDeviceCredential()
-        : await widget.auth.authenticateBiometric();
+    final result = switch (method) {
+      _AuthMethod.face => await widget.auth.authenticateBiometric(
+          method: BiometricMethod.face,
+        ),
+      _AuthMethod.fingerprint => await widget.auth.authenticateBiometric(
+          method: BiometricMethod.fingerprint,
+        ),
+      _AuthMethod.biometric => await widget.auth.authenticateBiometric(
+          method: BiometricMethod.generic,
+        ),
+      _AuthMethod.deviceCredential =>
+          await widget.auth.authenticateDeviceCredential(),
+    };
 
-    if (!mounted) return;
+    if (!mounted) {
+      _attemptInFlight = false;
+      return;
+    }
 
     if (result == BiometricResult.success) {
       setState(() => _phase = _AuthPhase.success);
@@ -158,18 +168,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     }
   }
 
-  IconData get _methodIcon {
-    switch (_method) {
-      case _AuthMethod.face:
-        return Icons.face_retouching_natural_rounded;
-      case _AuthMethod.fingerprint:
-        return Icons.fingerprint_rounded;
-      case _AuthMethod.biometric:
-        return Icons.fingerprint_rounded;
-      case _AuthMethod.deviceCredential:
-        return Icons.lock_rounded;
-    }
-  }
+  IconData get _methodIcon => _methodIconFor(_method);
 
   String _methodLabel(_AuthMethod method) {
     switch (method) {
@@ -290,7 +289,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     );
   }
 
-  Widget _methodSelector(ColorScheme scheme) {
+  Widget _methodSelector() {
     final methods = _methods;
     if (methods.length <= 1 || _phase == _AuthPhase.success) {
       return const SizedBox.shrink();
@@ -373,7 +372,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                       ),
                     ),
                     const SizedBox(height: 20),
-                    _methodSelector(scheme),
+                    _methodSelector(),
                     const SizedBox(height: 20),
                     if (!isSuccess)
                       FilledButton.icon(
