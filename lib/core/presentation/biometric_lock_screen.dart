@@ -207,16 +207,10 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                         progress: _scanController.value,
                         phase: _phase,
                         child: child ??
-                            Image.asset(
-                              'assets/images/sales_erp_logo.png',
-                              width: 92,
-                              height: 92,
-                              fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) => Icon(
-                                Icons.fingerprint_rounded,
-                                size: 92,
-                                color: colors.textPrimary,
-                              ),
+                            Icon(
+                              Icons.fingerprint_rounded,
+                              size: 92,
+                              color: colors.textPrimary,
                             ),
                       ),
                     ),

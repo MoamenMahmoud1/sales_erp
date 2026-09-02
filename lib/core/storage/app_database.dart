@@ -1,6 +1,8 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
+import 'car_tables.dart';
+
 class AppDatabase {
   static Database? _database;
 
@@ -19,7 +21,7 @@ class AppDatabase {
 
     _database = await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onConfigure: (database) async {
         await database.execute(
           'PRAGMA foreign_keys = ON',
@@ -86,6 +88,12 @@ class AppDatabase {
 
         if (oldVersion < 10) {
           await _migrateToVersion10(
+            database,
+          );
+        }
+
+        if (oldVersion < 11) {
+          await _migrateToVersion11(
             database,
           );
         }
@@ -339,6 +347,12 @@ class AppDatabase {
       CREATE INDEX idx_payments_status
       ON payments(status)
     ''');
+
+    // CAR FEATURE
+
+    await createCarTables(
+      database,
+    );
   }
 
   // ============================================================
@@ -797,6 +811,20 @@ class AppDatabase {
                 0
               )
         ''');
+      },
+    );
+  }
+
+  // ============================================================
+  // MIGRATION 11 - CAR FEATURE
+  // ============================================================
+
+  static Future<void> _migrateToVersion11(
+    Database database,
+  ) async {
+    await database.transaction(
+      (txn) async {
+        await createCarTables(txn);
       },
     );
   }

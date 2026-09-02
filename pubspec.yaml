@@ -38,7 +38,6 @@ flutter:
 
   assets:
     - assets/logo/app_logo.jpeg
-    - assets/images/sales_erp_logo.png
 
 flutter_launcher_icons:
   android: true
