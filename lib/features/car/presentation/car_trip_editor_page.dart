@@ -9,7 +9,6 @@ import '../application/usecases/confirm_car_trip.dart';
 import '../application/usecases/create_car_trip.dart';
 import '../application/usecases/revise_car_trip.dart';
 import '../application/usecases/update_car_trip_draft.dart';
-import '../domain/entities/car_financial_summary.dart';
 import '../domain/entities/car_load_item.dart';
 import '../domain/entities/car_trip.dart';
 import '../domain/entities/money.dart';
@@ -217,11 +216,11 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       await Navigator.of(context).push(
         PageRouteBuilder(
           opaque: true,
-          pageBuilder: (_, __, ___) => CarClosingAnimation(
+          pageBuilder: (_, _, _) => CarClosingAnimation(
             displayNumber: persisted.displayNumber,
             summary: summary,
           ),
-          transitionsBuilder: (_, animation, __, child) => FadeTransition(opacity: animation, child: child),
+          transitionsBuilder: (_, animation, _, child) => FadeTransition(opacity: animation, child: child),
           transitionDuration: const Duration(milliseconds: 180),
         ),
       );
@@ -443,7 +442,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
 
   Widget _dropdown<T>({required String label, required T? value, required List<T> items, required String Function(T) labelOf, required ValueChanged<T?> onChanged}) =>
       DropdownButtonFormField<T>(
-        value: value,
+        initialValue: value,
         isExpanded: true,
         decoration: InputDecoration(labelText: label, border: OutlineInputBorder(borderRadius: AppRadius.lgAll)),
         items: [for (final item in items) DropdownMenuItem<T>(value: item, child: Text(labelOf(item), overflow: TextOverflow.ellipsis))],

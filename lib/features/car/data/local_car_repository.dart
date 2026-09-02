@@ -247,7 +247,11 @@ class LocalCarRepository implements CarRepository {
       finalValue += view.finalValue.minorUnits;
       paid += view.paidTotal.minorUnits;
       remaining += view.remaining.minorUnits;
-      if (view.status.value == 'closed') closedCount++; else openCount++;
+      if (view.status.value == 'closed') {
+        closedCount++;
+      } else {
+        openCount++;
+      }
       switch (view.paymentStatus(_evaluator, now)) {
         case CarPaymentStatus.paid:
           paidCount++;

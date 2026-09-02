@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:sales_erp/features/car/domain/entities/car_payment_transaction.dart';
 import 'package:sales_erp/features/car/domain/entities/car_trip.dart';
-import 'package:sales_erp/features/car/domain/entities/car_trip_status.dart';
 import 'package:sales_erp/features/car/domain/entities/car_load_item.dart';
 import 'package:sales_erp/features/car/domain/entities/money.dart';
 import 'package:sales_erp/features/car/domain/services/car_payment_allocator.dart';

@@ -71,7 +71,7 @@ class _PaymentDistributionAnimationState
     final scheme = Theme.of(context).colorScheme;
     final visible = (widget.allocations.length * _flow.value)
         .ceil()
-        .clamp(0, widget.allocations.length) as int;
+        .clamp(0, widget.allocations.length);
 
     return Material(
       color: scheme.surface,

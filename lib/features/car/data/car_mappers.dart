@@ -1,11 +1,9 @@
 import '../domain/entities/car_financial_summary.dart';
 import '../domain/entities/car_load_item.dart';
-import '../domain/entities/car_payment.dart';
 import '../domain/entities/car_payment_allocation.dart';
 import '../domain/entities/car_payment_transaction.dart';
 import '../domain/entities/car_revision.dart';
 import '../domain/entities/car_trip.dart';
-import '../domain/entities/car_trip_status.dart';
 import '../domain/entities/car_trip_summary_view.dart';
 import '../domain/entities/money.dart';
 import '../domain/entities/sales_car.dart';
