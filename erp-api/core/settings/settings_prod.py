@@ -14,21 +14,21 @@ CSRF_TRUSTED_ORIGINS = config(
 )
 
 # PostgreSQL production pooling.
-# Keep a small, explicit per-worker pool. The benchmarked async API path uses
-# a separate admission limit below, so application concurrency cannot turn
-# directly into unbounded database connection contention.
+# Keep a small, explicit per-worker pool. The async API uses a matching
+# admission limit so DB-bound application work does not queue again inside
+# the connection pool under normal operation.
 DB_POOL_MIN_SIZE = config("DB_POOL_MIN_SIZE", default=2, cast=int)
 DB_POOL_MAX_SIZE = config("DB_POOL_MAX_SIZE", default=8, cast=int)
 if DB_POOL_MIN_SIZE < 0 or DB_POOL_MAX_SIZE < 1 or DB_POOL_MIN_SIZE > DB_POOL_MAX_SIZE:
     raise ValueError("DB_POOL_MIN_SIZE and DB_POOL_MAX_SIZE are invalid")
 
-# Evidence-backed default from the C50/C100 benchmark matrix: gate=4 had the
-# best p95/p99 tail among the tested admission limits while preserving high
-# successful throughput. Keep the gate strictly below the pool size.
+# Admission and pool are intentionally allowed to be equal. When they match,
+# the application admission layer is the primary queue and the DB pool is the
+# execution resource rather than a second hidden queue.
 ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=4, cast=int)
-if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
+if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY > DB_POOL_MAX_SIZE:
     raise ValueError(
-        "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
+        "ASYNC_DB_CONCURRENCY must be between 0 and DB_POOL_MAX_SIZE"
     )
 
 # Fail fast when a DB-bound request has been queued behind the application
