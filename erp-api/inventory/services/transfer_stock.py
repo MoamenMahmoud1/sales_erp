@@ -40,7 +40,10 @@ class TransferStockService:
             reference=reference,
         )
 
-        for item in items:
+        # Lock source/destination StockBalance rows in deterministic product
+        # order. The whole transfer already runs in one outer transaction, so
+        # use the non-savepoint stock primitives inside it.
+        for item in sorted(items, key=lambda value: value["product"].pk):
             product = item["product"]
             quantity = item["quantity"]
 
@@ -49,13 +52,13 @@ class TransferStockService:
                     "Quantity must be greater than zero."
                 )
 
-            StockBalanceService.decrease(
+            StockBalanceService.decrease_in_transaction(
                 location=source,
                 product=product,
                 quantity=quantity,
             )
 
-            StockBalanceService.increase(
+            StockBalanceService.increase_in_transaction(
                 location=destination,
                 product=product,
                 quantity=quantity,
