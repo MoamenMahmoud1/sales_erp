@@ -23,6 +23,11 @@ if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
         "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
     )
 
-# Keep instrumentation enabled for stage-level diagnosis. Production defaults
-# remain disabled through settings_base.py unless explicitly enabled.
-PERF_TIMING_ENABLED = True
+# Calibration/diagnostic runs enable stage instrumentation; clean performance
+# runs disable it so SQL sampling and response headers cannot inflate latency.
+PERF_TIMING_ENABLED = os.getenv("PERF_TIMING_ENABLED", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
