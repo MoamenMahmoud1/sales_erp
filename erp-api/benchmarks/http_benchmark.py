@@ -230,7 +230,9 @@ async def main() -> None:
     benchmark_mode = os.getenv("BENCH_MODE", "unknown")
     pagination_mode = os.getenv("BENCH_PAGINATION", "page")
     detail_path = Path(os.environ["BENCH_DETAIL_PATH"]) if os.getenv("BENCH_DETAIL_PATH") else None
-    require_instrumentation = env_bool("BENCH_REQUIRE_INSTRUMENTATION", True)
+    # Calibration/diagnostic passes explicitly require instrumentation; clean
+    # final performance passes deliberately do not.
+    require_instrumentation = env_bool("BENCH_REQUIRE_INSTRUMENTATION", False)
 
     if requests <= 0 or concurrency <= 0:
         raise SystemExit("BENCH_REQUESTS and BENCH_CONCURRENCY must be > 0")
