@@ -11,6 +11,7 @@ from common.permissions import ReadAuthenticatedWriteStaffPermission
 from common.services.perf_timing import add_serializer_cpu, db_operation, timed_function, view_stage
 from products.api.serializers import CartonPricingSerializer, ProductSerializer
 from products.models import CartonPricing
+from products.services import cache as product_cache
 from products.services.metrics import ProductMetricsQueryService
 
 
@@ -45,6 +46,14 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @timed_function("ProductViewSet.list")
     def list(self, request, *args, **kwargs):
+        cache_key = product_cache.make_key(request.path, request.query_params)
+        if product_cache.enabled():
+            with view_stage("view.redis.cache.get"):
+                cached = product_cache.get_sync(cache_key)
+            if cached is not None:
+                with view_stage("view.redis.cache.hit"):
+                    return Response(cached, status=200)
+
         with view_stage("view.total"):
             with view_stage("view.queryset.build"):
                 queryset = self.filter_queryset(self.get_queryset())
@@ -62,7 +71,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                     finally:
                         add_serializer_cpu(time.perf_counter_ns() - started)
                 with view_stage("view.response.paginated"):
-                    return self.get_paginated_response(data)
+                    response = self.get_paginated_response(data)
+                if product_cache.enabled() and response.status_code == 200:
+                    with view_stage("view.redis.cache.set"):
+                        product_cache.set_sync(cache_key, response.data)
+                return response
 
             with view_stage("view.serializer.instantiate"):
                 serializer = self.get_serializer(queryset, many=True)
@@ -73,7 +86,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                 finally:
                     add_serializer_cpu(time.perf_counter_ns() - started)
             with view_stage("view.response.unpaginated"):
-                return Response(data, status=200)
+                response = Response(data, status=200)
+            if product_cache.enabled():
+                with view_stage("view.redis.cache.set"):
+                    product_cache.set_sync(cache_key, response.data)
+            return response
 
     @timed_function("ProductViewSet.get_queryset")
     def get_queryset(self):
