@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param, replace_query_param
 
 from common.services.async_db_gate import db_slot
+from common.services.async_executor import run_sync
 from common.services.perf_timing import db_operation, view_stage
 
 
@@ -45,7 +46,7 @@ class AsyncPage:
 
 
 class AsyncStandardPagination(PageNumberPagination):
-    """Page-number pagination without Django's synchronous Paginator path."""
+    """Page-number pagination with an explicit async benchmark executor."""
 
     page_size = 20
     page_size_query_param = "page_size"
@@ -60,12 +61,13 @@ class AsyncStandardPagination(PageNumberPagination):
                 return None
             raw_page = request.query_params.get(self.page_query_param) or "1"
 
-        # Admission covers only the actual COUNT query. Page math does not
-        # consume a DB slot, so it must never hold the gate.
+        # The benchmark executor bounds the actual blocking ORM workers while
+        # the admission gate bounds active DB operations. Production keeps the
+        # normal Django async ORM path when ASYNC_BENCH_THREADS is unset.
         with view_stage("view.pagination.count"):
             async with db_slot():
                 with db_operation():
-                    count = await queryset.acount()
+                    count = await run_sync(queryset.count)
 
         with view_stage("view.pagination.page_math"):
             num_pages = math.ceil(count / page_size) if count else 1
@@ -90,12 +92,10 @@ class AsyncStandardPagination(PageNumberPagination):
             start = (page_number - 1) * page_size
             queryset_slice = queryset[start : start + page_size]
 
-        # The admission slot ends as soon as the result set is materialized.
-        # Serializer construction and page metadata run outside the DB gate.
         with view_stage("view.pagination.fetch"):
             async with db_slot():
                 with db_operation():
-                    objects = [obj async for obj in queryset_slice]
+                    objects = await run_sync(list, queryset_slice)
 
         with view_stage("view.pagination.page_object"):
             self.page = AsyncPage(objects, page_number, count, page_size)
