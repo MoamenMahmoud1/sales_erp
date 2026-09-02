@@ -14,10 +14,14 @@ enum AppStatus { locked, unlocked }
 class AppLockController extends ChangeNotifier with WidgetsBindingObserver {
   static const Duration inactivityTimeout = Duration(minutes: 5);
 
+  final DateTime Function() _now;
+
   AppStatus _status = AppStatus.locked;
   bool _initialized = false;
   DateTime? _lastActivity;
   Timer? _inactivityTimer;
+
+  AppLockController({DateTime Function()? now}) : _now = now ?? DateTime.now;
 
   AppStatus get status => _status;
   bool get isLocked => _status == AppStatus.locked;
@@ -41,37 +45,45 @@ class AppLockController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> unlock() async {
     if (!_initialized) await init();
     if (_status == AppStatus.unlocked) {
-      _recordActivity(now: DateTime.now());
+      recordActivity();
       return;
     }
 
     _status = AppStatus.unlocked;
-    _recordActivity(now: DateTime.now());
+    recordActivity();
     notifyListeners();
   }
 
-  /// Records meaningful app usage. While unlocked this resets the five-minute
-  /// inactivity deadline. Calls while locked are intentionally ignored.
-  void recordActivity({DateTime? now}) {
+  /// Records meaningful app usage and resets the five-minute idle deadline.
+  void recordActivity() {
     if (_status != AppStatus.unlocked) return;
-    _recordActivity(now: now ?? DateTime.now());
-  }
-
-  void _recordActivity({required DateTime now}) {
+    final now = _now();
     _lastActivity = now;
     _scheduleInactivityCheck(now);
   }
 
   void _scheduleInactivityCheck(DateTime now) {
     _inactivityTimer?.cancel();
-    final elapsed = now.difference(_lastActivity ?? now);
-    final remaining = inactivityTimeout - elapsed;
+    final deadline = now.add(inactivityTimeout);
+    final delay = deadline.difference(_now());
     _inactivityTimer = Timer(
-      remaining.isNegative || remaining == Duration.zero
-          ? Duration.zero
-          : remaining,
-      _lockForInactivity,
+      delay.isNegative || delay == Duration.zero ? Duration.zero : delay,
+      _handleInactivityTimer,
     );
+  }
+
+  void _handleInactivityTimer() {
+    if (_status != AppStatus.unlocked) return;
+    final last = _lastActivity;
+    if (last == null) return;
+
+    final elapsed = _now().difference(last);
+    if (elapsed >= inactivityTimeout) {
+      _lockForInactivity();
+      return;
+    }
+
+    _scheduleInactivityCheck(last);
   }
 
   void _lockForInactivity() {
@@ -101,12 +113,12 @@ class AppLockController extends ChangeNotifier with WidgetsBindingObserver {
 
     final last = _lastActivity;
     if (last == null) return;
-    if (DateTime.now().difference(last) >= inactivityTimeout) {
-      _lockForInactivity();
-      return;
-    }
 
-    _scheduleInactivityCheck(DateTime.now());
+    if (_now().difference(last) >= inactivityTimeout) {
+      _lockForInactivity();
+    } else {
+      _scheduleInactivityCheck(last);
+    }
   }
 
   @override
