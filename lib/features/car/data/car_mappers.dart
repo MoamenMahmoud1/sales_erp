@@ -89,6 +89,7 @@ class CarMappers {
         'final_total_value_minor': summary.finalTotalSoldValue.minorUnits,
         'total_loaded_cartons': summary.totalLoadedCartons,
         'total_returned_cartons': summary.totalReturnedCartons,
+        'total_returned_value_minor': summary.totalReturnedValue.minorUnits,
         'total_sold_cartons': summary.totalSoldCartons,
         'paid_cash_minor': trip.payment.cashAmount.minorUnits,
         'paid_transfer_minor': trip.payment.transferAmount.minorUnits,
@@ -131,6 +132,8 @@ class CarMappers {
         totalLoadedCartons: (row['total_loaded_cartons'] as num).toInt(),
         totalReturnedCartons: (row['total_returned_cartons'] as num).toInt(),
         totalSoldCartons: (row['total_sold_cartons'] as num).toInt(),
+        totalReturnedValue:
+            CarMoney((row['total_returned_value_minor'] as num?)?.toInt() ?? 0),
         grossSubtotal: CarMoney((row['gross_subtotal_minor'] as num).toInt()),
         productDiscountTotal:
             CarMoney((row['product_discount_total_minor'] as num).toInt()),
@@ -167,6 +170,7 @@ class CarMappers {
       'final_total_value_minor': summary.finalTotalSoldValue.minorUnits,
       'total_loaded_cartons': summary.totalLoadedCartons,
       'total_returned_cartons': summary.totalReturnedCartons,
+      'total_returned_value_minor': summary.totalReturnedValue.minorUnits,
       'total_sold_cartons': summary.totalSoldCartons,
       'paid_cash_minor': revision.payment.cashAmount.minorUnits,
       'paid_transfer_minor': revision.payment.transferAmount.minorUnits,
@@ -245,8 +249,7 @@ class CarMappers {
         transactionId: row['payment_transaction_id'] as int,
         tripId: row['trip_id'] as int,
         cashAmount: CarMoney((row['cash_amount_minor'] as num).toInt()),
-        transferAmount:
-            CarMoney((row['transfer_amount_minor'] as num).toInt()),
+        transferAmount: CarMoney((row['transfer_amount_minor'] as num).toInt()),
       );
 
   CarTrip _revisionAsTrip(CarRevision revision) => CarTrip(
