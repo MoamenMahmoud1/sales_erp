@@ -117,7 +117,16 @@ jobs:
           SYNC_D_VALUES=(1 2 4 6 8 10)
           ASYNC_D_VALUES=(2 4 6 8 10)
           CLIENT_CONCURRENCIES=(1 10 25 50 100 150)
+          CACHE_MODES=(off hot)
           CALIBRATION_C=50
+
+          clear_redis_cache() {
+            python - <<'PY'
+          import os
+          import redis
+          redis.from_url(os.environ["REDIS_URL"]).flushdb()
+          PY
+          }
 
           stop_server() {
             local pid="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
@@ -133,15 +142,18 @@ jobs:
           }
 
           start_server() {
-            local mode="$1" pagination="$2" workers="$3" d="$4" perf="$5"
+            local mode="$1" pagination="$2" workers="$3" d="$4" perf="$5" cache_mode="$6"
+            local cache_enabled=0
+            if [[ "$cache_mode" == "hot" ]]; then cache_enabled=1; fi
             stop_server
+            clear_redis_cache
             : > /tmp/gunicorn-benchmark.log
             if [[ "$mode" == "sync" ]]; then
-              setsid env BENCH_API_STACK=sync BENCH_PAGINATION="$pagination" PERF_TIMING_ENABLED="$perf" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=12 ASYNC_DB_CONCURRENCY=0 \
+              setsid env BENCH_API_STACK=sync BENCH_PAGINATION="$pagination" PERF_TIMING_ENABLED="$perf" PRODUCT_LIST_CACHE_ENABLED="$cache_enabled" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=12 ASYNC_DB_CONCURRENCY=0 \
                 gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers "$workers" --threads "$d" --worker-class gthread \
                 --timeout 10 --access-logfile /dev/null --error-logfile /tmp/gunicorn-benchmark.log --log-level warning &
             else
-              setsid env BENCH_API_STACK=async BENCH_PAGINATION="$pagination" PERF_TIMING_ENABLED="$perf" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=12 ASYNC_DB_CONCURRENCY="$d" \
+              setsid env BENCH_API_STACK=async BENCH_PAGINATION="$pagination" PERF_TIMING_ENABLED="$perf" PRODUCT_LIST_CACHE_ENABLED="$cache_enabled" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=12 ASYNC_DB_CONCURRENCY="$d" \
                 gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$workers" --worker-class uvicorn_worker.UvicornWorker \
                 --timeout 10 --access-logfile /dev/null --error-logfile /tmp/gunicorn-benchmark.log --log-level warning &
             fi
@@ -152,9 +164,11 @@ jobs:
           }
 
           run_one() {
-            local mode="$1" pagination="$2" workers="$3" d="$4" c="$5" phase="$6" require_instrumentation="$7"
+            local mode="$1" pagination="$2" workers="$3" d="$4" c="$5" phase="$6" require_instrumentation="$7" cache_mode="$8"
             local url="http://127.0.0.1:8000/api/v1/products/?page_size=20"
-            local out="benchmark-results/$phase/${mode}-w${workers}-d${d}-${pagination}-c${c}.json"
+            local out="benchmark-results/$phase/${mode}-w${workers}-d${d}-${pagination}-c${c}-${cache_mode}.json"
+            local redis_cache=0
+            if [[ "$cache_mode" == "hot" ]]; then redis_cache=1; fi
             set +e
             # Do not cap a run at a fixed 6s: with C=1, 200 requests may need
             # longer even when every individual request is healthy. The
@@ -162,12 +176,12 @@ jobs:
             # global 15-minute timeout.
             timeout --signal=TERM --kill-after=5s 120s env \
               BENCH_MODE="$mode" BENCH_PAGINATION="$pagination" BENCH_URL="$url" BENCH_TOKEN="$TOKEN" \
-              BENCH_CONCURRENCY="$c" BENCH_REQUESTS="$BENCH_REQUESTS" BENCH_WARMUP="$BENCH_WARMUP" BENCH_TIMEOUT="$BENCH_TIMEOUT" \
+              BENCH_REDIS_CACHE="$redis_cache" BENCH_CONCURRENCY="$c" BENCH_REQUESTS="$BENCH_REQUESTS" BENCH_WARMUP="$BENCH_WARMUP" BENCH_TIMEOUT="$BENCH_TIMEOUT" \
               BENCH_REQUIRE_INSTRUMENTATION="$require_instrumentation" python benchmarks/http_benchmark.py > "$out"
             local rc=$?
             set -e
             if [[ $rc -ne 0 ]]; then
-              echo "benchmark failed: $mode pagination=$pagination workers=$workers D=$d C=$c rc=$rc" >&2
+              echo "benchmark failed: $mode pagination=$pagination workers=$workers D=$d C=$c cache=$cache_mode rc=$rc" >&2
               return 1
             fi
           }
@@ -176,10 +190,8 @@ jobs:
             if [[ "$mode" == "sync" ]]; then d_values=("${SYNC_D_VALUES[@]}"); else d_values=("${ASYNC_D_VALUES[@]}"); fi
             for workers in "${WORKER_VALUES[@]}"; do
               for d in "${d_values[@]}"; do
-                start_server "$mode" cursor "$workers" "$d" 1
-                # Calibration uses request completion + error rate as health signals.
-                # Instrumentation is collected, but validated separately in diagnostics.
-                run_one "$mode" cursor "$workers" "$d" "$CALIBRATION_C" calibration 0
+                start_server "$mode" cursor "$workers" "$d" 1 off
+                run_one "$mode" cursor "$workers" "$d" "$CALIBRATION_C" calibration 0 off
                 stop_server
               done
             done
@@ -191,7 +203,7 @@ jobs:
           root=Path('benchmark-results/calibration')
           for mode in ('async','sync'):
               candidates=[]
-              for p in root.glob(f'{mode}-w*-d*-cursor-c50.json'):
+              for p in root.glob(f'{mode}-w*-d*-cursor-c50-off.json'):
                   parts=p.stem.split('-')
                   workers=int(parts[1][1:]); d=int(parts[2][1:])
                   c=json.loads(p.read_text())
@@ -219,25 +231,29 @@ jobs:
           SYNC_D="$(get_value sync D_PER_WORKER)"
 
           for pagination in page cursor; do
-            start_server async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 0
-            for c in "${CLIENT_CONCURRENCIES[@]}"; do
-              run_one async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" "$c" final 0
+            for cache_mode in "${CACHE_MODES[@]}"; do
+              start_server async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 0 "$cache_mode"
+              for c in "${CLIENT_CONCURRENCIES[@]}"; do
+                run_one async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" "$c" final 0 "$cache_mode"
+              done
+              stop_server
+              start_server sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" 0 "$cache_mode"
+              for c in "${CLIENT_CONCURRENCIES[@]}"; do
+                run_one sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" "$c" final 0 "$cache_mode"
+              done
+              stop_server
             done
-            stop_server
-            start_server sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" 0
-            for c in "${CLIENT_CONCURRENCIES[@]}"; do
-              run_one sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" "$c" final 0
-            done
-            stop_server
           done
 
           for pagination in page cursor; do
-            start_server async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 1
-            run_one async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 100 diagnostic 0
-            stop_server
-            start_server sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" 1
-            run_one sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" 100 diagnostic 0
-            stop_server
+            for cache_mode in "${CACHE_MODES[@]}"; do
+              start_server async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 1 "$cache_mode"
+              run_one async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 100 diagnostic 0 "$cache_mode"
+              stop_server
+              start_server sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" 1 "$cache_mode"
+              run_one sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" 100 diagnostic 0 "$cache_mode"
+              stop_server
+            done
           done
 
           python - <<'PY'
@@ -256,12 +272,13 @@ jobs:
                   k,v=line.split('=',1); d[k]=int(v)
               vals[mode]=d
           lines=['# Optimized Sync vs Async Capacity','',
-                 'Clean final runs disable instrumentation. Diagnostic runs at C=100 keep stage timings for root-cause analysis. Each architecture is independently optimized; DB pool max is 12 per worker and async admission stays below the pool for async.','',
-                 '| mode | workers | D/worker | total D | pagination | client C | wall s | RPS | p50 ms | p95 ms | p99 ms | failed |',
-                 '|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|']
+                 'Clean final runs disable instrumentation. Diagnostic runs at C=100 keep stage timings for root-cause analysis. Each architecture is independently optimized; DB pool max is 12 per worker and async admission stays below the pool for async. Redis hot-cache runs use one warm-up request to avoid cache-miss stampede.','',
+                 '| mode | workers | D/worker | total D | pagination | redis cache | client C | wall s | RPS | p50 ms | p95 ms | p99 ms | failed |',
+                 '|---|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|']
           for p in sorted((root/'final').glob('*.json')):
               c=json.loads(p.read_text()); m=c.get('mode','')
-              lines.append(f"| {m} | {vals[m]['WORKERS']} | {vals[m]['D_PER_WORKER']} | {vals[m]['TOTAL_D']} | {c.get('pagination','')} | {int(c.get('concurrency') or 0)} | {float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | {float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | {float(c.get('p99_ms') or 0):.2f} | {int(c.get('failed') or 0)} |")
+              cache='hot' if c.get('redis_product_cache') else 'off'
+              lines.append(f"| {m} | {vals[m]['WORKERS']} | {vals[m]['D_PER_WORKER']} | {vals[m]['TOTAL_D']} | {c.get('pagination','')} | {cache} | {int(c.get('concurrency') or 0)} | {float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | {float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | {float(c.get('p99_ms') or 0):.2f} | {int(c.get('failed') or 0)} |")
           (root/'report.md').write_text('\n'.join(lines)+'\n')
           print('\n'.join(lines))
           PY
