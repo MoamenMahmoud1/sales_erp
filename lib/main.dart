@@ -6,48 +6,31 @@ import 'core/presentation/biometric_lock_screen.dart';
 import 'core/repositories/app_services.dart';
 import 'core/security/app_lock_controller.dart';
 import 'core/security/biometric_auth.dart';
-import 'core/security/local_session.dart';
-import 'core/security/pin_service.dart';
 import 'core/theme/app_theme.dart';
 
 /// Local-only startup.
 ///
-/// ```
-/// main
-///  └─ local initialization   (AppServices.load — no network, no Dio)
-///  └─ local database + demo seed
-///  └─ local session
-///  └─ biometric authentication
-///  └─ application shell
-///  └─ dashboard
-/// ```
+/// The server authentication feature remains available for the future API
+/// integration, but is intentionally not initialized or used here.
 ///
-/// No backend, no API client, no internet and no credentials are required.
+/// Startup is:
+/// local services → local database/seed → one device-auth gate → app shell.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Pure local services — never constructs the network/client stack.
   await AppServices.instance.init();
-
-  // Local database + believable demo data on first launch.
   await DemoDataSeeder().seedIfNeeded();
 
   final lockController = AppLockController();
   await lockController.init();
 
-  final localSession = LocalSession();
-  await localSession.load();
-
-  runApp(
-    SalesErpApp(lockController: lockController, localSession: localSession),
-  );
+  runApp(SalesErpApp(lockController: lockController));
 }
 
 class SalesErpApp extends StatefulWidget {
   final AppLockController? lockController;
-  final LocalSession? localSession;
 
-  const SalesErpApp({super.key, this.lockController, this.localSession});
+  const SalesErpApp({super.key, this.lockController});
 
   @override
   State<SalesErpApp> createState() => _SalesErpAppState();
@@ -55,21 +38,13 @@ class SalesErpApp extends StatefulWidget {
 
 class _SalesErpAppState extends State<SalesErpApp> {
   late final AppThemeController _themeController;
-  late final BiometricAuth _biometricAuth = BiometricAuth();
-  late final PinService _pinService = PinService();
-  late bool _showWelcomeGate;
+  late final BiometricAuth _deviceAuth = BiometricAuth();
 
   @override
   void initState() {
     super.initState();
     _themeController = AppThemeController();
-    // Rebuild the app whenever the theme mode changes so the switch is live.
     _themeController.addListener(_onThemeChanged);
-    final session = widget.localSession;
-    // Show the one-time biometric gate until the local session is initialized.
-    _showWelcomeGate =
-        widget.lockController != null &&
-        (session == null || !session.isInitialized);
     widget.lockController?.addListener(_onLockChanged);
   }
 
@@ -89,36 +64,17 @@ class _SalesErpAppState extends State<SalesErpApp> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _onWelcomeUnlocked({bool viaBiometrics = true}) async {
-    await widget.localSession?.markInitialized(biometricEnabled: viaBiometrics);
-    widget.lockController?.unlock();
-    if (mounted) setState(() => _showWelcomeGate = false);
-  }
-
   Widget _buildHome() {
     final lock = widget.lockController;
 
     if (lock == null) {
-      // No lock controller (e.g. widget tests) → straight to the shell.
       return AppShell(themeController: _themeController, onLock: () {});
-    }
-
-    if (_showWelcomeGate) {
-      return BiometricLockScreen(
-        auth: _biometricAuth,
-        onUnlocked: () => _onWelcomeUnlocked(),
-        bypassLabel: 'Continue locally',
-        onBypass: () => _onWelcomeUnlocked(viaBiometrics: false),
-        bypassRequiresPin: false,
-      );
     }
 
     if (lock.status == AppStatus.locked) {
       return BiometricLockScreen(
-        auth: _biometricAuth,
+        auth: _deviceAuth,
         onUnlocked: lock.unlock,
-        bypassLabel: 'Enter with PIN',
-        pinService: _pinService,
       );
     }
 
@@ -163,22 +119,18 @@ class _SalesErpAppState extends State<SalesErpApp> {
 
   Object _buildHomeBuildKey() {
     final lock = widget.lockController;
-    if (lock != null && _showWelcomeGate) return 'welcome';
     if (lock != null && lock.status == AppStatus.locked) return 'locked';
     return 'shell';
   }
 }
 
-/// Globally animates theme changes: when the target [theme] changes, the
-/// whole application's ThemeData is interpolated over 300ms with
-/// easeInOutCubic — no flash, no hard cut, no per-widget animations.
+/// Globally animates theme changes.
 class SmoothTheme extends StatefulWidget {
   final ThemeData theme;
   final Widget child;
 
   const SmoothTheme({super.key, required this.theme, required this.child});
 
-  /// The currently animated theme data.
   static ThemeData of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<_SmoothThemeScope>()!.theme;
 
@@ -246,18 +198,7 @@ class _SmoothThemeScope extends InheritedWidget {
       theme != oldWidget.theme;
 }
 
-/// Premium, lightweight one-shot startup entrance animation (~700ms).
-///
-/// Performance-first design:
-/// - ONE AnimationController, composited via FadeTransition/ScaleTransition
-///   (opacity/transform run on the compositor — no per-frame widget rebuilds
-///   of the content tree).
-/// - Theme-aware: only uses the active ThemeData (no new colors).
-/// - Purely visual overlay with IgnorePointer: it NEVER blocks interaction,
-///   and the child (including the biometric screen and its automatic
-///   authentication attempt) mounts and runs immediately beneath it.
-/// - After completion the brand overlay is removed entirely; the retained
-///   transitions sit at identity values and cost nothing.
+/// Lightweight one-shot startup entrance animation.
 class StartupIntro extends StatefulWidget {
   final Widget child;
 
@@ -274,7 +215,6 @@ class _StartupIntroState extends State<StartupIntro>
     duration: const Duration(milliseconds: 700),
   );
 
-  // Content: subtle scale (0.985 → 1.0) + fade-in with easeOutCubic.
   late final Animation<double> _contentFade = CurvedAnimation(
     parent: _controller,
     curve: Curves.easeOutCubic,
@@ -283,15 +223,13 @@ class _StartupIntroState extends State<StartupIntro>
     begin: 0.985,
     end: 1.0,
   ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
-
-  // Brand mark: visible briefly, then fades away during the second half.
   late final Animation<double> _brandFade = Tween<double>(begin: 1, end: 0)
       .animate(
-        CurvedAnimation(
-          parent: _controller,
-          curve: const Interval(0.45, 1.0, curve: Curves.easeIn),
-        ),
-      );
+    CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.45, 1.0, curve: Curves.easeIn),
+    ),
+  );
 
   bool _brandRemoved = false;
 
@@ -320,8 +258,6 @@ class _StartupIntroState extends State<StartupIntro>
     final theme = Theme.of(context);
     return Stack(
       children: [
-        // The real app — mounted immediately so authentication/biometric
-        // behaviour is never delayed by the intro.
         FadeTransition(
           opacity: _contentFade,
           child: ScaleTransition(
