@@ -57,9 +57,6 @@ jobs:
       DB_POOL_MAX_SIZE: "8"
       WEB_CONCURRENCY: "4"
       TRUST_PROXY_HEADERS: "false"
-      # Keep benchmark runs complete so capacity can be measured without the
-      # production fail-fast policy changing the sample. Overload protection
-      # is configured separately in production settings.
       ASYNC_DB_ADMISSION_TIMEOUT_MS: "0"
       BENCH_TIMEOUT: "10"
     steps:
@@ -107,7 +104,7 @@ jobs:
           done
           TOKEN="$(cat bench_token.txt)"
           URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
-          for concurrency in 50 100; do
+          for concurrency in 1 50 100; do
             BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 python benchmarks/http_benchmark.py > "benchmark-results/baseline-c${concurrency}.json"
           done
       - name: Benchmark protected admission
