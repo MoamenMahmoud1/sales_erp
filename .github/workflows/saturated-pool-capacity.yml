@@ -56,29 +56,36 @@ jobs:
       DB_POOL_MAX_SIZE: "12"
       ASYNC_DB_CONCURRENCY: "11"
       ASYNC_DB_ADMISSION_TIMEOUT_MS: "250"
+      ASYNC_BENCH_THREADS: "0"
       TRUST_PROXY_HEADERS: "false"
       PERF_TIMING_ENABLED: "0"
       BENCH_TIMEOUT: "5"
-      BENCH_REQUESTS: "200"
+      BENCH_REQUESTS: "300"
       BENCH_WARMUP: "20"
       PRODUCT_LIST_CACHE_ENABLED: "0"
       PRODUCT_LIST_CACHE_TTL: "30"
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: erp-api/requirements.txt
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install httpx
+
       - name: Migrate
         run: python manage.py migrate --noinput
+
       - name: Seed benchmark database
         run: python benchmarks/seed_benchmark_data.py
+
       - name: Configure PostgreSQL
         run: |
           set -euo pipefail
@@ -94,15 +101,22 @@ jobs:
             sleep 1
           done
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c 'ANALYZE;'
-      - name: Run near-full DB pool benchmark
+
+      - name: Run fair thread-budget benchmark
         run: |
           set -euo pipefail
           rm -rf benchmark-results-saturated
           mkdir -p benchmark-results-saturated/final benchmark-results-saturated/diagnostic
           TOKEN="$(cat bench_token.txt)"
+
           WORKERS=4
-          D=11
-          CLIENT_CONCURRENCIES=(1 10 25 50 100 150)
+          SYNC_THREADS=11
+          ASYNC_THREAD_BUDGETS=(2 3 4 6 8 11)
+          DB_POOL=12
+          DB_SLOTS=11
+          CLIENT_CONCURRENCIES=(1 10 50 100 250)
+          CACHE_MODES=(off hot)
+          PAGINATIONS=(page cursor)
 
           clear_redis_cache() {
             python - <<'PY'
@@ -113,11 +127,11 @@ jobs:
           }
 
           stop_server() {
-            local pid="$(cat /tmp/gunicorn-saturated.pid 2>/dev/null || true)"
+            local pid="$(cat /tmp/gunicorn-fair.pid 2>/dev/null || true)"
             if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
               kill -TERM -- "-$pid" 2>/dev/null || true
               kill -TERM "$pid" 2>/dev/null || true
-              for _ in $(seq 1 20); do
+              for _ in $(seq 1 30); do
                 kill -0 "$pid" 2>/dev/null || break
                 sleep 0.1
               done
@@ -125,31 +139,33 @@ jobs:
               kill -KILL "$pid" 2>/dev/null || true
               wait "$pid" 2>/dev/null || true
             fi
-            rm -f /tmp/gunicorn-saturated.pid
+            rm -f /tmp/gunicorn-fair.pid
           }
 
           start_server() {
-            local mode="$1" pagination="$2" perf="$3" cache_mode="$4"
+            local mode="$1" pagination="$2" thread_budget="$3" perf="$4" cache_mode="$5"
             local cache_enabled=0
             [[ "$cache_mode" == "hot" ]] && cache_enabled=1
             stop_server
             clear_redis_cache
-            : > /tmp/gunicorn-saturated.log
+            : > /tmp/gunicorn-fair.log
+
             if [[ "$mode" == "sync" ]]; then
               setsid env \
                 BENCH_API_STACK=sync \
                 BENCH_PAGINATION="$pagination" \
                 PERF_TIMING_ENABLED="$perf" \
                 PRODUCT_LIST_CACHE_ENABLED="$cache_enabled" \
-                DB_POOL_MIN_SIZE=12 DB_POOL_MAX_SIZE=12 ASYNC_DB_CONCURRENCY=0 \
+                ASYNC_BENCH_THREADS=0 \
+                DB_POOL_MIN_SIZE="$DB_POOL" DB_POOL_MAX_SIZE="$DB_POOL" ASYNC_DB_CONCURRENCY=0 \
                 gunicorn core.wsgi:application \
                 --bind 127.0.0.1:8000 \
                 --workers "$WORKERS" \
-                --threads "$D" \
+                --threads "$SYNC_THREADS" \
                 --worker-class gthread \
                 --timeout 15 \
                 --access-logfile /dev/null \
-                --error-logfile /tmp/gunicorn-saturated.log \
+                --error-logfile /tmp/gunicorn-fair.log \
                 --log-level warning &
             else
               setsid env \
@@ -157,32 +173,52 @@ jobs:
                 BENCH_PAGINATION="$pagination" \
                 PERF_TIMING_ENABLED="$perf" \
                 PRODUCT_LIST_CACHE_ENABLED="$cache_enabled" \
-                DB_POOL_MIN_SIZE=12 DB_POOL_MAX_SIZE=12 ASYNC_DB_CONCURRENCY="$D" \
+                ASYNC_BENCH_THREADS="$thread_budget" \
+                DB_POOL_MIN_SIZE="$DB_POOL" DB_POOL_MAX_SIZE="$DB_POOL" ASYNC_DB_CONCURRENCY="$DB_SLOTS" \
                 gunicorn core.asgi:application \
                 --bind 127.0.0.1:8000 \
                 --workers "$WORKERS" \
                 --worker-class uvicorn_worker.UvicornWorker \
                 --timeout 15 \
                 --access-logfile /dev/null \
-                --error-logfile /tmp/gunicorn-saturated.log \
+                --error-logfile /tmp/gunicorn-fair.log \
                 --log-level warning &
             fi
-            echo $! > /tmp/gunicorn-saturated.pid
+
+            echo $! > /tmp/gunicorn-fair.pid
             for _ in $(seq 1 30); do
               curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1 && return 0
               sleep 0.2
             done
-            cat /tmp/gunicorn-saturated.log >&2 || true
+            cat /tmp/gunicorn-fair.log >&2 || true
             return 1
           }
 
+          sample_threads() {
+            local pgid="$1" out="$2" max=0
+            while kill -0 "$pgid" 2>/dev/null; do
+              local current
+              current="$(ps -eo pgid=,nlwp= | awk -v pg="$pgid" '$1==pg {sum+=$2} END {print sum+0}')"
+              if [[ "$current" -gt "$max" ]]; then
+                max="$current"
+              fi
+              sleep 0.05
+            done
+            echo "$max" > "$out"
+          }
+
           run_one() {
-            local mode="$1" pagination="$2" c="$3" phase="$4" cache_mode="$5" require_instrumentation="$6"
+            local mode="$1" pagination="$2" thread_budget="$3" c="$4" phase="$5" cache_mode="$6" perf="$7"
             local url="http://127.0.0.1:8000/api/v1/products/?page_size=20"
-            local out="benchmark-results-saturated/$phase/${mode}-w${WORKERS}-d${D}-${pagination}-c${c}-${cache_mode}.json"
+            local out="benchmark-results-saturated/$phase/${mode}-t${thread_budget}-${pagination}-c${c}-${cache_mode}.json"
+            local threads_out="${out%.json}.threads"
             local redis_cache=0
             [[ "$cache_mode" == "hot" ]] && redis_cache=1
+
             set +e
+            sample_threads "$(cat /tmp/gunicorn-fair.pid)" "$threads_out" &
+            local sampler_pid=$!
+
             timeout --signal=TERM --kill-after=5s 120s env \
               BENCH_MODE="$mode" \
               BENCH_PAGINATION="$pagination" \
@@ -193,35 +229,74 @@ jobs:
               BENCH_REQUESTS="$BENCH_REQUESTS" \
               BENCH_WARMUP="$BENCH_WARMUP" \
               BENCH_TIMEOUT="$BENCH_TIMEOUT" \
-              BENCH_REQUIRE_INSTRUMENTATION="$require_instrumentation" \
+              BENCH_REQUIRE_INSTRUMENTATION="$perf" \
               python benchmarks/http_benchmark.py > "$out"
             local rc=$?
+
+            kill "$sampler_pid" 2>/dev/null || true
+            wait "$sampler_pid" 2>/dev/null || true
             set -e
+
             if [[ $rc -ne 0 ]]; then
-              echo "benchmark failed: $mode pagination=$pagination C=$c cache=$cache_mode rc=$rc" >&2
+              echo "benchmark failed: $mode threads=$thread_budget pagination=$pagination C=$c cache=$cache_mode rc=$rc" >&2
               return 1
             fi
+
+            local observed_threads="$(cat "$threads_out" 2>/dev/null || echo 0)"
+            python - "$out" "$observed_threads" "$thread_budget" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          observed = int(sys.argv[2])
+          budget = int(sys.argv[3])
+          payload = json.loads(path.read_text())
+          payload["async_execution_thread_budget"] = budget
+          payload["max_os_threads_observed"] = observed
+          path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+          PY
+            rm -f "$threads_out"
           }
 
-          for mode in async sync; do
-            for pagination in page cursor; do
-              for cache_mode in off hot; do
-                start_server "$mode" "$pagination" 0 "$cache_mode"
-                for c in "${CLIENT_CONCURRENCIES[@]}"; do
-                  run_one "$mode" "$pagination" "$c" final "$cache_mode" 0
-                done
+          # Sync baseline: 11 request threads/worker, same 12-connection pool.
+          for pagination in "${PAGINATIONS[@]}"; do
+            for cache_mode in "${CACHE_MODES[@]}"; do
+              start_server sync "$pagination" "$SYNC_THREADS" 0 "$cache_mode"
+              for c in "${CLIENT_CONCURRENCIES[@]}"; do
+                run_one sync "$pagination" "$SYNC_THREADS" "$c" final "$cache_mode" 0
               done
             done
             stop_server
           done
 
-          for mode in async sync; do
-            for pagination in page cursor; do
-              start_server "$mode" "$pagination" 1 off
-              run_one "$mode" "$pagination" 100 diagnostic off 1
+          # Async sweep: multiple actual blocking-execution threads/worker,
+          # fixed 11 active DB slots/worker, and the same DB pool as Sync.
+          for thread_budget in "${ASYNC_THREAD_BUDGETS[@]}"; do
+            for pagination in "${PAGINATIONS[@]}"; do
+              for cache_mode in "${CACHE_MODES[@]}"; do
+                start_server async "$pagination" "$thread_budget" 0 "$cache_mode"
+                for c in "${CLIENT_CONCURRENCIES[@]}"; do
+                  run_one async "$pagination" "$thread_budget" "$c" final "$cache_mode" 0
+                done
+              done
+              stop_server
             done
           done
-          stop_server
+
+          # Instrumented diagnostics at C=100 for every Async thread budget and
+          # the Sync baseline. This validates DB/pool/admission timing and
+          # records the observed thread count under load.
+          for pagination in "${PAGINATIONS[@]}"; do
+            start_server sync "$pagination" "$SYNC_THREADS" 1 off
+            run_one sync "$pagination" "$SYNC_THREADS" 100 diagnostic off 1
+            stop_server
+            for thread_budget in "${ASYNC_THREAD_BUDGETS[@]}"; do
+              start_server async "$pagination" "$thread_budget" 1 off
+              run_one async "$pagination" "$thread_budget" 100 diagnostic off 1
+              stop_server
+            done
+          done
 
           python - <<'PY'
           import json
@@ -229,34 +304,37 @@ jobs:
 
           root = Path("benchmark-results-saturated")
           lines = [
-              "# Near-full DB Pool Sync vs Async",
+              "# Fair Sync vs Async Thread-Budget Benchmark",
               "",
-              "Configuration: 4 workers, DB pool 12/12 per worker, 11 DB execution slots per worker (44 active slots vs 48 pooled connections).",
+              f"Configuration: {4} workers; DB pool {12}/{12} per worker; DB execution budget {11} per worker. Sync uses {11} request threads/worker. Async is tested at 2, 3, 4, 6, 8, and 11 execution threads/worker.",
               "",
-              "| mode | pagination | cache | C | wall s | RPS | p50 ms | p95 ms | p99 ms | failed |",
-              "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
+              "| mode | async threads/worker | pagination | cache | C | wall s | RPS | p50 ms | p95 ms | p99 ms | max OS threads | failed |",
+              "|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
           ]
           for p in sorted((root / "final").glob("*.json")):
               c = json.loads(p.read_text())
-              parts = p.stem.split("-")
-              cache = parts[-1]
+              budget = int(c.get("async_execution_thread_budget") or 0)
               lines.append(
-                  f"| {c['mode']} | {c['pagination']} | {cache} | {int(c['concurrency'])} | "
+                  f"| {c['mode']} | {budget} | {c['pagination']} | "
+                  f"{'hot' if c.get('redis_product_cache') else 'off'} | {int(c['concurrency'])} | "
                   f"{float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | "
                   f"{float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | "
-                  f"{float(c.get('p99_ms') or 0):.2f} | {int(c.get('failed') or 0)} |"
+                  f"{float(c.get('p99_ms') or 0):.2f} | {int(c.get('max_os_threads_observed') or 0)} | "
+                  f"{int(c.get('failed') or 0)} |"
               )
 
           (root / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
           print("\n".join(lines))
           PY
+
       - name: PostgreSQL diagnostics
         run: python benchmarks/postgres_diagnostics.py > benchmark-results-saturated/postgres-plan.json
-      - name: Upload saturated benchmark results
+
+      - name: Upload fair benchmark results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: saturated-db-pool-sync-async
+          name: saturated-db-pool-sync-async-fair
           path: erp-api/benchmark-results-saturated
           if-no-files-found: warn
           retention-days: 14
