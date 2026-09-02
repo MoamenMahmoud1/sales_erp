@@ -8,6 +8,9 @@ on:
     paths:
       - "erp-api/common/services/async_db_gate.py"
       - "erp-api/products/api/views.py"
+      - "erp-api/products/api/sync_views.py"
+      - "erp-api/products/services/**"
+      - "erp-api/common/pagination/**"
       - "erp-api/benchmarks/**"
       - "erp-api/core/settings/settings_bench.py"
       - "erp-api/core/settings/settings_prod.py"
@@ -17,7 +20,7 @@ on:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: erp-api
@@ -92,52 +95,113 @@ jobs:
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "SELECT pg_stat_statements_reset();"
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c "ANALYZE;"
-      - name: Benchmark baseline with expanded pool
-        run: |
-          set -euo pipefail
-          export ASYNC_DB_CONCURRENCY=0
-          gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
-          echo $! > /tmp/gunicorn.pid
-          for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
-          TOKEN="$(cat bench_token.txt)"
-          URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
-          for concurrency in 1 50 100; do
-            BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 python benchmarks/http_benchmark.py > "benchmark-results/baseline-c${concurrency}.json"
-          done
-      - name: Benchmark protected admission
+
+      - name: Benchmark async and sync stacks
         run: |
           set -euo pipefail
           TOKEN="$(cat bench_token.txt)"
           URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
-          for gate in 4 6 7; do
-            OLD_PID="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
-            if [[ -n "$OLD_PID" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
-              kill "$OLD_PID" 2>/dev/null || true
+
+          stop_server() {
+            local old_pid="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
+            if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
+              kill "$old_pid" 2>/dev/null || true
               for attempt in $(seq 1 30); do
-                kill -0 "$OLD_PID" 2>/dev/null || break
+                kill -0 "$old_pid" 2>/dev/null || break
                 sleep 1
               done
-              if kill -0 "$OLD_PID" 2>/dev/null; then kill -KILL "$OLD_PID" 2>/dev/null || true; fi
+              kill -KILL "$old_pid" 2>/dev/null || true
             fi
-            ASYNC_DB_CONCURRENCY="$gate" gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
+          }
+
+          start_server() {
+            local stack="$1"
+            local gate="$2"
+            BENCH_API_STACK="$stack" ASYNC_DB_CONCURRENCY="$gate" BENCH_PAGINATION="$3" \
+              gunicorn core.asgi:application --bind 127.0.0.1:8000 \
+              --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker \
+              --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
             echo $! > /tmp/gunicorn.pid
             for attempt in $(seq 1 60); do
-              if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then break; fi
+              if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then return 0; fi
               sleep 1
             done
-            if ! curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then cat /tmp/gunicorn-admission.log || true; exit 1; fi
-            for concurrency in 50 100; do
-              BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 python benchmarks/http_benchmark.py > "benchmark-results/gate${gate}-c${concurrency}.json"
+            cat /tmp/gunicorn-admission.log || true
+            exit 1
+          }
+
+          bench_case() {
+            local stack="$1"
+            local pagination="$2"
+            local concurrency="$3"
+            local prefix="${stack}-${pagination}-c${concurrency}"
+            BENCH_MODE="$stack" BENCH_PAGINATION="$pagination" BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" \
+              BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 \
+              BENCH_DETAIL_PATH="benchmark-results/${prefix}-requests.ndjson" \
+              python benchmarks/http_benchmark.py > "benchmark-results/${prefix}.json"
+          }
+
+          for stack in async sync; do
+            for pagination in page cursor; do
+              stop_server
+              start_server "$stack" 0 "$pagination"
+              for concurrency in 1 50 100; do
+                bench_case "$stack" "$pagination" "$concurrency"
+              done
             done
           done
+
+      - name: Benchmark async admission gates
+        run: |
+          set -euo pipefail
+          TOKEN="$(cat bench_token.txt)"
+          URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
+
+          stop_server() {
+            local old_pid="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
+            if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
+              kill "$old_pid" 2>/dev/null || true
+              for attempt in $(seq 1 30); do
+                kill -0 "$old_pid" 2>/dev/null || break
+                sleep 1
+              done
+              kill -KILL "$old_pid" 2>/dev/null || true
+            fi
+          }
+
+          start_server() {
+            local gate="$1"
+            BENCH_API_STACK=async ASYNC_DB_CONCURRENCY="$gate" BENCH_PAGINATION=page \
+              gunicorn core.asgi:application --bind 127.0.0.1:8000 \
+              --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker \
+              --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
+            echo $! > /tmp/gunicorn.pid
+            for attempt in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then return 0; fi
+              sleep 1
+            done
+            cat /tmp/gunicorn-admission.log || true
+            exit 1
+          }
+
+          for gate in 4 6 7; do
+            stop_server
+            start_server "$gate"
+            for concurrency in 50 100; do
+              prefix="async-gate${gate}-page-c${concurrency}"
+              BENCH_MODE="async-gate${gate}" BENCH_PAGINATION=page BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" \
+                BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 \
+                BENCH_DETAIL_PATH="benchmark-results/${prefix}-requests.ndjson" \
+                python benchmarks/http_benchmark.py > "benchmark-results/${prefix}.json"
+            done
+          done
+
       - name: PostgreSQL query diagnostics
         run: |
           set -euo pipefail
           python benchmarks/postgres_diagnostics.py > benchmark-results/postgres-plan.json
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -At -F $'\t' -c "SELECT calls, total_exec_time, mean_exec_time, rows, shared_blks_hit, shared_blks_read, left(query, 1000) FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 30;" > benchmark-results/pg-stat-statements.tsv
+
       - name: Stop API
         if: always()
         run: |
@@ -150,7 +214,8 @@ jobs:
             done
             kill -KILL "$PID" 2>/dev/null || true
           fi
-      - name: Build report
+
+      - name: Build detailed report
         run: |
           python - <<'PY'
           import json
@@ -158,31 +223,52 @@ jobs:
 
           root = Path("benchmark-results")
           rows = []
-          inputs = sorted(root.glob("baseline-c*.json")) + sorted(root.glob("gate*-c*.json"))
+          inputs = sorted(root.glob("*.json"))
+          inputs = [p for p in inputs if p.name not in {"postgres-plan.json"}]
           for p in inputs:
               case = json.loads(p.read_text())
-              if not isinstance(case, dict):
-                  raise TypeError(f"unexpected benchmark payload in {p}: {type(case).__name__}")
-              rps = case.get("rps", case.get("successful_rps", 0))
-              wall = case.get("wall_time_sec", 0)
+              if not isinstance(case, dict) or "concurrency" not in case:
+                  continue
+              queue = case.get("request_queue_wait", {})
               rows.append(
-                  f"| {p.stem} | {case['concurrency']} | {case.get('latency_mean_ms', 0):.2f} | "
-                  f"{case['p50_ms']:.2f} | {case['p95_ms']:.2f} | {case['p99_ms']:.2f} | "
-                  f"{rps:.2f} | {wall:.3f} | {case['successful']} | {case['failed']} |"
+                  "| {case} | {mode} | {pagination} | {c} | {wall:.3f} | {rps:.2f} | "
+                  "{mean:.2f} | {p50:.2f} | {p95:.2f} | {p99:.2f} | {q50:.2f} | {q95:.2f} | "
+                  "{db:.2f} | {pool:.2f} | {ok} | {failed} |".format(
+                      case=p.stem,
+                      mode=case.get("mode", "unknown"),
+                      pagination=case.get("pagination", "page"),
+                      c=case["concurrency"],
+                      wall=case.get("wall_time_sec", 0),
+                      rps=case.get("successful_rps", 0),
+                      mean=case.get("latency_mean_ms", 0),
+                      p50=case.get("p50_ms", 0),
+                      p95=case.get("p95_ms", 0),
+                      p99=case.get("p99_ms", 0),
+                      q50=queue.get("p50_ms", 0),
+                      q95=queue.get("p95_ms", 0),
+                      db=case.get("db_p50_ms") or 0,
+                      pool=case.get("pool_wait_p50_ms") or 0,
+                      ok=case.get("successful", 0),
+                      failed=case.get("failed", 0),
+                  )
               )
 
           report = [
-              "# Async DB admission benchmark", "",
-              "HTTP latency is measured entirely outside Django. Warmup requests are discarded. Each measured request is timed from immediately before the HTTP GET until the full response body is read.", "",
-              "| case | concurrency | mean ms | p50 ms | p95 ms | p99 ms | RPS | wall s | successful | failed |",
-              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|", *rows, "",
-              "PostgreSQL execution plans and pg_stat_statements are included in the uploaded artifact for root-cause analysis.",
+              "# Product endpoint performance benchmark", "",
+              "Each measured request records client-side queue wait (from batch enqueue to HTTP dispatch), full wire latency, and server-side timing headers. Warmup requests are discarded.", "",
+              "| case | mode | pagination | C | wall s | successful RPS | mean ms | p50 | p95 | p99 | queue p50 | queue p95 | DB p50 | pool p50 | successful | failed |",
+              "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+              *rows,
+              "",
+              "Every case also has a `*-requests.ndjson` file containing one record per request with enqueue/start/end offsets and server timing headers.",
           ]
           (root / "report.md").write_text("\n".join(report) + "\n")
           PY
+
       - name: Add benchmark summary
         if: always()
         run: cat benchmark-results/report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
       - name: Upload benchmark results
         if: always()
         uses: actions/upload-artifact@v4
