@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""True end-to-end HTTP benchmark with server-side root-cause timings."""
+"""True end-to-end HTTP benchmark with per-request queue and server timings."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import os
 import statistics
 import time
 from collections import Counter, defaultdict
+from pathlib import Path
 
 import httpx
 
@@ -55,36 +56,14 @@ async def run_requests(
     concurrency: int,
     timeout_s: float,
     progress_every: int = 0,
-) -> tuple[
-    list[float],
-    list[int],
-    Counter[str],
-    dict[str, list[float]],
-    dict[str, list[float]],
-    dict[str, list[float]],
-    dict[str, list[float]],
-    int,
-]:
-    latencies: list[float] = []
-    statuses: list[int] = []
-    errors: Counter[str] = Counter()
-    stage_samples: dict[str, list[float]] = {
-        "app": [],
-        "db_admission": [],
-        "db_pool": [],
-        "db_operation": [],
-        "serializer_wait": [],
-        "serializer_cpu": [],
-    }
-    view_stage_samples: dict[str, list[float]] = defaultdict(list)
-    sql_samples: dict[str, list[float]] = defaultdict(list)
-    function_samples: dict[str, list[float]] = defaultdict(list)
-    transaction_samples: dict[str, list[float]] = defaultdict(list)
-    instrumented_responses = 0
-    next_index = 0
-    completed = 0
-    lock = asyncio.Lock()
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    results: list[dict[str, object]] = []
+    server_results: list[dict[str, object]] = []
+    queue = asyncio.Queue[int]()
+    for index in range(requests):
+        await queue.put(index)
 
+    batch_started = time.perf_counter()
     limits = httpx.Limits(
         max_connections=concurrency,
         max_keepalive_connections=concurrency,
@@ -97,15 +76,24 @@ async def run_requests(
         http2=False,
         trust_env=False,
     ) as client:
-        async def worker() -> None:
-            nonlocal next_index, completed, instrumented_responses
+        async def worker(worker_id: int) -> None:
             while True:
-                async with lock:
-                    if next_index >= requests:
-                        return
-                    next_index += 1
+                try:
+                    index = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
 
-                started = time.perf_counter()
+                queued_at = time.perf_counter()
+                request_started = time.perf_counter()
+                queue_wait_ms = (request_started - batch_started) * 1000
+                row: dict[str, object] = {
+                    "request_index": index,
+                    "worker_id": worker_id,
+                    "queued_at_offset_ms": (queued_at - batch_started) * 1000,
+                    "request_start_offset_ms": (request_started - batch_started) * 1000,
+                    "queue_wait_ms": queue_wait_ms,
+                }
+
                 try:
                     response = await client.get(
                         url,
@@ -115,94 +103,120 @@ async def run_requests(
                         },
                     )
                     response.read()
-                    elapsed_ms = (time.perf_counter() - started) * 1000
-                    latencies.append(elapsed_ms)
-                    statuses.append(response.status_code)
-
-                    required = {
-                        "app": "X-Perf-App-ms",
-                        "db_admission": "X-Perf-DB-Admission-ms",
-                        "db_pool": "X-Perf-DB-Pool-ms",
-                        "db_operation": "X-Perf-DB-Operation-ms",
-                        "serializer_wait": "X-Perf-Serializer-Wait-ms",
-                        "serializer_cpu": "X-Perf-Serializer-CPU-ms",
-                    }
-                    parsed = True
-                    for stage, header in required.items():
-                        value = response.headers.get(header)
-                        if value is None:
-                            parsed = False
-                            continue
-                        try:
-                            stage_samples[stage].append(float(value))
-                        except ValueError:
-                            parsed = False
-
-                    for header_name, value in response.headers.items():
-                        lower = header_name.lower()
-                        if lower.startswith("x-perf-view-") and lower.endswith("-ms"):
-                            try:
-                                stage_name = header_name[12:-3].replace("-", ".")
-                                view_stage_samples[stage_name].append(float(value))
-                            except ValueError:
-                                parsed = False
-                        elif lower.startswith("x-perf-sql-") and (
-                            lower.endswith("-total-ms")
-                            or lower.endswith("-max-ms")
-                            or lower.endswith("-count")
-                        ):
-                            parts = header_name.split("-")
-                            if lower.endswith("-total-ms"):
-                                kind = "-".join(parts[3:-2]).lower()
-                                try:
-                                    sql_samples[f"{kind}.total"].append(float(value))
-                                except ValueError:
-                                    parsed = False
-                            elif lower.endswith("-max-ms"):
-                                kind = "-".join(parts[3:-2]).lower()
-                                try:
-                                    sql_samples[f"{kind}.max"].append(float(value))
-                                except ValueError:
-                                    parsed = False
-                        elif lower.startswith("x-perf-fn-") and lower.endswith("-total-ms"):
-                            name = header_name[10:-9].replace("-", ".")
-                            try:
-                                function_samples[name].append(float(value))
-                            except ValueError:
-                                parsed = False
-                        elif lower.startswith("x-perf-tx-") and lower.endswith("-total-ms"):
-                            kind = header_name[10:-9].lower()
-                            try:
-                                transaction_samples[kind].append(float(value))
-                            except ValueError:
-                                parsed = False
-
-                    if parsed:
-                        instrumented_responses += 1
+                    finished = time.perf_counter()
+                    wire_ms = (finished - request_started) * 1000
+                    row.update(
+                        {
+                            "status_code": response.status_code,
+                            "request_wire_ms": wire_ms,
+                            "request_end_offset_ms": (finished - batch_started) * 1000,
+                            "server_total_ms": _header_float(response, "X-Perf-Total-ms"),
+                            "server_app_ms": _header_float(response, "X-Perf-App-ms"),
+                            "db_admission_ms": _header_float(response, "X-Perf-DB-Admission-ms"),
+                            "db_pool_ms": _header_float(response, "X-Perf-DB-Pool-ms"),
+                            "db_operation_ms": _header_float(response, "X-Perf-DB-Operation-ms"),
+                            "serializer_wait_ms": _header_float(response, "X-Perf-Serializer-Wait-ms"),
+                            "serializer_cpu_ms": _header_float(response, "X-Perf-Serializer-CPU-ms"),
+                        }
+                    )
+                    server_results.append(_extract_instrumentation(response))
                 except Exception as exc:
-                    latencies.append((time.perf_counter() - started) * 1000)
-                    errors[type(exc).__name__] += 1
+                    finished = time.perf_counter()
+                    row.update(
+                        {
+                            "status_code": None,
+                            "request_wire_ms": (finished - request_started) * 1000,
+                            "request_end_offset_ms": (finished - batch_started) * 1000,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        }
+                    )
 
-                async with lock:
-                    completed += 1
-                    current = completed
+                results.append(row)
+                queue.task_done()
 
-                if progress_every and current % progress_every == 0:
-                    print(json.dumps({"phase": "progress", "completed": current, "requests": requests}), flush=True)
+                if progress_every and len(results) % progress_every == 0:
+                    print(
+                        json.dumps(
+                            {
+                                "phase": "progress",
+                                "completed": len(results),
+                                "requests": requests,
+                            }
+                        ),
+                        flush=True,
+                    )
 
-        await asyncio.gather(*(worker() for _ in range(concurrency)))
+        await asyncio.gather(*(worker(worker_id) for worker_id in range(concurrency)))
 
-    return (
-        latencies,
-        statuses,
-        errors,
-        stage_samples,
-        dict(view_stage_samples),
-        dict(sql_samples),
-        dict(function_samples),
-        dict(transaction_samples),
-        instrumented_responses,
-    )
+    return results, server_results
+
+
+def _header_float(response: httpx.Response, name: str) -> float | None:
+    value = response.headers.get(name)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _extract_instrumentation(response: httpx.Response) -> dict[str, object]:
+    required = {
+        "app": "X-Perf-App-ms",
+        "db_admission": "X-Perf-DB-Admission-ms",
+        "db_pool": "X-Perf-DB-Pool-ms",
+        "db_operation": "X-Perf-DB-Operation-ms",
+        "serializer_wait": "X-Perf-Serializer-Wait-ms",
+        "serializer_cpu": "X-Perf-Serializer-CPU-ms",
+    }
+    row: dict[str, object] = {"status_code": response.status_code}
+    for stage, header in required.items():
+        row[stage] = _header_float(response, header)
+
+    for header_name, value in response.headers.items():
+        lower = header_name.lower()
+        if lower.startswith("x-perf-view-") and lower.endswith("-ms"):
+            key = header_name[12:-3].replace("-", ".")
+            parsed = _safe_float(value)
+            if parsed is not None:
+                row[f"view.{key}"] = parsed
+        elif lower.startswith("x-perf-sql-"):
+            if lower.endswith("-total-ms"):
+                parts = header_name.split("-")
+                key = "-".join(parts[3:-2]).lower()
+                parsed = _safe_float(value)
+                if parsed is not None:
+                    row[f"sql.{key}.total"] = parsed
+            elif lower.endswith("-max-ms"):
+                parts = header_name.split("-")
+                key = "-".join(parts[3:-2]).lower()
+                parsed = _safe_float(value)
+                if parsed is not None:
+                    row[f"sql.{key}.max"] = parsed
+            elif lower.endswith("-count"):
+                parts = header_name.split("-")
+                key = "-".join(parts[3:-1]).lower()
+                row[f"sql.{key}.count"] = int(value)
+        elif lower.startswith("x-perf-fn-") and lower.endswith("-total-ms"):
+            name = header_name[10:-9].replace("-", ".")
+            parsed = _safe_float(value)
+            if parsed is not None:
+                row[f"fn.{name}"] = parsed
+        elif lower.startswith("x-perf-tx-") and lower.endswith("-total-ms"):
+            kind = header_name[10:-9].lower()
+            parsed = _safe_float(value)
+            if parsed is not None:
+                row[f"tx.{kind}"] = parsed
+    return row
+
+
+def _safe_float(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None
 
 
 async def main() -> None:
@@ -214,6 +228,9 @@ async def main() -> None:
     timeout_s = env_float("BENCH_TIMEOUT", 10)
     deadline_s = env_float("BENCH_DEADLINE", 0)
     progress_every = env_int("BENCH_PROGRESS_EVERY", 0)
+    benchmark_mode = os.getenv("BENCH_MODE", "unknown")
+    pagination_mode = os.getenv("BENCH_PAGINATION", "page")
+    detail_path = Path(os.getenv("BENCH_DETAIL_PATH", "")) if os.getenv("BENCH_DETAIL_PATH") else None
 
     if requests <= 0 or concurrency <= 0:
         raise SystemExit("BENCH_REQUESTS and BENCH_CONCURRENCY must be > 0")
@@ -221,34 +238,62 @@ async def main() -> None:
     if warmup > 0:
         await run_requests(url, token, warmup, min(concurrency, warmup), timeout_s)
 
-    started = time.perf_counter()
-    (
-        latencies,
-        statuses,
-        errors,
-        stage_samples,
-        view_stage_samples,
-        sql_samples,
-        function_samples,
-        transaction_samples,
-        instrumented,
-    ) = await run_requests(url, token, requests, concurrency, timeout_s, progress_every)
-    elapsed = time.perf_counter() - started
+    batch_started = time.perf_counter()
+    request_rows, instrumentation_rows = await run_requests(
+        url, token, requests, concurrency, timeout_s, progress_every
+    )
+    wall_time = time.perf_counter() - batch_started
 
-    successful = sum(200 <= status < 300 for status in statuses)
-    completed = len(latencies)
-    failed = completed - successful
+    request_rows.sort(key=lambda row: int(row["request_index"]))
+    successful_rows = [
+        row for row in request_rows if isinstance(row.get("status_code"), int) and 200 <= row["status_code"] < 300
+    ]
+    latencies = [float(row["request_wire_ms"]) for row in successful_rows]
+    queue_waits = [float(row["queue_wait_ms"]) for row in request_rows]
+    errors = Counter(str(row.get("error_type")) for row in request_rows if row.get("error_type"))
+
+    stage_samples: dict[str, list[float]] = defaultdict(list)
+    view_stage_samples: dict[str, list[float]] = defaultdict(list)
+    sql_samples: dict[str, list[float]] = defaultdict(list)
+    function_samples: dict[str, list[float]] = defaultdict(list)
+    transaction_samples: dict[str, list[float]] = defaultdict(list)
+    instrumented = 0
+
+    for row in instrumentation_rows:
+        for stage in ("app", "db_admission", "db_pool", "db_operation", "serializer_wait", "serializer_cpu"):
+            value = row.get(stage)
+            if isinstance(value, (int, float)):
+                stage_samples[stage].append(float(value))
+        for key, value in row.items():
+            if not isinstance(value, (int, float)) or key == "status_code":
+                continue
+            if key.startswith("view."):
+                view_stage_samples[key[5:]].append(float(value))
+            elif key.startswith("sql.") and key.endswith(".total"):
+                sql_samples[key[4:]].append(float(value))
+            elif key.startswith("fn."):
+                function_samples[key[3:]].append(float(value))
+            elif key.startswith("tx."):
+                transaction_samples[key[3:]].append(float(value))
+        if row.get("app") is not None:
+            instrumented += 1
+
     stage_stats = {stage: summarize(values) for stage, values in stage_samples.items()}
     view_stage_stats = {stage: summarize(values) for stage, values in sorted(view_stage_samples.items())}
     sql_stats = {stage: summarize(values) for stage, values in sorted(sql_samples.items())}
     function_stats = {name: summarize(values) for name, values in sorted(function_samples.items())}
     transaction_stats = {kind: summarize(values) for kind, values in sorted(transaction_samples.items())}
 
-    stack_verified = completed == requests and successful == requests and instrumented == requests
+    completed = len(request_rows)
+    successful = len(successful_rows)
+    failed = completed - successful
+    stack_verified = completed == requests and successful == requests and instrumented == successful
 
     payload = {
         "phase": "measured",
         "status": "complete" if stack_verified else "partial",
+        "mode": benchmark_mode,
+        "pagination": pagination_mode,
         "requests": requests,
         "completed": completed,
         "successful": successful,
@@ -256,41 +301,58 @@ async def main() -> None:
         "error_rate_pct": (failed / completed * 100) if completed else None,
         "concurrency": concurrency,
         "warmup_requests": warmup,
-        "wall_time_sec": elapsed,
-        "rps": completed / elapsed if elapsed else 0,
-        "successful_rps": successful / elapsed if elapsed else 0,
+        "wall_time_sec": wall_time,
+        "rps": completed / wall_time if wall_time else 0,
+        "successful_rps": successful / wall_time if wall_time else 0,
         "latency_mean_ms": statistics.fmean(latencies) if latencies else None,
         "p50_ms": percentile(latencies, 0.50),
         "p95_ms": percentile(latencies, 0.95),
         "p99_ms": percentile(latencies, 0.99),
         "latency_min_ms": min(latencies) if latencies else None,
         "latency_max_ms": max(latencies) if latencies else None,
-        "status_counts": dict(Counter(map(str, statuses))),
+        "request_queue_wait": summarize(queue_waits),
+        "queue_wait_max_ms": max(queue_waits) if queue_waits else None,
+        "request_start_first_ms": min(
+            (float(row["request_start_offset_ms"]) for row in request_rows), default=None
+        ),
+        "request_start_last_ms": max(
+            (float(row["request_start_offset_ms"]) for row in request_rows), default=None
+        ),
+        "request_detail_file": str(detail_path.name) if detail_path else None,
+        "status_counts": dict(Counter(str(row.get("status_code")) for row in request_rows)),
         "errors": dict(errors),
         "server_timing": stage_stats,
         "view_stage_timing": view_stage_stats,
         "sql_timing": sql_stats,
         "function_timing": function_stats,
         "transaction_timing": transaction_stats,
-        "server_p50_ms": stage_stats["app"]["p50_ms"],
-        "server_p95_ms": stage_stats["app"]["p95_ms"],
-        "server_p99_ms": stage_stats["app"]["p99_ms"],
-        "db_p50_ms": stage_stats["db_operation"]["p50_ms"],
-        "db_p95_ms": stage_stats["db_operation"]["p95_ms"],
-        "db_p99_ms": stage_stats["db_operation"]["p99_ms"],
-        "pool_wait_p50_ms": stage_stats["db_pool"]["p50_ms"],
-        "pool_wait_p95_ms": stage_stats["db_pool"]["p95_ms"],
-        "pool_wait_p99_ms": stage_stats["db_pool"]["p99_ms"],
-        "db_admission_p50_ms": stage_stats["db_admission"]["p50_ms"],
-        "db_admission_p95_ms": stage_stats["db_admission"]["p95_ms"],
-        "db_admission_p99_ms": stage_stats["db_admission"]["p99_ms"],
-        "serializer_wait_p50_ms": stage_stats["serializer_wait"]["p50_ms"],
-        "serializer_cpu_p50_ms": stage_stats["serializer_cpu"]["p50_ms"],
+        "server_p50_ms": stage_stats.get("app", {}).get("p50_ms"),
+        "server_p95_ms": stage_stats.get("app", {}).get("p95_ms"),
+        "server_p99_ms": stage_stats.get("app", {}).get("p99_ms"),
+        "db_p50_ms": stage_stats.get("db_operation", {}).get("p50_ms"),
+        "db_p95_ms": stage_stats.get("db_operation", {}).get("p95_ms"),
+        "db_p99_ms": stage_stats.get("db_operation", {}).get("p99_ms"),
+        "pool_wait_p50_ms": stage_stats.get("db_pool", {}).get("p50_ms"),
+        "pool_wait_p95_ms": stage_stats.get("db_pool", {}).get("p95_ms"),
+        "pool_wait_p99_ms": stage_stats.get("db_pool", {}).get("p99_ms"),
+        "db_admission_p50_ms": stage_stats.get("db_admission", {}).get("p50_ms"),
+        "db_admission_p95_ms": stage_stats.get("db_admission", {}).get("p95_ms"),
+        "db_admission_p99_ms": stage_stats.get("db_admission", {}).get("p99_ms"),
+        "serializer_wait_p50_ms": stage_stats.get("serializer_wait", {}).get("p50_ms"),
+        "serializer_cpu_p50_ms": stage_stats.get("serializer_cpu", {}).get("p50_ms"),
         "instrumented_responses": instrumented,
         "stack_verified": stack_verified,
         "deadline_sec": deadline_s,
-        "deadline_exceeded": bool(deadline_s and elapsed > deadline_s),
+        "deadline_exceeded": bool(deadline_s and wall_time > deadline_s),
+        "request_rows": request_rows,
     }
+
+    if detail_path:
+        detail_path.parent.mkdir(parents=True, exist_ok=True)
+        detail_path.write_text(
+            "\n".join(json.dumps(row, sort_keys=True) for row in request_rows) + "\n",
+            encoding="utf-8",
+        )
 
     print(json.dumps(payload, indent=2, sort_keys=True))
 
