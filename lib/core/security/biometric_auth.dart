@@ -39,25 +39,16 @@ class BiometricAuth {
     }
   }
 
-  Future<bool> isBiometricAvailable() async {
-    try {
-      if (!await _auth.isDeviceSupported() || !await _auth.canCheckBiometrics) {
-        return false;
-      }
-      return (await availableBiometrics()).isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// Attempts biometrics only. The OS remains responsible for selecting the
-  /// enrolled biometric modality (for example Face or fingerprint).
+  /// Uses an enrolled biometric. The OS chooses the enrolled biometric UI.
   Future<BiometricResult> authenticateBiometric({
     String reason = 'Unlock Sales ERP to protect your business data',
   }) async {
-    if (!await isBiometricAvailable()) return BiometricResult.unavailable;
-
     try {
+      final available = await availableBiometrics();
+      if (available.isEmpty || !await _auth.canCheckBiometrics) {
+        return BiometricResult.unavailable;
+      }
+
       final ok = await _auth.authenticate(
         localizedReason: reason,
         biometricOnly: true,
@@ -70,8 +61,8 @@ class BiometricAuth {
     }
   }
 
-  /// Uses the OS device credential flow (PIN/pattern/password/passcode).
-  /// The app never receives or stores the credential.
+  /// Uses the device credential flow (PIN, pattern, password or passcode).
+  /// The credential is entered in the OS UI and is never exposed to the app.
   Future<BiometricResult> authenticateDeviceCredential({
     String reason = 'Unlock Sales ERP with your phone PIN or password',
   }) async {
@@ -89,9 +80,4 @@ class BiometricAuth {
       return BiometricResult.failed;
     }
   }
-
-  /// Backwards-compatible convenience method for biometric-only callers.
-  Future<BiometricResult> authenticate({
-    String reason = 'Unlock Sales ERP to protect your business data',
-  }) => authenticateBiometric(reason: reason);
 }
