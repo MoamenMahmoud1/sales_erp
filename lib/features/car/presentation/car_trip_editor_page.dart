@@ -55,6 +55,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   final Map<int, int> _loaded = {};
   final Map<int, int> _returned = {};
   final Map<int, double> _discounts = {};
+  final Map<int, CarMoney> _unitPrices = {};
+  final Map<int, String> _productNames = {};
 
   bool _loading = true;
   bool _saving = false;
@@ -104,6 +106,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
           _loaded[item.productId] = item.loadedCartons;
           _returned[item.productId] = item.returnedCartons;
           _discounts[item.productId] = item.discountPercent;
+          _unitPrices[item.productId] = item.unitPrice;
+          _productNames[item.productId] = item.productName;
         }
       } else {
         if (_cars.length == 1) _selectedCar = _cars.first;
@@ -134,8 +138,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     final product = _productsList.firstWhere((p) => p.id == id);
     return CarLoadItem(
       productId: id,
-      productName: product.name,
-      unitPrice: CarMoney.fromUnits(product.price),
+      productName: _productNames[id] ?? product.name,
+      unitPrice: _unitPrices[id] ?? CarMoney.fromUnits(product.price),
       loadedCartons: _loaded[id] ?? 0,
       returnedCartons: _returned[id] ?? 0,
       discountPercent: _discounts[id] ?? 0,
@@ -304,6 +308,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       _loaded[chosen.id] = 1;
       _returned[chosen.id] = 0;
       _discounts[chosen.id] = 0;
+      _unitPrices[chosen.id] = CarMoney.fromUnits(chosen.price);
+      _productNames[chosen.id] = chosen.name;
     });
   }
 
@@ -604,10 +610,13 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(product.name, style: const TextStyle(fontWeight: FontWeight.w800)),
+                      Text(
+                        _productNames[id] ?? product.name,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                       const SizedBox(height: 3),
                       Text(
-                        '${product.price.toStringAsFixed(2)} EGP / carton',
+                        '${line.item.unitPrice.units.toStringAsFixed(2)} EGP / carton',
                         style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
                       ),
                     ],
@@ -621,6 +630,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                             _loaded.remove(id);
                             _returned.remove(id);
                             _discounts.remove(id);
+                            _unitPrices.remove(id);
+                            _productNames.remove(id);
                           }),
                   icon: Icon(Icons.close_rounded, color: scheme.error),
                 ),
