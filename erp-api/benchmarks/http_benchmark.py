@@ -55,7 +55,16 @@ async def run_requests(
     concurrency: int,
     timeout_s: float,
     progress_every: int = 0,
-) -> tuple[list[float], list[int], Counter[str], dict[str, list[float]], dict[str, list[float]], int]:
+) -> tuple[
+    list[float],
+    list[int],
+    Counter[str],
+    dict[str, list[float]],
+    dict[str, list[float]],
+    dict[str, list[float]],
+    dict[str, list[float]],
+    int,
+]:
     latencies: list[float] = []
     statuses: list[int] = []
     errors: Counter[str] = Counter()
@@ -68,6 +77,9 @@ async def run_requests(
         "serializer_cpu": [],
     }
     view_stage_samples: dict[str, list[float]] = defaultdict(list)
+    sql_samples: dict[str, list[float]] = defaultdict(list)
+    function_samples: dict[str, list[float]] = defaultdict(list)
+    transaction_samples: dict[str, list[float]] = defaultdict(list)
     instrumented_responses = 0
     next_index = 0
     completed = 0
@@ -107,7 +119,7 @@ async def run_requests(
                     latencies.append(elapsed_ms)
                     statuses.append(response.status_code)
 
-                    headers = {
+                    required = {
                         "app": "X-Perf-App-ms",
                         "db_admission": "X-Perf-DB-Admission-ms",
                         "db_pool": "X-Perf-DB-Pool-ms",
@@ -116,7 +128,7 @@ async def run_requests(
                         "serializer_cpu": "X-Perf-Serializer-CPU-ms",
                     }
                     parsed = True
-                    for stage, header in headers.items():
+                    for stage, header in required.items():
                         value = response.headers.get(header)
                         if value is None:
                             parsed = False
@@ -127,15 +139,41 @@ async def run_requests(
                             parsed = False
 
                     for header_name, value in response.headers.items():
-                        if not header_name.lower().startswith("x-perf-view-"):
-                            continue
-                        if not header_name.lower().endswith("-ms"):
-                            continue
-                        try:
-                            stage_name = header_name[12:-3].replace("-", ".")
-                            view_stage_samples[stage_name].append(float(value))
-                        except ValueError:
-                            parsed = False
+                        lower = header_name.lower()
+                        if lower.startswith("x-perf-view-") and lower.endswith("-ms"):
+                            try:
+                                stage_name = header_name[12:-3].replace("-", ".")
+                                view_stage_samples[stage_name].append(float(value))
+                            except ValueError:
+                                parsed = False
+                        elif lower.startswith("x-perf-sql-") and (
+                            lower.endswith("-total-ms") or lower.endswith("-max-ms") or lower.endswith("-count")
+                        ):
+                            parts = header_name.split("-")
+                            if lower.endswith("-total-ms"):
+                                kind = "-".join(parts[3:-1]).lower()
+                                try:
+                                    sql_samples[f"{kind}.total"].append(float(value))
+                                except ValueError:
+                                    parsed = False
+                            elif lower.endswith("-max-ms"):
+                                kind = "-".join(parts[3:-1]).lower()
+                                try:
+                                    sql_samples[f"{kind}.max"].append(float(value))
+                                except ValueError:
+                                    parsed = False
+                        elif lower.startswith("x-perf-fn-") and lower.endswith("-total-ms"):
+                            name = header_name[10:-9].replace("-", ".")
+                            try:
+                                function_samples[name].append(float(value))
+                            except ValueError:
+                                parsed = False
+                        elif lower.startswith("x-perf-tx-") and lower.endswith("-total-ms"):
+                            kind = header_name[10:-9].lower()
+                            try:
+                                transaction_samples[kind].append(float(value))
+                            except ValueError:
+                                parsed = False
 
                     if parsed:
                         instrumented_responses += 1
@@ -152,7 +190,17 @@ async def run_requests(
 
         await asyncio.gather(*(worker() for _ in range(concurrency)))
 
-    return latencies, statuses, errors, stage_samples, dict(view_stage_samples), instrumented_responses
+    return (
+        latencies,
+        statuses,
+        errors,
+        stage_samples,
+        dict(view_stage_samples),
+        dict(sql_samples),
+        dict(function_samples),
+        dict(transaction_samples),
+        instrumented_responses,
+    )
 
 
 async def main() -> None:
@@ -172,24 +220,29 @@ async def main() -> None:
         await run_requests(url, token, warmup, min(concurrency, warmup), timeout_s)
 
     started = time.perf_counter()
-    latencies, statuses, errors, stage_samples, view_stage_samples, instrumented = await run_requests(
-        url, token, requests, concurrency, timeout_s, progress_every
-    )
+    (
+        latencies,
+        statuses,
+        errors,
+        stage_samples,
+        view_stage_samples,
+        sql_samples,
+        function_samples,
+        transaction_samples,
+        instrumented,
+    ) = await run_requests(url, token, requests, concurrency, timeout_s, progress_every)
     elapsed = time.perf_counter() - started
 
     successful = sum(200 <= status < 300 for status in statuses)
     completed = len(latencies)
     failed = completed - successful
     stage_stats = {stage: summarize(values) for stage, values in stage_samples.items()}
-    view_stage_stats = {
-        stage: summarize(values) for stage, values in sorted(view_stage_samples.items())
-    }
+    view_stage_stats = {stage: summarize(values) for stage, values in sorted(view_stage_samples.items())}
+    sql_stats = {stage: summarize(values) for stage, values in sorted(sql_samples.items())}
+    function_stats = {name: summarize(values) for name, values in sorted(function_samples.items())}
+    transaction_stats = {kind: summarize(values) for kind, values in sorted(transaction_samples.items())}
 
-    stack_verified = (
-        completed == requests
-        and successful == requests
-        and instrumented == requests
-    )
+    stack_verified = completed == requests and successful == requests and instrumented == requests
 
     payload = {
         "phase": "measured",
@@ -214,6 +267,9 @@ async def main() -> None:
         "errors": dict(errors),
         "server_timing": stage_stats,
         "view_stage_timing": view_stage_stats,
+        "sql_timing": sql_stats,
+        "function_timing": function_stats,
+        "transaction_timing": transaction_stats,
         "server_p50_ms": stage_stats["app"]["p50_ms"],
         "server_p95_ms": stage_stats["app"]["p95_ms"],
         "server_p99_ms": stage_stats["app"]["p99_ms"],
