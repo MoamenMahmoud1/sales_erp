@@ -4,6 +4,7 @@ import '../../../core/storage/app_database.dart';
 import '../domain/entities/car_payment_allocation.dart';
 import '../domain/entities/car_payment_transaction.dart';
 import '../domain/entities/car_trip.dart';
+import '../domain/entities/money.dart';
 import '../domain/repositories/car_payment_repository.dart';
 
 /// Persists payment events and allocations atomically in AppDatabase.
@@ -19,10 +20,12 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
     required List<CarPaymentAllocation> allocations,
     required List<CarTrip> updatedTrips,
   }) async {
-    if (transaction.totalAmount.isNegative || transaction.totalAmount == 0) {
+    if (transaction.totalAmount.minorUnits <= 0) {
       throw ArgumentError('Payment amount must be greater than zero.');
     }
-    if (allocations.isEmpty) throw ArgumentError('Payment has no allocations.');
+    if (allocations.isEmpty) {
+      throw ArgumentError('Payment has no allocations.');
+    }
 
     final db = await _database();
     await db.transaction((txn) async {
@@ -65,7 +68,9 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
           where: 'id = ?',
           whereArgs: [trip.id],
         );
-        if (updated == 0) throw StateError('Car trip ${trip.id} was not found.');
+        if (updated == 0) {
+          throw StateError('Car trip ${trip.id} was not found.');
+        }
       }
     });
   }
@@ -123,7 +128,6 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
         transactionId: row['payment_transaction_id'] as int,
         tripId: row['trip_id'] as int,
         cashAmount: CarMoney((row['cash_amount_minor'] as num).toInt()),
-        transferAmount:
-            CarMoney((row['transfer_amount_minor'] as num).toInt()),
+        transferAmount: CarMoney((row['transfer_amount_minor'] as num).toInt()),
       );
 }
