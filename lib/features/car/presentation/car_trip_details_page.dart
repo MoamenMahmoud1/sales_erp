@@ -5,7 +5,6 @@ import '../../../core/ui/app_card.dart';
 import '../../../core/ui/empty_state.dart';
 import '../../../core/ui/status_badge.dart';
 import '../domain/entities/car_trip.dart';
-import '../domain/entities/car_trip_summary_view.dart';
 import '../domain/entities/car_payment_status.dart';
 import '../domain/services/car_calculator.dart';
 import '../domain/services/car_payment_evaluator.dart';
