@@ -105,29 +105,56 @@ jobs:
           stop_server() {
             local old_pid="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
             if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
-              kill "$old_pid" 2>/dev/null || true
-              for attempt in $(seq 1 30); do
-                kill -0 "$old_pid" 2>/dev/null || break
-                sleep 1
+              kill -TERM "$old_pid" 2>/dev/null || true
+              pkill -TERM -P "$old_pid" 2>/dev/null || true
+              for attempt in $(seq 1 10); do
+                if ! kill -0 "$old_pid" 2>/dev/null; then break; fi
+                sleep 0.5
               done
+              pkill -KILL -P "$old_pid" 2>/dev/null || true
               kill -KILL "$old_pid" 2>/dev/null || true
             fi
+
+            for attempt in $(seq 1 20); do
+              if ! ss -ltnH 'sport = :8000' | grep -q .; then return 0; fi
+              sleep 0.25
+            done
+
+            echo "port 8000 is still occupied after server shutdown" >&2
+            ss -ltnp || true
+            ps -ef --forest | grep -E 'gunicorn|uvicorn' | grep -v grep || true
+            return 1
           }
 
           start_server() {
             local stack="$1"
             local gate="$2"
-            BENCH_API_STACK="$stack" ASYNC_DB_CONCURRENCY="$gate" BENCH_PAGINATION="$3" \
+            local pagination="$3"
+
+            stop_server
+            : > /tmp/gunicorn-admission.log
+            BENCH_API_STACK="$stack" ASYNC_DB_CONCURRENCY="$gate" BENCH_PAGINATION="$pagination" \
               gunicorn core.asgi:application --bind 127.0.0.1:8000 \
               --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker \
               --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
             echo $! > /tmp/gunicorn.pid
+
             for attempt in $(seq 1 60); do
               if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then return 0; fi
+              if [[ -s /tmp/gunicorn-admission.log ]]; then
+                if grep -qiE 'error|traceback|failed|address already in use' /tmp/gunicorn-admission.log; then break; fi
+              fi
               sleep 1
             done
-            cat /tmp/gunicorn-admission.log || true
-            exit 1
+
+            echo "server failed to become healthy: stack=$stack pagination=$pagination gate=$gate" >&2
+            echo "--- gunicorn log ---" >&2
+            cat /tmp/gunicorn-admission.log >&2 || true
+            echo "--- port state ---" >&2
+            ss -ltnp || true
+            echo "--- process state ---" >&2
+            ps -ef --forest | grep -E 'gunicorn|uvicorn' | grep -v grep || true
+            return 1
           }
 
           bench_case() {
@@ -143,7 +170,6 @@ jobs:
 
           for stack in async sync; do
             for pagination in page cursor; do
-              stop_server
               start_server "$stack" 0 "$pagination"
               for concurrency in 1 50 100; do
                 bench_case "$stack" "$pagination" "$concurrency"
@@ -160,17 +186,29 @@ jobs:
           stop_server() {
             local old_pid="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
             if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
-              kill "$old_pid" 2>/dev/null || true
-              for attempt in $(seq 1 30); do
-                kill -0 "$old_pid" 2>/dev/null || break
-                sleep 1
+              kill -TERM "$old_pid" 2>/dev/null || true
+              pkill -TERM -P "$old_pid" 2>/dev/null || true
+              for attempt in $(seq 1 10); do
+                if ! kill -0 "$old_pid" 2>/dev/null; then break; fi
+                sleep 0.5
               done
+              pkill -KILL -P "$old_pid" 2>/dev/null || true
               kill -KILL "$old_pid" 2>/dev/null || true
             fi
+            for attempt in $(seq 1 20); do
+              if ! ss -ltnH 'sport = :8000' | grep -q .; then return 0; fi
+              sleep 0.25
+            done
+            echo "port 8000 is still occupied after admission server shutdown" >&2
+            ss -ltnp || true
+            ps -ef --forest | grep -E 'gunicorn|uvicorn' | grep -v grep || true
+            return 1
           }
 
           start_server() {
             local gate="$1"
+            stop_server
+            : > /tmp/gunicorn-admission.log
             BENCH_API_STACK=async ASYNC_DB_CONCURRENCY="$gate" BENCH_PAGINATION=page \
               gunicorn core.asgi:application --bind 127.0.0.1:8000 \
               --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker \
@@ -180,12 +218,14 @@ jobs:
               if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then return 0; fi
               sleep 1
             done
-            cat /tmp/gunicorn-admission.log || true
-            exit 1
+            echo "admission server failed to become healthy: gate=$gate" >&2
+            cat /tmp/gunicorn-admission.log >&2 || true
+            ss -ltnp || true
+            ps -ef --forest | grep -E 'gunicorn|uvicorn' | grep -v grep || true
+            return 1
           }
 
           for gate in 4 6 7; do
-            stop_server
             start_server "$gate"
             for concurrency in 50 100; do
               prefix="async-gate${gate}-page-c${concurrency}"
@@ -207,11 +247,10 @@ jobs:
         run: |
           if [[ -f /tmp/gunicorn.pid ]]; then
             PID="$(cat /tmp/gunicorn.pid)"
-            kill "$PID" 2>/dev/null || true
-            for attempt in $(seq 1 10); do
-              kill -0 "$PID" 2>/dev/null || exit 0
-              sleep 1
-            done
+            kill -TERM "$PID" 2>/dev/null || true
+            pkill -TERM -P "$PID" 2>/dev/null || true
+            sleep 1
+            pkill -KILL -P "$PID" 2>/dev/null || true
             kill -KILL "$PID" 2>/dev/null || true
           fi
 
