@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite_common_ffi/sqflite_common_ffi.dart';
 
 import 'package:sales_erp/core/storage/app_schema.dart';
 import 'package:sales_erp/features/car/data/local_car_catalog_repository.dart';
@@ -120,8 +120,8 @@ void main() {
       ),
     );
 
-    final paid = closed.copyWith(
-      payment: const CarPayment(cashAmount: CarMoney(1000)),
+    final revisedAttempt = closed.copyWith(
+      payment: const CarPayment(cashAmount: CarMoney.fromUnits(1000)),
       items: [
         CarLoadItem(
           productId: productId,
@@ -132,8 +132,8 @@ void main() {
       ],
     );
 
-    expect(
-      () => repo.reviseClosedTrip(paid, triggeredBy: 'invoice_edit'),
+    await expectLater(
+      repo.reviseClosedTrip(revisedAttempt, triggeredBy: 'invoice_edit'),
       throwsA(isA<StateError>()),
     );
 
@@ -142,5 +142,50 @@ void main() {
     expect(stored!.payment.totalPaid, CarMoney.zero);
     expect(stored.items.single.unitPrice, CarMoney.fromUnits(10));
     expect(await repo.getRevisionsForTrip(closed.id), hasLength(1));
+  });
+
+  test('revision preserves the original product snapshot after catalog price changes', () async {
+    final productId = await product('Water', 100);
+    final (car, warehouse) = await catalog();
+    final repo = LocalCarTripRepository(database: () async => database);
+
+    final closed = await repo.createAndConfirmTrip(
+      CarTrip(
+        salesCarId: car.id,
+        salesCarName: car.name,
+        warehouseId: warehouse.id,
+        warehouseName: warehouse.name,
+        openedAt: DateTime(2026, 1, 2),
+        items: [
+          CarLoadItem(
+            productId: productId,
+            productName: 'Water',
+            unitPrice: CarMoney.fromUnits(100),
+            loadedCartons: 10,
+          ),
+        ],
+      ),
+    );
+
+    await database.update(
+      'products',
+      {
+        'name': 'Water Premium',
+        'price': 150.0,
+        'updated_at': DateTime(2026, 1, 3).toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [productId],
+    );
+
+    final unchanged = await repo.getTripById(closed.id);
+    expect(unchanged, isNotNull);
+    expect(unchanged!.items.single.productName, 'Water');
+    expect(unchanged.items.single.unitPrice, CarMoney.fromUnits(100));
+
+    final revisions = await repo.getRevisionsForTrip(closed.id);
+    expect(revisions, hasLength(1));
+    expect(revisions.single.items.single.productName, 'Water');
+    expect(revisions.single.items.single.unitPrice, CarMoney.fromUnits(100));
   });
 }
