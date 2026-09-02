@@ -7,17 +7,19 @@ import '../ui/app_card.dart';
 import '../ui/section_header.dart';
 import '../ui/status_badge.dart';
 
-/// "More" page: theme switching, local-mode info and security actions.
+/// More page: appearance, data mode, security, and the independent Car app.
 class SettingsPage extends StatelessWidget {
   final AppThemeController themeController;
   final VoidCallback? onLock;
   final VoidCallback? onReset;
+  final VoidCallback? onOpenCarApp;
 
   const SettingsPage({
     super.key,
     required this.themeController,
     this.onLock,
     this.onReset,
+    this.onOpenCarApp,
   });
 
   @override
@@ -28,6 +30,17 @@ class SettingsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
+          const SectionHeader(title: 'Operations'),
+          const SizedBox(height: AppSpacing.md),
+          AppCard(
+            child: _ActionRow(
+              icon: Icons.local_shipping_rounded,
+              title: 'Car Sales',
+              subtitle: 'Daily loads, returns, sold cartons, payments and reports',
+              onTap: onOpenCarApp,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
           const SectionHeader(title: 'Appearance'),
           const SizedBox(height: AppSpacing.md),
           Row(
@@ -111,16 +124,14 @@ class SettingsPage extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xxl),
           Center(
-            child: Text(
-              'Sales ERP v1.0.0',
-              style: TextStyle(color: colors.textMuted, fontSize: 12),
-            ),
+            child: Text('Sales ERP v1.0.0', style: TextStyle(color: colors.textMuted, fontSize: 12)),
           ),
         ],
       ),
     );
   }
 }
+
 class _ThemeOption extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -186,12 +197,12 @@ class _ActionRow extends StatelessWidget {
     return Material(
       type: MaterialType.transparency,
       child: ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: colors.primary),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-      subtitle: Text(subtitle, style: const TextStyle(fontSize: 13)),
-      trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: onTap,
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icon, color: colors.primary),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+        subtitle: Text(subtitle, style: const TextStyle(fontSize: 13)),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: onTap,
       ),
     );
   }
