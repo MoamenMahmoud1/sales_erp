@@ -1,14 +1,22 @@
 import '../../app/config/data_mode.dart';
+import '../../features/car/data/local_car_catalog_repository.dart';
+import '../../features/car/data/local_car_payment_repository.dart';
+import '../../features/car/data/local_car_report_repository.dart';
+import '../../features/car/data/local_car_trip_repository.dart';
+import '../../features/car/domain/repositories/car_catalog_repository.dart';
+import '../../features/car/domain/repositories/car_payment_repository.dart';
+import '../../features/car/domain/repositories/car_report_repository.dart';
+import '../../features/car/domain/repositories/car_trip_repository.dart';
 import '../../features/customers/data/local_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
 import '../../features/products/data/local_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
 
-/// Central entry point for core services and repositories.
+/// Central composition root for application services and repositories.
 ///
-/// The current runtime is **100% local**: startup initializes only the local
-/// data mode and database and never touches any network/client code. A future
-/// API phase can be introduced behind the same repository interfaces.
+/// Runtime is currently offline-first. Repository interfaces are deliberately
+/// stable so remote data sources can be introduced later without changing UI
+/// or domain code.
 class AppServices {
   AppServices._();
 
@@ -16,28 +24,27 @@ class AppServices {
 
   final DataModeController dataMode = DataModeController();
 
+  final CustomerRepository customerRepository = LocalCustomerRepository();
+  final ProductRepository productRepository = LocalProductRepository();
+
+  final CarCatalogRepository carCatalogRepository =
+      LocalCarCatalogRepository();
+  final CarTripRepository carTripRepository = LocalCarTripRepository();
+  final CarPaymentRepository carPaymentRepository =
+      LocalCarPaymentRepository();
+  final CarReportRepository carReportRepository = LocalCarReportRepository();
+
   bool _ready = false;
 
   bool get isReady => _ready;
 
-  /// Initializes purely local services. Never touches the network layer, so
-  /// the app boots without a backend, internet, or API credentials.
   Future<void> init() async {
     if (_ready) return;
     await dataMode.load();
     _ready = true;
   }
 
-  /// Whether the current operational mode permits offline access without a
-  /// server (true for `local` & `hybrid`, false only for `api`).
   bool get offlineAllowed => dataMode.offlineAllowed;
 
   DataMode get mode => dataMode.mode;
-
-  /// In this local-only phase every mode resolves to the local SQLite-backed
-  /// repository. The [DataMode.api] / [DataMode.hybrid] branches will be
-  /// introduced in a future integration phase via the same interfaces.
-  CustomerRepository get customerRepository => LocalCustomerRepository();
-
-  ProductRepository get productRepository => LocalProductRepository();
 }
