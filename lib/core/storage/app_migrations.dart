@@ -1,5 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
+import 'car_tables.dart';
+
 Future<void> runAppMigrations(
   Database db,
   int oldVersion,
@@ -187,14 +189,12 @@ Future<void> _migrateToVersion10(Database db) async {
   await db.transaction((txn) async {
     final columns = await txn.rawQuery('PRAGMA table_info(coupons)');
     final existing = {for (final row in columns) row['name'] as String};
-
     if (!existing.contains('units_per_carton')) {
       await txn.execute('ALTER TABLE coupons ADD COLUMN units_per_carton INTEGER');
     }
     if (!existing.contains('carton_price')) {
       await txn.execute('ALTER TABLE coupons ADD COLUMN carton_price REAL');
     }
-
     await txn.execute('''
       UPDATE coupons
       SET units_per_carton = COALESCE(units_per_carton, pieces_per_coupon, 0),
@@ -205,10 +205,7 @@ Future<void> _migrateToVersion10(Database db) async {
 
 Future<void> _migrateToVersion11(Database db) async {
   await db.transaction((txn) async {
-    // Car schema belongs to the central AppDatabase. The schema helper is
-    // idempotent so this migration can also recover partially-created tables.
-    // ignore: avoid_dynamic_calls
-    await _createCarTables(txn);
+    await createCarTables(txn);
   });
 }
 
@@ -230,8 +227,6 @@ Future<void> _migrateToVersion12(Database db) async {
       await txn.execute('ALTER TABLE car_revisions ADD COLUMN warehouse_name TEXT');
     }
 
-    // Existing rows from the first Car migration may be missing these values.
-    // Backfill them from the current trip snapshot when possible.
     await txn.execute('''
       UPDATE car_revisions
       SET sales_car_id = COALESCE(
@@ -252,15 +247,6 @@ Future<void> _migrateToVersion12(Database db) async {
           )
     ''');
   });
-}
-
-Future<void> _createCarTables(DatabaseExecutor db) async {
-  // Importing through a local helper would create a circular dependency with
-  // the central schema, so execute the migration through the shared schema
-  // entry point exposed in this file's part-free design.
-  throw StateError(
-    'Car schema migration must be wired by AppDatabase using createCarTables.',
-  );
 }
 
 Future<bool> _tableExists(DatabaseExecutor db, String tableName) async {
