@@ -60,18 +60,19 @@ def _pool_options() -> dict[str, Any]:
     """Build the async pool configuration for one ASGI worker."""
     min_size = max(int(getattr(settings, "ASYNC_PG_POOL_MIN_SIZE", 2)), 0)
     max_size = max(int(getattr(settings, "ASYNC_PG_POOL_MAX_SIZE", 12)), 1)
+    max_waiting = max(int(getattr(settings, "ASYNC_PG_MAX_WAITING", 0)), 0)
     if min_size > max_size:
         raise ValueError("ASYNC_PG_POOL_MIN_SIZE must be <= ASYNC_PG_POOL_MAX_SIZE")
 
     return {
         "min_size": min_size,
         "max_size": max_size,
+        "max_waiting": max_waiting,
         "timeout": float(getattr(settings, "ASYNC_PG_POOL_TIMEOUT", 2.0)),
         "max_lifetime": float(getattr(settings, "ASYNC_PG_POOL_MAX_LIFETIME", 3600.0)),
         "max_idle": float(getattr(settings, "ASYNC_PG_POOL_MAX_IDLE", 600.0)),
         "open": False,
         "kwargs": _db_kwargs(),
-        "check": AsyncConnectionPool.check_connection,
     }
 
 
