@@ -65,6 +65,7 @@ async def run_requests(
     concurrency: int,
     timeout_s: float,
     progress_every: int = 0,
+    client: httpx.AsyncClient | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     results: list[dict[str, object]] = []
     server_results: list[dict[str, object]] = []
@@ -72,20 +73,9 @@ async def run_requests(
 
     batch_started = time.perf_counter()
     for index in range(requests):
-        await queue.put(index)
+        queue.put_nowait(index)
 
-    limits = httpx.Limits(
-        max_connections=concurrency,
-        max_keepalive_connections=concurrency,
-        keepalive_expiry=30,
-    )
-
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(timeout_s),
-        limits=limits,
-        http2=False,
-        trust_env=False,
-    ) as client:
+    async def execute(active_client: httpx.AsyncClient) -> None:
         async def worker(worker_id: int) -> None:
             while True:
                 try:
@@ -101,14 +91,13 @@ async def run_requests(
                 }
 
                 try:
-                    response = await client.get(
+                    response = await active_client.get(
                         url,
                         headers={
                             "Authorization": f"Bearer {token}",
                             "Accept": "application/json",
                         },
                     )
-                    response.read()
                     finished = time.perf_counter()
                     request_wire_ms = (finished - request_started) * 1000
                     row.update(
@@ -154,6 +143,23 @@ async def run_requests(
                     )
 
         await asyncio.gather(*(worker(worker_id) for worker_id in range(concurrency)))
+
+    if client is not None:
+        await execute(client)
+        return results, server_results
+
+    limits = httpx.Limits(
+        max_connections=concurrency,
+        max_keepalive_connections=concurrency,
+        keepalive_expiry=30,
+    )
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(timeout_s),
+        limits=limits,
+        http2=False,
+        trust_env=False,
+    ) as owned_client:
+        await execute(owned_client)
 
     return results, server_results
 
@@ -237,14 +243,33 @@ async def main() -> None:
     if requests <= 0 or concurrency <= 0:
         raise SystemExit("BENCH_REQUESTS and BENCH_CONCURRENCY must be > 0")
 
-    if warmup > 0:
-        await run_requests(url, token, warmup, min(concurrency, warmup), timeout_s)
-
-    batch_started = time.perf_counter()
-    request_rows, instrumentation_rows = await run_requests(
-        url, token, requests, concurrency, timeout_s, progress_every
+    limits = httpx.Limits(
+        max_connections=concurrency,
+        max_keepalive_connections=concurrency,
+        keepalive_expiry=30,
     )
-    wall_time = time.perf_counter() - batch_started
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(timeout_s),
+        limits=limits,
+        http2=False,
+        trust_env=False,
+    ) as client:
+        warmup_requests = max(warmup, concurrency) if warmup > 0 else 0
+        if warmup_requests:
+            await run_requests(
+                url,
+                token,
+                warmup_requests,
+                concurrency,
+                timeout_s,
+                client=client,
+            )
+
+        batch_started = time.perf_counter()
+        request_rows, instrumentation_rows = await run_requests(
+            url, token, requests, concurrency, timeout_s, progress_every, client=client
+        )
+        wall_time = time.perf_counter() - batch_started
 
     request_rows.sort(key=lambda row: int(row["request_index"]))
     successful_rows = [
@@ -290,7 +315,6 @@ async def main() -> None:
     completed = len(request_rows)
     successful = len(successful_rows)
     failed = completed - successful
-    request_complete = completed == requests and successful == requests
     execution_complete = completed == requests
     stack_verified = execution_complete and (instrumented == successful or not require_instrumentation)
 
@@ -305,7 +329,7 @@ async def main() -> None:
         "failed": failed,
         "error_rate_pct": (failed / completed * 100) if completed else None,
         "concurrency": concurrency,
-        "warmup_requests": warmup,
+        "warmup_requests": warmup_requests,
         "wall_time_sec": wall_time,
         "rps": completed / wall_time if wall_time else 0,
         "successful_rps": successful / wall_time if wall_time else 0,
