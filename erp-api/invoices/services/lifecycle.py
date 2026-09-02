@@ -59,7 +59,7 @@ def _record_sale_movement_sync(invoice, source_location):
     items = sorted(invoice.items.select_related("product").all(), key=lambda value: value.product_id)
     for item in items:
         try:
-            StockBalanceService.decrease(
+            StockBalanceService.decrease_in_transaction(
                 location=source_location,
                 product=item.product,
                 quantity=item.quantity,
@@ -135,7 +135,7 @@ def _reverse_sale_movement_sync(invoice):
 
     items = sorted(invoice.items.select_related("product").all(), key=lambda value: value.product_id)
     for item in items:
-        StockBalanceService.increase(
+        StockBalanceService.increase_in_transaction(
             location=source_location,
             product=item.product,
             quantity=item.quantity,
