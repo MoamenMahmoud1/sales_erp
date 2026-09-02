@@ -56,7 +56,7 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
       REDIS_URL: redis://127.0.0.1:6379/0
-      WEB_CONCURRENCY: "1"
+      WEB_CONCURRENCY: "4"
       DB_POOL_MIN_SIZE: "0"
       DB_POOL_MAX_SIZE: "8"
       ASYNC_DB_CONCURRENCY: "8"
@@ -125,11 +125,11 @@ jobs:
             : > /tmp/gunicorn-benchmark.log
             if [[ "$mode" == "sync" ]]; then
               setsid env BENCH_API_STACK=sync BENCH_PAGINATION="$pagination" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=8 ASYNC_DB_CONCURRENCY=0 \
-                gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers 1 --threads "$d" --worker-class gthread \
+                gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --threads "$d" --worker-class gthread \
                 --timeout 10 --access-logfile /dev/null --error-logfile /tmp/gunicorn-benchmark.log --log-level warning &
             else
               setsid env BENCH_API_STACK=async BENCH_PAGINATION="$pagination" DB_POOL_MIN_SIZE=0 DB_POOL_MAX_SIZE=8 ASYNC_DB_CONCURRENCY="$d" \
-                gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers 1 --worker-class uvicorn_worker.UvicornWorker \
+                gunicorn core.asgi:application --bind 127.0.0.1:8000 --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker \
                 --timeout 10 --access-logfile /dev/null --error-logfile /tmp/gunicorn-benchmark.log --log-level warning &
             fi
             echo $! > /tmp/gunicorn.pid
@@ -156,14 +156,13 @@ jobs:
             fi
           }
 
-          # Fairness rule: one Gunicorn worker for BOTH modes. D is the same
-          # server-side concurrency unit: sync = threads, async = DB admission.
-          # Therefore D means exactly the same number of concurrent request slots.
+          # D is per-worker server-side concurrency:
+          # sync = Gunicorn threads/worker; async = DB admission slots/worker.
+          # With 4 workers, total server-side concurrency is D * 4 in both modes.
           for mode in async sync; do
             for d in "${D_VALUES[@]}"; do
               start_server "$mode" cursor "$d"
-              PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c 'SELECT pg_stat_statements_reset();' >/dev/null 2>&1 || true
-              run_one "$mode" cursor "$d" 25 calibration
+              run_one "$mode" cursor "$d" 100 calibration
               stop_server
             done
           done
@@ -175,20 +174,15 @@ jobs:
           for mode in ('async','sync'):
               good=[]
               for d in (1,2,4,8):
-                  p=root/f'{mode}-cursor-d{d}-c25.json'
+                  p=root/f'{mode}-cursor-d{d}-c100.json'
                   c=json.loads(p.read_text())
                   if c.get('status') == 'complete' and int(c.get('failed') or 0) == 0 and float(c.get('pool_wait_p95_ms') or 0) <= 50:
-                      good.append(c)
+                      good.append((d,c))
               if not good:
                   raise SystemExit(f'No healthy D for {mode}')
-              # Maximize throughput at the SAME client pressure (C=25).
-              selected=max(good,key=lambda x:(float(x.get('successful_rps') or 0),-float(x.get('p99_ms') or 0)))
-              d=int(selected['capacity_per_worker']) if 'capacity_per_worker' in selected else int(selected.get('d', 0) or 0)
-              if not d:
-                  # benchmark output has no D field; recover it from the filename chosen above.
-                  d=int(next(p.stem.split('-d')[1].split('-')[0] for p in root.glob(f'{mode}-cursor-d*-c25.json') if json.loads(p.read_text()) is selected) or 0)
-              (root/f'{mode}-selected.env').write_text(f'CAPACITY_PER_WORKER={d}\nCAPACITY_TOTAL={d}\n')
-              print(f'{mode}: selected D={d} RPS={selected.get("successful_rps")} p95={selected.get("p95_ms")}')
+              d, selected=max(good,key=lambda item:(float(item[1].get('successful_rps') or 0),-float(item[1].get('p99_ms') or 0)))
+              (root/f'{mode}-selected.env').write_text(f'CAPACITY_PER_WORKER={d}\nCAPACITY_TOTAL={d*4}\n')
+              print(f'{mode}: selected D/worker={d} total={d*4} RPS={selected.get("successful_rps")} p95={selected.get("p95_ms")}')
           PY
 
           get_d() { awk -F= '/^CAPACITY_PER_WORKER=/{print $2}' "benchmark-results/calibration/$1-selected.env"; }
@@ -211,16 +205,21 @@ jobs:
           from pathlib import Path
           root=Path('benchmark-results')
           caps={}
+          totals={}
           for mode in ('async','sync'):
-              caps[mode]=int([x.split('=',1)[1] for x in (root/'calibration'/f'{mode}-selected.env').read_text().splitlines() if x.startswith('CAPACITY_PER_WORKER=')][0])
+              vals={}
+              for x in (root/'calibration'/f'{mode}-selected.env').read_text().splitlines():
+                  k,v=x.split('=',1); vals[k]=int(v)
+              caps[mode]=vals['CAPACITY_PER_WORKER']
+              totals[mode]=vals['CAPACITY_TOTAL']
           lines=['# Sustainable Sync vs Async Capacity','',
-                 'Fairness: one Gunicorn worker for both modes. D is identical in meaning: sync uses D threads, async uses D admission slots. DB pool is fixed at 8.','',
-                 '| mode | pagination | D | client C | wall s | RPS | p50 ms | p95 ms | p99 ms | pool p95 ms | admission p95 ms | failed |',
-                 '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
+                 f'Fairness: 4 Gunicorn workers for both modes. D is per-worker server-side concurrency: sync = D threads/worker, async = D admission slots/worker. Total server-side D = D × 4. DB pool max is 8 per worker.','',
+                 '| mode | pagination | D/worker | total D | client C | wall s | RPS | p50 ms | p95 ms | p99 ms | pool p95 ms | admission p95 ms | failed |',
+                 '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
           for p in sorted((root/'final').glob('*.json')):
               c=json.loads(p.read_text())
               m=c.get('mode','')
-              lines.append(f"| {m} | {c.get('pagination','')} | {caps[m]} | {int(c.get('concurrency') or 0)} | {float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | {float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | {float(c.get('p99_ms') or 0):.2f} | {float(c.get('pool_wait_p95_ms') or 0):.2f} | {float(c.get('db_admission_p95_ms') or 0):.2f} | {int(c.get('failed') or 0)} |")
+              lines.append(f"| {m} | {c.get('pagination','')} | {caps[m]} | {totals[m]} | {int(c.get('concurrency') or 0)} | {float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | {float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | {float(c.get('p99_ms') or 0):.2f} | {float(c.get('pool_wait_p95_ms') or 0):.2f} | {float(c.get('db_admission_p95_ms') or 0):.2f} | {int(c.get('failed') or 0)} |")
           (root/'report.md').write_text('\n'.join(lines)+'\n')
           print('\n'.join(lines))
           PY
