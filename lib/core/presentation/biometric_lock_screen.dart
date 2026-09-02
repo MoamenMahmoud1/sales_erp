@@ -42,7 +42,6 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
   _AuthPhase _phase = _AuthPhase.authenticating;
   bool _attemptInFlight = false;
   bool _autoAttemptStarted = false;
-  bool _deviceCredentialOffered = false;
 
   @override
   void initState() {
@@ -50,6 +49,9 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 650),
+      lowerBound: 0.0,
+      upperBound: 1.0,
+      value: 0.0,
     );
     _prepare();
   }
@@ -102,11 +104,6 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
       setState(() => _phase = _AuthPhase.failed);
       await _animationController.forward();
       HapticFeedback.mediumImpact();
-
-      if (automatic && method != _AuthMethod.deviceCredential) {
-        _deviceCredentialOffered = true;
-        if (mounted) setState(() {});
-      }
     }
 
     _attemptInFlight = false;
@@ -136,9 +133,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
       case _AuthPhase.authenticating:
         return 'Authenticate once to unlock Sales ERP on this app session.';
       case _AuthPhase.failed:
-        return _method == _AuthMethod.deviceCredential
-            ? 'That device credential was not accepted. Try again.'
-            : 'That biometric was not accepted. Try again or use your phone credential.';
+        return 'Authentication was not accepted. Try again.';
       case _AuthPhase.success:
         return 'Authentication successful. Welcome back.';
     }
@@ -149,6 +144,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
       case _AuthMethod.face:
         return Icons.face_retouching_natural_rounded;
       case _AuthMethod.fingerprint:
+        return Icons.fingerprint_rounded;
       case _AuthMethod.biometric:
         return Icons.fingerprint_rounded;
       case _AuthMethod.deviceCredential:
@@ -341,24 +337,6 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                           ),
                         ),
                       ),
-                    if (!isSuccess &&
-                        _deviceCredentialOffered &&
-                        _method != _AuthMethod.deviceCredential) ...[
-                      const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: _attemptInFlight
-                            ? null
-                            : () => _attempt(_AuthMethod.deviceCredential),
-                        icon: const Icon(Icons.lock_rounded),
-                        label: const Text('Use phone PIN / password'),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(52),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                      ),
-                    ],
                     const SizedBox(height: 18),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
