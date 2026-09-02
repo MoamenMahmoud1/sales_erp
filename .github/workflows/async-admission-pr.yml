@@ -236,9 +236,13 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           root = Path("benchmark-results")
+          workers = int(os.environ.get("WEB_CONCURRENCY", "1"))
+          async_db_concurrency = int(os.environ.get("ASYNC_DB_CONCURRENCY", "0"))
+          effective_async_db_concurrency = workers * async_db_concurrency if async_db_concurrency > 0 else 0
           rows = []
           for p in sorted(root.glob("*.json")):
               if p.name in {"postgres-plan.json"}:
@@ -249,11 +253,9 @@ jobs:
                   continue
               if not isinstance(case, dict) or "concurrency" not in case:
                   continue
-              queue = case.get("request_queue_wait", {}) or {}
               rows.append(
                   "| {case} | {mode} | {pagination} | {c} | {wall:.3f} | {rps:.2f} | "
-                  "{mean:.2f} | {p50:.2f} | {p95:.2f} | {p99:.2f} | {q50:.2f} | {q95:.2f} | "
-                  "{db:.2f} | {pool:.2f} | {ok} | {failed} |".format(
+                  "{mean:.2f} | {p50:.2f} | {p95:.2f} | {p99:.2f} | {db:.2f} | {pool:.2f} | {admit:.2f} | {ok} | {failed} |".format(
                       case=p.stem,
                       mode=case.get("mode", "unknown"),
                       pagination=case.get("pagination", "page"),
@@ -264,10 +266,9 @@ jobs:
                       p50=case.get("p50_ms") or 0,
                       p95=case.get("p95_ms") or 0,
                       p99=case.get("p99_ms") or 0,
-                      q50=queue.get("p50_ms") or 0,
-                      q95=queue.get("p95_ms") or 0,
                       db=case.get("db_p50_ms") or 0,
                       pool=case.get("pool_wait_p50_ms") or 0,
+                      admit=case.get("db_admission_p50_ms") or 0,
                       ok=case.get("successful", 0),
                       failed=case.get("failed", 0),
                   )
@@ -277,13 +278,25 @@ jobs:
               "# Product endpoint performance benchmark",
               "",
               "Canonical matrix: true ASGI async vs true WSGI sync × page/cursor × C=1/50/100.",
-              "Each case is isolated with a fresh server process and records wall time, RPS, HTTP latency, load-generator queue wait, DB/pool timing, and request-level details.",
+              "Each case runs 500 measured requests after 100 warmup requests against a fresh server process.",
+              "HTTP latency is measured from actual request dispatch/start to response completion. Client batch-queue/dispatch delay is intentionally excluded from latency metrics because it is a load-generator scheduling artifact, not server queue time.",
               "",
-              "| case | mode | pagination | C | wall s | RPS | mean ms | p50 | p95 | p99 | loadgen queue p50 | loadgen queue p95 | DB p50 | pool p50 | successful | failed |",
-              "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+              f"- Gunicorn workers: `{workers}`",
+              f"- Async DB admission per worker: `{async_db_concurrency}`",
+              f"- Effective async DB admission capacity: `{effective_async_db_concurrency}` concurrent DB operations (`workers × per-worker gate`)" if effective_async_db_concurrency else "- Async DB admission: disabled",
+              "",
+              "| case | mode | pagination | C | wall s | RPS | mean ms | p50 | p95 | p99 | DB p50 | pool p50 | admission p50 | successful | failed |",
+              "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
               *rows,
               "",
-              "`*-requests.ndjson` contains one record per request, including enqueue/start/end offsets and server timing headers.",
+              "### Metric definitions",
+              "- **Wall / RPS:** measured batch completion time and completed successful requests per second. This is the primary throughput comparison.",
+              "- **HTTP latency:** `request_start -> response_end`; this is the latency used for mean/p50/p95/p99.",
+              "- **DB p50:** database operation time reported by the application.",
+              "- **Pool p50:** time waiting for a PostgreSQL pool connection.",
+              "- **Admission p50:** time waiting for the async DB admission semaphore. For async workers, the configured gate is per worker, so total capacity is `WEB_CONCURRENCY × ASYNC_DB_CONCURRENCY`.",
+              "",
+              "`*-requests.ndjson` contains one record per request, including request start/end offsets and server timing headers.",
               "`pg-stat-statements.tsv` and `postgres-plan.json` contain PostgreSQL execution diagnostics.",
               "",
           ]
