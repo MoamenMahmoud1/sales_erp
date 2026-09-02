@@ -100,12 +100,13 @@ async def get_pool() -> AsyncConnectionPool:
 
 
 async def open_pool(*, wait: bool = True) -> None:
-    """Open and optionally pre-warm the pool during ASGI lifespan startup."""
+    """Open, pre-warm, and health-check the pool during ASGI startup."""
     if not enabled():
         return
     pool = await get_pool()
     if wait:
         await pool.wait()
+    await pool.check()
 
 
 async def close_pool() -> None:
