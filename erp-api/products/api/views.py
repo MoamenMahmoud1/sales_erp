@@ -6,9 +6,9 @@ from rest_framework.response import Response
 
 from common.pagination import AsyncCursorPagination, AsyncStandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
-from common.services.async_db_gate import DBAdmissionTimeout, db_slot
+from common.services.async_db_gate import DBAdmissionTimeout
 from common.services.async_serializer import AsyncSerializerService
-from common.services.perf_timing import db_operation, timed_function, view_stage
+from common.services.perf_timing import timed_function, view_stage
 from products.api.serializers import CartonPricingSerializer, ProductSerializer
 from products.models import CartonPricing
 from products.services.metrics import ProductMetricsQueryService
@@ -63,9 +63,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 queryset = await self.afilter_queryset(self.get_queryset())
 
             try:
-                async with db_slot():
-                    with db_operation():
-                        page = await self.apaginate_queryset(queryset)
+                # Pagination owns admission around each actual DB execution.
+                # This prevents CPU-only page math, cursor preparation and
+                # metadata construction from occupying a DB slot.
+                page = await self.apaginate_queryset(queryset)
             except DBAdmissionTimeout:
                 with view_stage("view.response.busy"):
                     response = Response(
