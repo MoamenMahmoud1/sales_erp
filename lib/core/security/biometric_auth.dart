@@ -1,8 +1,6 @@
-import 'dart:async';
-
 import 'package:local_auth/local_auth.dart';
 
-/// Result of a local biometric authentication attempt.
+/// Result of a local device authentication attempt.
 enum BiometricResult {
   success,
   unavailable,
@@ -17,10 +15,7 @@ class BiometricAuth {
   BiometricAuth([LocalAuthentication? auth])
       : _auth = auth ?? LocalAuthentication();
 
-  /// Returns the biometric methods currently registered and usable.
-  Future<Set<BiometricType>> availableBiometrics({
-    bool refresh = false,
-  }) async {
+  Future<Set<BiometricType>> availableBiometrics({bool refresh = false}) async {
     if (!refresh) {
       final cached = _availableCache;
       if (cached != null) return cached;
@@ -36,11 +31,17 @@ class BiometricAuth {
     }
   }
 
-  /// Returns whether this device can currently perform biometric auth.
-  Future<bool> isAvailable() async {
+  Future<bool> isDeviceSupported() async {
     try {
-      if (!await _auth.isDeviceSupported() ||
-          !await _auth.canCheckBiometrics) {
+      return await _auth.isDeviceSupported();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> isBiometricAvailable() async {
+    try {
+      if (!await _auth.isDeviceSupported() || !await _auth.canCheckBiometrics) {
         return false;
       }
       return (await availableBiometrics()).isNotEmpty;
@@ -49,42 +50,48 @@ class BiometricAuth {
     }
   }
 
-  /// Prompts the OS biometric UI. The app never retries automatically.
-  Future<BiometricResult> authenticate({
+  /// Attempts biometrics only. The OS remains responsible for selecting the
+  /// enrolled biometric modality (for example Face or fingerprint).
+  Future<BiometricResult> authenticateBiometric({
     String reason = 'Unlock Sales ERP to protect your business data',
   }) async {
-    final stopwatch = Stopwatch()..start();
-    if (!await isAvailable()) return BiometricResult.unavailable;
+    if (!await isBiometricAvailable()) return BiometricResult.unavailable;
 
     try {
       final ok = await _auth.authenticate(
         localizedReason: reason,
         biometricOnly: true,
-        persistAcrossBackgrounding: true,
+        persistAcrossBackgrounding: false,
         sensitiveTransaction: false,
       );
       return ok ? BiometricResult.success : BiometricResult.failed;
     } catch (_) {
       return BiometricResult.failed;
-    } finally {
-      stopwatch.stop();
-      // local_auth can fail immediately while Android is restoring window
-      // focus. Keep the first result deterministic so the presentation layer
-      // cannot mistake an instantaneous failure for a prompt that needs an
-      // automatic retry.
-      const minimumAttemptDuration = Duration(milliseconds: 450);
-      final remaining = minimumAttemptDuration - stopwatch.elapsed;
-      if (remaining > Duration.zero) {
-        await Future<void>.delayed(remaining);
-      }
     }
   }
 
-  /// Whether Face authentication is available.
-  Future<bool> supportsFace() async =>
-      (await availableBiometrics()).contains(BiometricType.face);
+  /// Uses the OS device credential flow (PIN/pattern/password/passcode).
+  /// The app never receives or stores the credential.
+  Future<BiometricResult> authenticateDeviceCredential({
+    String reason = 'Unlock Sales ERP with your phone PIN or password',
+  }) async {
+    if (!await isDeviceSupported()) return BiometricResult.unavailable;
 
-  /// Whether fingerprint authentication is available.
-  Future<bool> supportsFingerprint() async =>
-      (await availableBiometrics()).contains(BiometricType.fingerprint);
+    try {
+      final ok = await _auth.authenticate(
+        localizedReason: reason,
+        biometricOnly: false,
+        persistAcrossBackgrounding: false,
+        sensitiveTransaction: false,
+      );
+      return ok ? BiometricResult.success : BiometricResult.failed;
+    } catch (_) {
+      return BiometricResult.failed;
+    }
+  }
+
+  /// Backwards-compatible convenience method for biometric-only callers.
+  Future<BiometricResult> authenticate({
+    String reason = 'Unlock Sales ERP to protect your business data',
+  }) => authenticateBiometric(reason: reason);
 }
