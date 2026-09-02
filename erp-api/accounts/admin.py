@@ -1,8 +1,8 @@
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
-from django.utils.html import format_html
 from django.urls import reverse
+from django.utils.html import format_html
 
 from .models import Employee, Role
 
@@ -71,6 +71,7 @@ class CustomUserAdmin(UserAdmin):
 
     readonly_fields = ("updated_at", "password_changed_at")
 
+
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
     list_display = (
@@ -80,6 +81,7 @@ class EmployeeAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
     @admin.display(description="User", ordering="user__username")
     def user_link(self, obj):
         url = reverse(
