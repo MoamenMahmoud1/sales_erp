@@ -3,14 +3,16 @@ import 'package:flutter/material.dart';
 import '../../../core/repositories/app_services.dart';
 import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/dialogs.dart';
-import '../../products/presentation/products_page.dart';
 import '../../products/domain/product.dart';
+import '../../products/presentation/products_page.dart';
 import '../application/usecases/confirm_car_trip.dart';
+import '../application/usecases/create_and_confirm_car_trip.dart';
 import '../application/usecases/create_car_trip.dart';
 import '../application/usecases/revise_car_trip.dart';
 import '../application/usecases/update_car_trip_draft.dart';
 import '../domain/entities/car_load_item.dart';
 import '../domain/entities/car_trip.dart';
+import '../domain/entities/car_trip_status.dart';
 import '../domain/entities/money.dart';
 import '../domain/entities/sales_car.dart';
 import '../domain/entities/warehouse.dart';
@@ -34,6 +36,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   final _calculator = const CarCalculator();
 
   late final CreateCarTrip _create = CreateCarTrip(_trips);
+  late final CreateAndConfirmCarTrip _createAndConfirm =
+      CreateAndConfirmCarTrip(_trips);
   late final UpdateCarTripDraft _update = UpdateCarTripDraft(_trips);
   late final ConfirmCarTrip _confirm = ConfirmCarTrip(_trips);
   late final ReviseCarTrip _revise = ReviseCarTrip(_trips);
@@ -46,6 +50,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   Warehouse? _selectedWarehouse;
   DateTime? _dueDate;
   String? _displayNumber;
+  CarTrip? _original;
 
   final Map<int, int> _loaded = {};
   final Map<int, int> _returned = {};
@@ -54,14 +59,22 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
+  double _globalDiscountPercent = 0;
+  final _globalDiscountController = TextEditingController(text: '0');
 
   bool get _editing => widget.tripId != null;
-  CarTrip? _original;
+  List<int> get _selectedProductIds => _loaded.keys.toList(growable: false);
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _globalDiscountController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -79,24 +92,21 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         final trip = await _trips.getTripById(widget.tripId!);
         if (trip == null) throw StateError('Car invoice not found.');
         _original = trip;
-        _selectedCar = _cars.where((c) => c.id == trip.salesCarId).firstOrNull;
-        _selectedWarehouse = _warehouses
-            .where((w) => w.id == trip.warehouseId)
-            .firstOrNull;
+        _selectedCar = _findById(_cars, trip.salesCarId);
+        _selectedWarehouse = _findById(_warehouses, trip.warehouseId);
         _dueDate = trip.dueDate?.toLocal();
         _displayNumber = trip.displayNumber;
+        _globalDiscountPercent = trip.globalDiscountPercent;
+        _globalDiscountController.text =
+            trip.globalDiscountPercent.toStringAsFixed(2);
         for (final item in trip.items) {
           _loaded[item.productId] = item.loadedCartons;
           _returned[item.productId] = item.returnedCartons;
           _discounts[item.productId] = item.discountPercent;
         }
-      }
-
-      if (!_editing && _selectedCar == null && _cars.length == 1) {
-        _selectedCar = _cars.first;
-      }
-      if (!_editing && _selectedWarehouse == null && _warehouses.length == 1) {
-        _selectedWarehouse = _warehouses.first;
+      } else {
+        if (_cars.length == 1) _selectedCar = _cars.first;
+        if (_warehouses.length == 1) _selectedWarehouse = _warehouses.first;
       }
 
       if (!mounted) return;
@@ -110,16 +120,21 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     }
   }
 
+  T? _findById<T>(List<T> items, int id) {
+    for (final item in items) {
+      if ((item as dynamic).id == id) return item;
+    }
+    return null;
+  }
+
   Future<void> _reloadProducts() async {
     _productsList = await _products.getProducts();
     if (mounted) setState(() {});
   }
 
-  List<int> get _selectedProductIds => _loaded.keys.toList(growable: false);
-
   List<CarLoadItem> get _items => [
-    for (final id in _selectedProductIds) _itemFor(id),
-  ];
+        for (final id in _selectedProductIds) _itemFor(id),
+      ];
 
   CarLoadItem _itemFor(int id) {
     final product = _productsList.firstWhere((p) => p.id == id);
@@ -145,68 +160,73 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       openedAt: _original?.openedAt ?? now,
       closedAt: closed ? (_original?.closedAt ?? now) : _original?.closedAt,
       dueDate: _dueDate?.toUtc(),
-      status: closed ? _original?.status ?? _closedStatus : _openStatus,
+      status: closed
+          ? (_original?.isClosed ?? false
+              ? CarTripStatus.closed
+              : CarTripStatus.closed)
+          : CarTripStatus.open,
       items: _items,
       globalDiscountPercent: _globalDiscountPercent,
       payment: _original?.payment ?? const CarPayment(),
     );
   }
 
-  static const _openStatus = CarTripStatus.open;
-  static const _closedStatus = CarTripStatus.closed;
+  bool _validateHeader() {
+    if (_selectedCar == null) {
+      _showError('Select a Car.');
+      return false;
+    }
+    if (_selectedWarehouse == null) {
+      _showError('Select a Warehouse.');
+      return false;
+    }
+    if (_items.isEmpty) {
+      _showError('Add at least one product.');
+      return false;
+    }
+    return true;
+  }
 
-  double _globalDiscountPercent = 0;
-  final _globalDiscountController = TextEditingController(text: '0');
-
-  @override
-  void dispose() {
-    _globalDiscountController.dispose();
-    super.dispose();
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _saveDraft() async {
-    if (_saving) return;
-    if (!_validateHeader()) return;
+    if (_saving || !_validateHeader()) return;
     setState(() => _saving = true);
     try {
-      final trip = _buildTrip(closed: false);
-      final saved = _editing ? await _update(trip) : await _create(trip);
+      final saved = _editing
+          ? await _update(_buildTrip(closed: false))
+          : await _create(_buildTrip(closed: false));
       _original = saved;
       _displayNumber = saved.displayNumber;
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Draft ${saved.displayNumber} saved.')),
-        );
-        if (!_editing) {
-          Navigator.of(context).pop(true);
-          return;
-        }
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Draft ${saved.displayNumber} saved.')),
+      );
+      if (!_editing) Navigator.of(context).pop(true);
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$error')));
-      }
+      if (mounted) _showError('$error');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _confirmAndClose() async {
-    if (_saving) return;
-    if (!_validateHeader()) return;
-    final trip = _buildTrip(closed: true);
-    final issues = _calculator.validate(trip);
+    if (_saving || !_validateHeader()) return;
+
+    final preview = _buildTrip(closed: true);
+    final issues = _calculator.validate(preview);
     if (issues.isNotEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(issues.first.message)));
+      _showError(issues.first.message);
       return;
     }
 
     final confirmed = await showConfirmDialog(
       context: context,
       title: 'Confirm Car invoice?',
-      message: 'This will finalize the daily load/return calculation and create an immutable historical revision.',
+      message:
+          'This will finalize the daily load/return calculation and create an immutable historical revision.',
       confirmLabel: 'Confirm',
     );
     if (!confirmed || !mounted) return;
@@ -214,78 +234,52 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     setState(() => _saving = true);
     try {
       final persisted = !_editing
-          ? await _createAndConfirmNew(trip)
+          ? await _createAndConfirm(
+              _buildTrip(closed: false),
+              triggeredBy: 'invoice_close',
+            )
           : _original!.isClosed
-          ? await _revise(trip, triggeredBy: 'invoice_edit')
-          : await _confirm(trip, triggeredBy: 'invoice_close');
+              ? await _revise(preview, triggeredBy: 'invoice_edit')
+              : await _confirm(preview, triggeredBy: 'invoice_close');
+
       final summary = _calculator.summary(persisted);
       if (!mounted) return;
       await Navigator.of(context).push(
         PageRouteBuilder(
           opaque: true,
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              CarClosingAnimation(
-                displayNumber: persisted.displayNumber,
-                summary: summary,
-              ),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+          pageBuilder: (_, animation, __) => CarClosingAnimation(
+            displayNumber: persisted.displayNumber,
+            summary: summary,
+          ),
+          transitionsBuilder: (_, animation, __, child) =>
               FadeTransition(opacity: animation, child: child),
           transitionDuration: const Duration(milliseconds: 180),
         ),
       );
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
+      if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$error')));
-      }
+      if (mounted) _showError('$error');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Future<CarTrip> _createAndConfirmNew(CarTrip trip) async {
-    final draft = await _create(trip.copyWith(status: CarTripStatus.open));
-    return _confirm(
-      trip.copyWith(id: draft.id, displayNumber: draft.displayNumber),
-    );
-  }
-
-  bool _validateHeader() {
-    if (_selectedCar == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Select a Car.')));
-      return false;
-    }
-    if (_selectedWarehouse == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Select a Warehouse.')));
-      return false;
-    }
-    if (_items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add at least one product.')),
-      );
-      return false;
-    }
-    return true;
+  Future<CarTrip> _createAndConfirm(
+    CarTrip trip, {
+    required String triggeredBy,
+  }) {
+    return _createAndConfirm.call(trip, triggeredBy: triggeredBy);
   }
 
   Future<void> _addProduct() async {
     final available = _productsList
-        .where((p) => !_loaded.containsKey(p.id))
+        .where((product) => !_loaded.containsKey(product.id))
         .toList(growable: false);
     if (available.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'All available products are already on this Car invoice.',
-          ),
-        ),
-      );
+      _showError('All available products are already on this Car invoice.');
       return;
     }
+
     final chosen = await showModalBottomSheet<Product>(
       context: context,
       showDragHandle: true,
@@ -306,15 +300,14 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                 trailing: const Icon(Icons.add_rounded),
                 onTap: () => Navigator.of(context).pop(product),
               ),
-            const SizedBox(height: 8),
             ListTile(
               leading: const Icon(Icons.inventory_2_outlined),
               title: const Text('Create a new product'),
               onTap: () async {
                 Navigator.of(context).pop();
-                await Navigator.of(
-                  this.context,
-                ).push(MaterialPageRoute(builder: (_) => const ProductsPage()));
+                await Navigator.of(this.context).push(
+                  MaterialPageRoute(builder: (_) => const ProductsPage()),
+                );
                 await _reloadProducts();
               },
             ),
@@ -322,6 +315,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         ),
       ),
     );
+
     if (chosen == null || !mounted) return;
     setState(() {
       _loaded[chosen.id] = 1;
@@ -333,7 +327,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   Future<void> _createCar() async {
     final controller = TextEditingController();
     try {
-      final name = await _simpleTextDialog(
+      final name = await _textDialog(
         title: 'New Car',
         label: 'Car name',
         controller: controller,
@@ -353,7 +347,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   Future<void> _createWarehouse() async {
     final controller = TextEditingController();
     try {
-      final name = await _simpleTextDialog(
+      final name = await _textDialog(
         title: 'New Warehouse',
         label: 'Warehouse name',
         controller: controller,
@@ -370,7 +364,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     }
   }
 
-  Future<String?> _simpleTextDialog({
+  Future<String?> _textDialog({
     required String title,
     required String label,
     required TextEditingController controller,
@@ -382,11 +376,11 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          textCapitalization: TextCapitalization.words,
           decoration: InputDecoration(
             labelText: label,
             border: const OutlineInputBorder(),
           ),
-          textCapitalization: TextCapitalization.words,
         ),
         actions: [
           TextButton(
@@ -401,8 +395,6 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       ),
     );
   }
-
-  String _money(CarMoney value) => 'EGP ${value.units.toStringAsFixed(2)}';
 
   @override
   Widget build(BuildContext context) {
@@ -431,9 +423,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_editing ? 'Edit Car Invoice' : 'New Car Invoice'),
-      ),
+      appBar: AppBar(title: Text(_editing ? 'Edit Car Invoice' : 'New Car Invoice')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 140),
         children: [
@@ -448,19 +438,18 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                 ),
               ),
               TextButton.icon(
-                onPressed: _addProduct,
+                onPressed: _saving ? null : _addProduct,
                 icon: const Icon(Icons.add_rounded),
                 label: const Text('Add product'),
               ),
             ],
           ),
-          const SizedBox(height: 8),
           if (_selectedProductIds.isEmpty)
-            Card(
+            const Card(
               child: ListTile(
-                leading: const Icon(Icons.inventory_2_outlined),
-                title: const Text('No products yet'),
-                subtitle: const Text('Add cartons loaded on the Car.'),
+                leading: Icon(Icons.inventory_2_outlined),
+                title: Text('No products yet'),
+                subtitle: Text('Add cartons loaded on the Car.'),
               ),
             )
           else
@@ -478,9 +467,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             Expanded(
               child: OutlinedButton(
                 onPressed: _saving ? null : _saveDraft,
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(52),
-                ),
+                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
                 child: const Text('Save draft'),
               ),
             ),
@@ -489,9 +476,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
               flex: 2,
               child: FilledButton.icon(
                 onPressed: _saving ? null : _confirmAndClose,
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(52),
-                ),
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
                 icon: _saving
                     ? const SizedBox(
                         width: 18,
@@ -528,7 +513,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                 ),
                 IconButton(
                   tooltip: 'Create Car',
-                  onPressed: _createCar,
+                  onPressed: _saving ? null : _createCar,
                   icon: const Icon(Icons.add_circle_outline_rounded),
                 ),
               ],
@@ -548,7 +533,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                 ),
                 IconButton(
                   tooltip: 'Create Warehouse',
-                  onPressed: _createWarehouse,
+                  onPressed: _saving ? null : _createWarehouse,
                   icon: const Icon(Icons.add_circle_outline_rounded),
                 ),
               ],
@@ -556,7 +541,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             const SizedBox(height: 12),
             InkWell(
               borderRadius: AppRadius.lgAll,
-              onTap: _pickDueDate,
+              onTap: _saving ? null : _pickDueDate,
               child: InputDecorator(
                 decoration: InputDecoration(
                   labelText: 'Payment due date',
@@ -585,22 +570,24 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     required List<T> items,
     required String Function(T) labelOf,
     required ValueChanged<T?> onChanged,
-  }) => DropdownButtonFormField<T>(
-    initialValue: value,
-    isExpanded: true,
-    decoration: InputDecoration(
-      labelText: label,
-      border: OutlineInputBorder(borderRadius: AppRadius.lgAll),
-    ),
-    items: [
-      for (final item in items)
-        DropdownMenuItem<T>(
-          value: item,
-          child: Text(labelOf(item), overflow: TextOverflow.ellipsis),
-        ),
-    ],
-    onChanged: onChanged,
-  );
+  }) {
+    return DropdownButtonFormField<T>(
+      initialValue: value,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: label,
+        border: OutlineInputBorder(borderRadius: AppRadius.lgAll),
+      ),
+      items: [
+        for (final item in items)
+          DropdownMenuItem<T>(
+            value: item,
+            child: Text(labelOf(item), overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      onChanged: onChanged,
+    );
+  }
 
   Future<void> _pickDueDate() async {
     final now = DateTime.now();
@@ -634,28 +621,24 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        product.name,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
+                      Text(product.name, style: const TextStyle(fontWeight: FontWeight.w800)),
                       const SizedBox(height: 3),
                       Text(
                         '${product.price.toStringAsFixed(2)} EGP / carton',
-                        style: TextStyle(
-                          color: scheme.onSurfaceVariant,
-                          fontSize: 12,
-                        ),
+                        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
                   tooltip: 'Remove product',
-                  onPressed: () => setState(() {
-                    _loaded.remove(id);
-                    _returned.remove(id);
-                    _discounts.remove(id);
-                  }),
+                  onPressed: _saving
+                      ? null
+                      : () => setState(() {
+                            _loaded.remove(id);
+                            _returned.remove(id);
+                            _discounts.remove(id);
+                          }),
                   icon: Icon(Icons.close_rounded, color: scheme.error),
                 ),
               ],
@@ -667,7 +650,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                   child: _quantityField(
                     label: 'Loaded',
                     value: loaded,
-                    onChanged: (v) => setState(() => _loaded[id] = v),
+                    onChanged: (value) => setState(() => _loaded[id] = value),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -676,7 +659,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                     label: 'Returned',
                     value: returned,
                     max: loaded,
-                    onChanged: (v) => setState(() => _returned[id] = v),
+                    onChanged: (value) => setState(() => _returned[id] = value),
                   ),
                 ),
               ],
@@ -688,9 +671,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                   child: TextFormField(
                     initialValue: discount.toStringAsFixed(2),
                     key: ValueKey('discount-$id-$discount'),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(
                       labelText: 'Product discount %',
                       suffixText: '%',
@@ -699,9 +680,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                     onChanged: (value) {
                       final parsed = double.tryParse(value);
                       if (parsed == null) return;
-                      setState(
-                        () => _discounts[id] = parsed.clamp(0, 100).toDouble(),
-                      );
+                      setState(() => _discounts[id] = parsed.clamp(0, 100).toDouble());
                     },
                   ),
                 ),
@@ -710,17 +689,11 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(
-                        '$sold sold',
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
+                      Text('$sold sold', style: const TextStyle(fontWeight: FontWeight.w900)),
                       const SizedBox(height: 3),
                       Text(
                         _money(line.netValue),
-                        style: TextStyle(
-                          color: scheme.primary,
-                          fontWeight: FontWeight.w900,
-                        ),
+                        style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w900),
                       ),
                     ],
                   ),
@@ -743,7 +716,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     return Row(
       children: [
         IconButton(
-          onPressed: value <= 0 ? null : () => onChanged(value - 1),
+          onPressed: _saving || value <= 0 ? null : () => onChanged(value - 1),
           icon: const Icon(Icons.remove_circle_outline_rounded),
         ),
         Expanded(
@@ -752,10 +725,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             initialValue: '$value',
             textAlign: TextAlign.center,
             keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: label,
-              border: const OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(border: OutlineInputBorder()),
             onChanged: (raw) {
               final parsed = int.tryParse(raw);
               if (parsed == null) return;
@@ -764,7 +734,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
           ),
         ),
         IconButton(
-          onPressed: value >= cappedMax ? null : () => onChanged(value + 1),
+          onPressed: _saving || value >= cappedMax ? null : () => onChanged(value + 1),
           icon: const Icon(Icons.add_circle_outline_rounded),
         ),
       ],
@@ -781,9 +751,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             Expanded(
               child: TextFormField(
                 controller: _globalDiscountController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(
                   labelText: 'Global discount %',
                   suffixText: '%',
@@ -792,11 +760,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                 onChanged: (raw) {
                   final parsed = double.tryParse(raw);
                   if (parsed == null) return;
-                  setState(
-                    () => _globalDiscountPercent = parsed
-                        .clamp(0, 100)
-                        .toDouble(),
-                  );
+                  setState(() => _globalDiscountPercent = parsed.clamp(0, 100).toDouble());
                 },
               ),
             ),
@@ -814,17 +778,14 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   }
 
   Widget _buildSummary() {
-    final scheme = Theme.of(context).colorScheme;
     if (_selectedProductIds.isEmpty) return const SizedBox.shrink();
-
+    final scheme = Theme.of(context).colorScheme;
     final summary = _calculator.summary(_buildTrip(closed: false));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Calculation summary',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
+        Text('Calculation summary', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 10),
         GridView.count(
           crossAxisCount: 2,
@@ -834,26 +795,10 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
           mainAxisSpacing: 8,
           childAspectRatio: 2.3,
           children: [
-            CarMetricCard(
-              label: 'Loaded cartons',
-              value: '${summary.totalLoadedCartons}',
-              icon: Icons.outbox_rounded,
-            ),
-            CarMetricCard(
-              label: 'Returned cartons',
-              value: '${summary.totalReturnedCartons}',
-              icon: Icons.assignment_return_rounded,
-            ),
-            CarMetricCard(
-              label: 'Sold cartons',
-              value: '${summary.totalSoldCartons}',
-              icon: Icons.point_of_sale_rounded,
-            ),
-            CarMetricCard(
-              label: 'Gross sold value',
-              value: _money(summary.grossSubtotal),
-              icon: Icons.receipt_long_outlined,
-            ),
+            CarMetricCard(label: 'Loaded cartons', value: '${summary.totalLoadedCartons}', icon: Icons.outbox_rounded),
+            CarMetricCard(label: 'Returned cartons', value: '${summary.totalReturnedCartons}', icon: Icons.assignment_return_rounded),
+            CarMetricCard(label: 'Sold cartons', value: '${summary.totalSoldCartons}', icon: Icons.point_of_sale_rounded),
+            CarMetricCard(label: 'Gross sold value', value: _money(summary.grossSubtotal), icon: Icons.receipt_long_outlined),
           ],
         ),
         const SizedBox(height: 10),
@@ -862,40 +807,15 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                _summaryRow(
-                  'Product discounts',
-                  summary.productDiscountTotal,
-                  false,
-                ),
-                _summaryRow(
-                  'After product discounts',
-                  summary.subtotalAfterProducts,
-                  false,
-                ),
-                _summaryRow(
-                  'Global discount',
-                  summary.globalDiscountAmount,
-                  false,
-                ),
+                _summaryRow('Product discounts', summary.productDiscountTotal),
+                _summaryRow('After product discounts', summary.subtotalAfterProducts),
+                _summaryRow('Global discount', summary.globalDiscountAmount),
                 const Divider(height: 22),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Actual sold value',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    Text(
-                      _money(summary.finalTotalSoldValue),
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w900,
-                        color: scheme.primary,
-                      ),
-                    ),
+                    const Text('Actual sold value', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+                    Text(_money(summary.finalTotalSoldValue), style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: scheme.primary)),
                   ],
                 ),
               ],
@@ -906,29 +826,18 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     );
   }
 
-  Widget _summaryRow(String label, CarMoney amount, bool accent) {
+  Widget _summaryRow(String label, CarMoney amount) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label),
-          Text(
-            _money(amount),
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: accent ? Theme.of(context).colorScheme.primary : null,
-            ),
-          ),
-        ],
+        children: [Text(label), Text(_money(amount), style: const TextStyle(fontWeight: FontWeight.w700))],
       ),
     );
   }
 
+  String _money(CarMoney value) => 'EGP ${value.units.toStringAsFixed(2)}';
+
   String _formatDate(DateTime date) =>
       '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
-}
-
-extension<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }
