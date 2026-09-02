@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/repositories/app_services.dart';
@@ -26,6 +28,8 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
   final _cashController = TextEditingController(text: '0');
   final _transferController = TextEditingController(text: '0');
   final _referenceController = TextEditingController();
+
+  late final StreamSubscription<CarTrip> _tripChanges;
 
   List<CarTrip> _allOutstandingTrips = const [];
   List<_PaymentScope> _scopes = const [];
@@ -58,11 +62,13 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
   @override
   void initState() {
     super.initState();
+    _tripChanges = AppServices.instance.carTripEvents.stream.listen(_onTripChanged);
     _load();
   }
 
   @override
   void dispose() {
+    _tripChanges.cancel();
     _cashController.dispose();
     _transferController.dispose();
     _referenceController.dispose();
@@ -73,54 +79,19 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
       double.tryParse(controller.text.trim().replaceAll(',', '')) ?? 0;
 
   Future<void> _load() async {
-    if (mounted) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
+    if (mounted) setState(() { _loading = true; _error = null; });
     try {
       final trips = await _tripRepository.getTrips();
       final outstanding = trips
           .where(
             (trip) =>
-                trip.isClosed && trip.payment.totalPaid.minorUnits < _totalFor(trip),
+                trip.isClosed &&
+                trip.payment.totalPaid.minorUnits < _totalFor(trip),
           )
           .toList(growable: false);
-
-      final groups = <String, _PaymentScope>{};
-      for (final trip in outstanding) {
-        final scope = _PaymentScope(
-          salesCarId: trip.salesCarId,
-          salesCarName: trip.salesCarName,
-          warehouseId: trip.warehouseId,
-          warehouseName: trip.warehouseName,
-        );
-        groups[scope.key] = scope;
-      }
-
-      String? selectedKey = _selectedScopeKey;
-      if (widget.focusTripId != null) {
-        final focused = outstanding
-            .where((trip) => trip.id == widget.focusTripId)
-            .firstOrNull;
-        if (focused != null) {
-          selectedKey =
-              '${focused.salesCarId}:${focused.warehouseId}';
-        }
-      }
-      selectedKey ??= groups.length == 1 ? groups.keys.first : null;
-      if (selectedKey != null && !groups.containsKey(selectedKey)) {
-        selectedKey = null;
-      }
-
+      _applyTrips(outstanding, preferFocus: true);
       if (!mounted) return;
-      setState(() {
-        _allOutstandingTrips = outstanding;
-        _scopes = groups.values.toList(growable: false);
-        _selectedScopeKey = selectedKey;
-        _loading = false;
-      });
+      setState(() => _loading = false);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -128,6 +99,46 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
         _error = '$error';
       });
     }
+  }
+
+  void _applyTrips(List<CarTrip> trips, {bool preferFocus = false}) {
+    final groups = <String, _PaymentScope>{};
+    for (final trip in trips) {
+      final scope = _PaymentScope(
+        salesCarId: trip.salesCarId,
+        salesCarName: trip.salesCarName,
+        warehouseId: trip.warehouseId,
+        warehouseName: trip.warehouseName,
+      );
+      groups[scope.key] = scope;
+    }
+
+    String? selectedKey = _selectedScopeKey;
+    if (preferFocus && widget.focusTripId != null) {
+      final focused = trips.where((trip) => trip.id == widget.focusTripId).firstOrNull;
+      if (focused != null) selectedKey = '${focused.salesCarId}:${focused.warehouseId}';
+    }
+    selectedKey ??= groups.length == 1 ? groups.keys.first : null;
+    if (selectedKey != null && !groups.containsKey(selectedKey)) selectedKey = null;
+
+    _allOutstandingTrips = trips;
+    _scopes = groups.values.toList(growable: false);
+    _selectedScopeKey = selectedKey;
+  }
+
+  void _onTripChanged(CarTrip trip) {
+    if (!mounted || trip.id <= 0) return;
+    final next = [..._allOutstandingTrips]..removeWhere((item) => item.id == trip.id);
+    if (trip.isClosed && trip.payment.totalPaid.minorUnits < _totalFor(trip)) {
+      next.add(trip);
+    }
+    next.sort((a, b) => a.openedAt.compareTo(b.openedAt));
+    final previousKey = _selectedScopeKey;
+    _applyTrips(next);
+    if (previousKey != null && _scopes.any((scope) => scope.key == previousKey)) {
+      _selectedScopeKey = previousKey;
+    }
+    setState(() {});
   }
 
   int _totalFor(CarTrip trip) => const CarTripValue().value(trip);
@@ -139,14 +150,12 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
       _showError('Select a Car + Warehouse group first.');
       return;
     }
-
     final cash = _value(_cashController);
     final transfer = _value(_transferController);
     if (cash < 0 || transfer < 0 || cash + transfer <= 0) {
       _showError('Enter a payment greater than zero.');
       return;
     }
-
     if (_outstandingTrips.isEmpty) {
       _showError('There are no outstanding invoices for the selected group.');
       return;
@@ -168,6 +177,10 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
         salesCarId: scope.salesCarId,
         warehouseId: scope.warehouseId,
       );
+
+      for (final updatedTrip in plan.updatedTrips) {
+        AppServices.instance.carTripEvents.publish(updatedTrip);
+      }
 
       final visuals = [
         for (final allocation in plan.allocations)
@@ -195,7 +208,6 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
       _cashController.text = '0';
       _transferController.text = '0';
       _referenceController.clear();
-      if (mounted) await _load();
     } catch (error) {
       if (mounted) _showError('$error');
     } finally {
@@ -236,10 +248,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
         children: [
-          const Text(
-            'Car payments',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
-          ),
+          const Text('Car payments', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
           Text(
             'Each payment is restricted to one Car + Warehouse group and may be split only across that group’s finalized outstanding trips.',
@@ -248,10 +257,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
           const SizedBox(height: 18),
           _paymentForm(),
           const SizedBox(height: 18),
-          const Text(
-            'Outstanding invoices',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-          ),
+          const Text('Outstanding invoices', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
           const SizedBox(height: 10),
           if (_selectedScope == null)
             const EmptyState(
@@ -279,10 +285,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Record payment',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-          ),
+          const Text('Record payment', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: _selectedScopeKey,
@@ -296,10 +299,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
               for (final scope in _scopes)
                 DropdownMenuItem<String>(
                   value: scope.key,
-                  child: Text(
-                    scope.label,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(scope.label, overflow: TextOverflow.ellipsis),
                 ),
             ],
             onChanged: _processing
@@ -313,11 +313,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
                 child: TextField(
                   controller: _cashController,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Cash',
-                    suffixText: 'EGP',
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: const InputDecoration(labelText: 'Cash', suffixText: 'EGP', border: OutlineInputBorder()),
                   onChanged: (_) => setState(() {}),
                 ),
               ),
@@ -326,11 +322,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
                 child: TextField(
                   controller: _transferController,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Transfer',
-                    suffixText: 'EGP',
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: const InputDecoration(labelText: 'Transfer', suffixText: 'EGP', border: OutlineInputBorder()),
                   onChanged: (_) => setState(() {}),
                 ),
               ),
@@ -339,35 +331,20 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
           const SizedBox(height: 10),
           TextField(
             controller: _referenceController,
-            decoration: const InputDecoration(
-              labelText: 'Reference (optional)',
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: 'Reference (optional)', border: OutlineInputBorder()),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Total payment',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              ),
-              Text(
-                'EGP ${amount.toStringAsFixed(2)}',
-                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17),
-              ),
+              Expanded(child: Text('Total payment', style: TextStyle(color: scheme.onSurfaceVariant))),
+              Text('EGP ${amount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
             ],
           ),
           const SizedBox(height: 14),
           FilledButton.icon(
             onPressed: _processing || _selectedScope == null ? null : _pay,
             icon: _processing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.payments_rounded),
             label: Text(_processing ? 'Applying...' : 'Apply payment'),
             style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
@@ -389,10 +366,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
             Container(
               width: 44,
               height: 44,
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer,
-                borderRadius: BorderRadius.circular(15),
-              ),
+              decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(15)),
               child: Icon(Icons.receipt_long_rounded, color: scheme.primary),
             ),
             const SizedBox(width: 10),
@@ -400,25 +374,16 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    _tripLabel(trip),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  Text(_tripLabel(trip), style: const TextStyle(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 3),
-                  Text(
-                    trip.warehouseName,
-                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                  ),
+                  Text(trip.warehouseName, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
                 ],
               ),
             ),
             const SizedBox(width: 8),
             Text(
               'EGP ${(remaining / 100).toStringAsFixed(2)}',
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                color: remaining > 0 ? scheme.error : scheme.primary,
-              ),
+              style: TextStyle(fontWeight: FontWeight.w900, color: remaining > 0 ? scheme.error : scheme.primary),
             ),
           ],
         ),
@@ -448,4 +413,8 @@ class CarTripValue {
   const CarTripValue();
   int value(CarTrip trip) =>
       const CarCalculator().summary(trip).finalTotalSoldValue.minorUnits;
+}
+
+extension<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }
