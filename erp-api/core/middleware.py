@@ -11,9 +11,7 @@ from core.proxy import is_trusted_proxy, normalize_ip
 
 CORRELATION_HEADER = "HTTP_X_REQUEST_ID"
 
-_current_request_id: ContextVar[str | None] = ContextVar(
-    "erp_request_id", default=None
-)
+_current_request_id: ContextVar[str | None] = ContextVar("erp_request_id", default=None)
 
 
 def get_current_request_id() -> str | None:
@@ -30,14 +28,10 @@ class _RequestIdLogRecordFactory:
         return record
 
 
-logging.setLogRecordFactory(
-    _RequestIdLogRecordFactory(logging.getLogRecordFactory())
-)
+logging.setLogRecordFactory(_RequestIdLogRecordFactory(logging.getLogRecordFactory()))
 
 
 class RequestIdAndPerfMiddleware:
-    """Keep the ASGI path async and expose independent server-side stages."""
-
     async_capable = True
     sync_capable = True
 
@@ -93,7 +87,6 @@ class RequestIdAndPerfMiddleware:
         if not getattr(settings, "DEEP_PROFILE_ENABLED", False):
             return None
         from common.services.deep_profile import profile_requested, start_profile
-
         kind = profile_requested(request)
         if kind is None:
             return None
@@ -114,12 +107,25 @@ class RequestIdAndPerfMiddleware:
         response["X-Perf-DB-Operation-ms"] = f"{ms(timing.db_operation_ns):.3f}"
         response["X-Perf-DB-Operation-Count"] = str(timing.db_operation_count)
         response["X-Perf-SQL-Count"] = str(len(timing.sql_samples))
-        sql_stats = timing.sql_stats()
-        for kind, stats in sql_stats.items():
-            prefix = "X-Perf-SQL-" + kind.replace("_", "-").title().replace("-", "-")
+        for kind, stats in timing.sql_stats().items():
+            prefix = "X-Perf-SQL-" + kind.replace("_", "-")
             response[f"{prefix}-Count"] = str(stats["count"])
             response[f"{prefix}-Total-ms"] = f"{float(stats['total_ms']):.3f}"
             response[f"{prefix}-Max-ms"] = f"{float(stats['max_ms']):.3f}"
+
+        for name, stats in timing.function_stats().items():
+            header_name = "X-Perf-Fn-" + name.replace(".", "-").replace("_", "-")
+            response[f"{header_name}-Count"] = str(stats["count"])
+            response[f"{header_name}-Total-ms"] = f"{float(stats['total_ms']):.3f}"
+            response[f"{header_name}-Mean-ms"] = f"{float(stats['mean_ms']):.3f}"
+            response[f"{header_name}-Max-ms"] = f"{float(stats['max_ms']):.3f}"
+
+        for kind, stats in timing.transaction_stats().items():
+            prefix = "X-Perf-Tx-" + kind
+            response[f"{prefix}-Count"] = str(stats["count"])
+            response[f"{prefix}-Total-ms"] = f"{float(stats['total_ms']):.3f}"
+            response[f"{prefix}-Max-ms"] = f"{float(stats['max_ms']):.3f}"
+
         response["X-Perf-Serializer-Wait-ms"] = f"{ms(timing.serializer_wait_ns):.3f}"
         response["X-Perf-Serializer-CPU-ms"] = f"{ms(timing.serializer_cpu_ns):.3f}"
 
@@ -131,12 +137,11 @@ class RequestIdAndPerfMiddleware:
             f"serializer-wait;dur={ms(timing.serializer_wait_ns):.3f}",
             f"serializer-cpu;dur={ms(timing.serializer_cpu_ns):.3f}",
         ]
-        for kind, stats in sql_stats.items():
+        for kind, stats in timing.sql_stats().items():
             server_timing.append(f"sql-{kind};dur={float(stats['total_ms']):.3f}")
+        for kind, stats in timing.transaction_stats().items():
+            server_timing.append(f"tx-{kind};dur={float(stats['total_ms']):.3f}")
 
-        # Detailed view timings are opt-in through PERF_TIMING_ENABLED and are
-        # emitted as individual headers so the benchmark can calculate exact
-        # per-stage distributions without guessing from inclusive middleware time.
         for name, duration_ns in timing.view_stage_ns.items():
             header_name = "X-Perf-View-" + name.removeprefix("view.").replace(".", "-") + "-ms"
             response[header_name] = f"{ms(duration_ns):.3f}"
@@ -189,7 +194,6 @@ class TrustedProxyHeadersMiddleware:
         "HTTP_X_FORWARDED_PORT",
         "HTTP_X_FORWARDED_PROTO",
     )
-
     async_capable = True
     sync_capable = True
 
