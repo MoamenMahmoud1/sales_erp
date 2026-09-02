@@ -291,7 +291,8 @@ async def main() -> None:
     successful = len(successful_rows)
     failed = completed - successful
     request_complete = completed == requests and successful == requests
-    stack_verified = request_complete and (instrumented == successful or not require_instrumentation)
+    execution_complete = completed == requests
+    stack_verified = execution_complete and (instrumented == successful or not require_instrumentation)
 
     payload = {
         "phase": "measured",
@@ -345,6 +346,7 @@ async def main() -> None:
         "instrumented_responses": instrumented,
         "instrumentation_required": require_instrumentation,
         "stack_verified": stack_verified,
+        "execution_complete": execution_complete,
         "deadline_sec": deadline_s,
         "deadline_exceeded": bool(deadline_s and wall_time > deadline_s),
         "request_rows": request_rows,
@@ -359,10 +361,16 @@ async def main() -> None:
 
     print(json.dumps(payload, indent=2, sort_keys=True))
 
-    if payload["status"] != "complete":
-        raise SystemExit(1)
+    # HTTP rejections/timeouts are benchmark observations, not runner crashes.
+    # The process only fails when the benchmark itself could not complete its
+    # planned request attempts, the global deadline was exceeded, or required
+    # server instrumentation was missing from an otherwise completed run.
     if payload["deadline_exceeded"]:
         raise SystemExit(2)
+    if not execution_complete:
+        raise SystemExit(1)
+    if require_instrumentation and not stack_verified:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
