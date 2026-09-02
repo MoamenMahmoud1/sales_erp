@@ -121,7 +121,7 @@ void main() {
     );
 
     final revisedAttempt = closed.copyWith(
-      payment: const CarPayment(cashAmount: CarMoney.fromUnits(1000)),
+      payment: const CarPayment(cashAmount: CarMoney(100000)),
       items: [
         CarLoadItem(
           productId: productId,
