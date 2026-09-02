@@ -37,11 +37,12 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
   }
 
   Future<void> _load() async {
-    if (mounted)
+    if (mounted) {
       setState(() {
         _loading = true;
         _error = null;
       });
+    }
     try {
       final trip = await _repository.getTripById(widget.tripId);
       if (!mounted) return;
@@ -89,8 +90,9 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading)
+    if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     final trip = _trip;
     if (_error != null || trip == null) {
       return Scaffold(
@@ -533,6 +535,3 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
       );
 }
 
-extension on CarTripSummaryView {
-  bool get isNotUsed => false;
-}

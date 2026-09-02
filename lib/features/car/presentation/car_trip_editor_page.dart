@@ -183,9 +183,10 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         }
       }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('$error')));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -235,9 +236,10 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('$error')));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -404,8 +406,9 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading)
+    if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     if (_error != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Car invoice')),
