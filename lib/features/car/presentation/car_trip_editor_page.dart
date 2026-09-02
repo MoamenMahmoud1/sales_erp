@@ -194,6 +194,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
           : await _create(_buildTrip(closed: false));
       _original = saved;
       _displayNumber = saved.displayNumber;
+      AppServices.instance.carTripEvents.publish(saved);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Draft ${saved.displayNumber} saved.')),
@@ -237,6 +238,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
               : await _confirm(preview, triggeredBy: 'invoice_close');
 
       final summary = _calculator.summary(persisted);
+      AppServices.instance.carTripEvents.publish(persisted);
       if (!mounted) return;
       await Navigator.of(context).push(
         PageRouteBuilder(
