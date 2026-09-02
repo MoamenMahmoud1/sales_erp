@@ -18,7 +18,7 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: erp-api
@@ -63,7 +63,8 @@ jobs:
       ASYNC_BENCH_THREADS: "0"
       TRUST_PROXY_HEADERS: "false"
       PERF_TIMING_ENABLED: "0"
-      BENCH_TIMEOUT: "5"
+      # Keep the client timeout comfortably above the expected saturated tail.
+      BENCH_TIMEOUT: "30"
       BENCH_REQUESTS: "300"
       BENCH_WARMUP: "20"
       PRODUCT_LIST_CACHE_ENABLED: "0"
@@ -161,7 +162,7 @@ jobs:
                 --workers "$WORKERS" \
                 --threads "$SYNC_THREADS" \
                 --worker-class gthread \
-                --timeout 15 \
+                --timeout 30 \
                 --access-logfile /dev/null \
                 --error-logfile /tmp/gunicorn-fair.log \
                 --log-level warning &
@@ -179,7 +180,7 @@ jobs:
                 --bind 127.0.0.1:8000 \
                 --workers "$WORKERS" \
                 --worker-class uvicorn_worker.UvicornWorker \
-                --timeout 15 \
+                --timeout 30 \
                 --access-logfile /dev/null \
                 --error-logfile /tmp/gunicorn-fair.log \
                 --log-level warning &
@@ -204,7 +205,7 @@ jobs:
             local db_dsn="host=127.0.0.1 port=5432 dbname=erp_bench user=erp_bench password=erp_bench"
 
             set +e
-            timeout --signal=TERM --kill-after=5s 120s env \
+            timeout --signal=TERM --kill-after=5s 180s env \
               BENCH_MODE="$mode" \
               BENCH_PAGINATION="$pagination" \
               BENCH_URL="$url" \
@@ -224,7 +225,7 @@ jobs:
             set -e
 
             if [[ $rc -ne 0 ]]; then
-              echo "benchmark failed: $mode pagination=$pagination C=$c cache=$cache_mode rc=$rc" >&2
+              echo "benchmark process failed: $mode pagination=$pagination C=$c cache=$cache_mode rc=$rc" >&2
               cat "$out" >&2 2>/dev/null || true
               cat /tmp/gunicorn-fair.log >&2 || true
               return 1
@@ -243,8 +244,11 @@ jobs:
               raise SystemExit(f"invalid system metrics: {metrics}")
           if not db.get("enabled") or not db.get("samples") or db.get("connections_peak") is None:
               raise SystemExit(f"invalid DB metrics: {db}")
-          if payload.get("status") != "complete" or payload.get("failed", 0) != 0:
-              raise SystemExit(f"invalid benchmark result: status={payload.get('status')} failed={payload.get('failed')}")
+          # HTTP failures are measured outcomes in a saturation benchmark;
+          # do not discard the entire matrix because one slow request failed.
+          # The request generator must still complete the requested sample.
+          if payload.get("status") != "complete":
+              raise SystemExit(f"invalid benchmark result: status={payload.get('status')}")
           PY
           }
 
@@ -288,7 +292,7 @@ jobs:
           lines = [
               "# Full DB Pool Sync vs Native Django Async",
               "",
-              "Configuration: 4 workers; Sync uses Django/psycopg synchronous pooling; Async uses ASGI plus psycopg AsyncConnectionPool on the migrated Product page path. Both are capped at 12 DB connections per worker for this controlled comparison. PostgreSQL metrics come from pg_stat_activity with the sampler connection excluded.",
+              "Configuration: 4 workers; Sync uses Django/psycopg synchronous pooling; Async uses ASGI plus psycopg AsyncConnectionPool on the migrated Product page path. Both are capped at 12 DB connections per worker for this controlled comparison. PostgreSQL metrics come from pg_stat_activity with the sampler connection excluded. Client timeout is 30s so saturated tail latency is measured rather than truncated by the benchmark client.",
               "",
               "| mode | pagination | cache | C | wall s | RPS | p50 ms | p95 ms | p99 ms | CPU avg % | CPU peak % | RAM avg MB | RAM peak MB | threads avg | threads peak | DB conn peak | failed |",
               "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
