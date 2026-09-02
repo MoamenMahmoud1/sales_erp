@@ -25,8 +25,19 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": (),
 }
 
-# The benchmark can explicitly enable the Redis-backed Products read cache.
-# Keep it off by default so the DB-only baseline remains reproducible.
+# Benchmark runs explicitly choose the admission limit through the environment.
+ASYNC_DB_CONCURRENCY = int(os.getenv("ASYNC_DB_CONCURRENCY", "0") or "0")
+if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
+    raise ValueError(
+        "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
+    )
+
+# The pool is pre-warmed for benchmark runs. This separates connection
+# creation from request latency while the per-worker admission limit controls
+# how many DB-bound operations may actually be active at once.
+DB_POOL_MIN_SIZE = DB_POOL_MAX_SIZE
+
+# Optional Redis response cache for the Products list benchmark.
 PRODUCT_LIST_CACHE_ENABLED = os.getenv("PRODUCT_LIST_CACHE_ENABLED", "0").strip().lower() in {
     "1",
     "true",
@@ -34,15 +45,6 @@ PRODUCT_LIST_CACHE_ENABLED = os.getenv("PRODUCT_LIST_CACHE_ENABLED", "0").strip(
     "on",
 }
 PRODUCT_LIST_CACHE_TTL = int(os.getenv("PRODUCT_LIST_CACHE_TTL", "30") or "30")
-if PRODUCT_LIST_CACHE_TTL < 1:
-    raise ValueError("PRODUCT_LIST_CACHE_TTL must be >= 1")
-
-# Benchmark runs explicitly choose the admission limit through the environment.
-ASYNC_DB_CONCURRENCY = int(os.getenv("ASYNC_DB_CONCURRENCY", "0") or "0")
-if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
-    raise ValueError(
-        "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
-    )
 
 # Calibration/diagnostic runs enable stage instrumentation; clean performance
 # runs disable it so SQL sampling and response headers cannot inflate latency.
