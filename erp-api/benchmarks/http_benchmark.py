@@ -237,6 +237,7 @@ async def main() -> None:
     progress_every = env_int("BENCH_PROGRESS_EVERY", 0)
     benchmark_mode = os.getenv("BENCH_MODE", "unknown")
     pagination_mode = os.getenv("BENCH_PAGINATION", "page")
+    redis_cache = env_bool("BENCH_REDIS_CACHE", False)
     detail_path = Path(os.environ["BENCH_DETAIL_PATH"]) if os.getenv("BENCH_DETAIL_PATH") else None
     require_instrumentation = env_bool("BENCH_REQUIRE_INSTRUMENTATION", False)
 
@@ -254,13 +255,15 @@ async def main() -> None:
         http2=False,
         trust_env=False,
     ) as client:
-        warmup_requests = max(warmup, concurrency) if warmup > 0 else 0
+        # For a Redis-hot benchmark, one request is enough to populate the exact
+        # cache key. Concurrent warm-up would otherwise create a cache-miss stampede.
+        warmup_requests = 1 if redis_cache and warmup > 0 else (max(warmup, concurrency) if warmup > 0 else 0)
         if warmup_requests:
             await run_requests(
                 url,
                 token,
                 warmup_requests,
-                concurrency,
+                1 if redis_cache else concurrency,
                 timeout_s,
                 client=client,
             )
@@ -323,6 +326,7 @@ async def main() -> None:
         "status": "complete" if stack_verified else "partial",
         "mode": benchmark_mode,
         "pagination": pagination_mode,
+        "redis_product_cache": redis_cache,
         "requests": requests,
         "completed": completed,
         "successful": successful,
