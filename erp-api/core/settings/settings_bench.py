@@ -25,6 +25,18 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": (),
 }
 
+# The benchmark can explicitly enable the Redis-backed Products read cache.
+# Keep it off by default so the DB-only baseline remains reproducible.
+PRODUCT_LIST_CACHE_ENABLED = os.getenv("PRODUCT_LIST_CACHE_ENABLED", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+PRODUCT_LIST_CACHE_TTL = int(os.getenv("PRODUCT_LIST_CACHE_TTL", "30") or "30")
+if PRODUCT_LIST_CACHE_TTL < 1:
+    raise ValueError("PRODUCT_LIST_CACHE_TTL must be >= 1")
+
 # Benchmark runs explicitly choose the admission limit through the environment.
 ASYNC_DB_CONCURRENCY = int(os.getenv("ASYNC_DB_CONCURRENCY", "0") or "0")
 if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
