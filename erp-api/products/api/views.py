@@ -1,20 +1,20 @@
+import os
+
 from adrf import viewsets
-from django.db.models import OuterRef, Subquery, Sum, Value
-from django.db.models.functions import Coalesce
 from rest_framework import filters
 from rest_framework.response import Response
 
-from common.pagination import AsyncStandardPagination
+from common.pagination import AsyncCursorPagination, AsyncStandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
 from common.services.async_db_gate import DBAdmissionTimeout, db_slot
 from common.services.async_serializer import AsyncSerializerService
 from common.services.perf_timing import db_operation, timed_function, view_stage
+from products.api.serializers import CartonPricingSerializer, ProductSerializer
+from products.models import CartonPricing
+from products.services.metrics import ProductMetricsQueryService
 
-from products.api.serializers import (
-    CartonPricingSerializer,
-    ProductSerializer,
-)
-from products.models import CartonPricing, Product
+
+_BENCH_PAGINATION = os.getenv("BENCH_PAGINATION", "page").lower()
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -22,7 +22,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = (
         ReadAuthenticatedWriteStaffPermission,
     )
-    pagination_class = AsyncStandardPagination
+    pagination_class = (
+        AsyncCursorPagination if _BENCH_PAGINATION == "cursor" else AsyncStandardPagination
+    )
 
     filter_backends = (
         filters.SearchFilter,
@@ -48,7 +50,6 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @timed_function("ProductViewSet.afilter_queryset")
     async def afilter_queryset(self, queryset):
-        """Apply lazy QuerySet filters without a sync-to-async thread hop."""
         for backend_class in self.filter_backends:
             name = backend_class.__name__.removesuffix("Filter").lower()
             with view_stage(f"view.filter.{name}"):
@@ -57,7 +58,6 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @timed_function("ProductViewSet.alist")
     async def alist(self, request, *args, **kwargs):
-        """List products with bounded DB concurrency and one serializer hop."""
         with view_stage("view.total"):
             with view_stage("view.queryset.build"):
                 queryset = await self.afilter_queryset(self.get_queryset())
@@ -92,48 +92,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     @timed_function("ProductViewSet.get_queryset")
     def get_queryset(self):
         with view_stage("view.queryset.annotate"):
-            return Product.objects.annotate(
-                _total_stock=Coalesce(
-                    Subquery(self._total_stock_subquery()),
-                    Value(0),
-                ),
-                _sold_quantity=Coalesce(
-                    Subquery(self._confirmed_invoice_item_qty()),
-                    Value(0),
-                ),
-            )
-
-    @staticmethod
-    @timed_function("ProductViewSet._total_stock_subquery")
-    def _total_stock_subquery():
-        from inventory.models import StockBalance
-
-        with view_stage("view.service.stock.build"):
-            return (
-                StockBalance.objects.filter(product_id=OuterRef("pk"))
-                .values("product_id")
-                .annotate(total=Sum("quantity"))
-                .values("total")
-            )
-
-    @staticmethod
-    @timed_function("ProductViewSet._confirmed_invoice_item_qty")
-    def _confirmed_invoice_item_qty():
-        from invoices.models import Invoice, InvoiceItem
-
-        with view_stage("view.service.sold.build"):
-            return (
-                InvoiceItem.objects.filter(
-                    product_id=OuterRef("pk"),
-                    invoice__status__in=(
-                        Invoice.Status.CONFIRMED,
-                        Invoice.Status.PAID,
-                    ),
-                )
-                .values("product_id")
-                .annotate(total=Sum("quantity"))
-                .values("total")
-            )
+            return ProductMetricsQueryService.with_metrics()
 
 
 class CartonPricingViewSet(viewsets.ModelViewSet):
@@ -155,7 +114,6 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
     ordering_fields = (
         "name",
         "units_per_carton",
-        "carton_price",
         "created_at",
         "updated_at",
     )
