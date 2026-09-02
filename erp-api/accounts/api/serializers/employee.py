@@ -1,8 +1,9 @@
+from adrf import serializers
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
-from adrf import serializers
-from asgiref.sync import sync_to_async
 from rest_framework.exceptions import ValidationError
+
+from asgiref.sync import sync_to_async
 
 from accounts.models import Employee, Role
 
