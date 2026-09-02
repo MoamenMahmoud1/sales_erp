@@ -13,6 +13,7 @@ before workers fork.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Sequence
@@ -48,6 +49,7 @@ def _db_kwargs() -> dict[str, Any]:
             "password": database["PASSWORD"],
             "host": database.get("HOST") or "localhost",
             "port": database.get("PORT") or "5432",
+            "application_name": os.getenv("ASYNC_PG_APPLICATION_NAME", "erp-api-async"),
             "autocommit": True,
             "prepare_threshold": int(getattr(settings, "ASYNC_PG_PREPARE_THRESHOLD", 5)),
             "row_factory": dict_row,
