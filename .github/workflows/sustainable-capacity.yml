@@ -177,10 +177,9 @@ jobs:
           import json
           from pathlib import Path
           root=Path('benchmark-results/calibration')
-          selected={}
           for mode in ('async','sync'):
               candidates=[]
-              for p in root.glob(f'{mode}-w*-d*-cursor-c{50}.json'):
+              for p in root.glob(f'{mode}-w*-d*-cursor-c50.json'):
                   parts=p.stem.split('-')
                   workers=int(parts[1][1:]); d=int(parts[2][1:])
                   c=json.loads(p.read_text())
@@ -197,7 +196,6 @@ jobs:
               if not candidates:
                   raise SystemExit(f'No healthy worker/D configuration for {mode}')
               _,_,_,_,_,workers,d,c=max(candidates)
-              selected[mode]=(workers,d,c)
               (root/f'{mode}-selected.env').write_text(f'WORKERS={workers}\nD_PER_WORKER={d}\nTOTAL_D={workers*d}\n')
               print(f'{mode}: workers={workers} D/worker={d} total={workers*d} RPS={c.get("successful_rps")} p95={c.get("p95_ms")} p99={c.get("p99_ms")} pool_p95={c.get("pool_wait_p95_ms")} admission_p95={c.get("db_admission_p95_ms")}')
           PY
@@ -208,8 +206,6 @@ jobs:
           SYNC_WORKERS="$(get_value sync WORKERS)"
           SYNC_D="$(get_value sync D_PER_WORKER)"
 
-          # Clean performance pass: instrumentation is OFF so RPS/latency are not
-          # inflated by SQL sampling and dozens of Server-Timing headers.
           for pagination in page cursor; do
             start_server async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 0
             for c in "${CLIENT_CONCURRENCIES[@]}"; do
@@ -223,9 +219,6 @@ jobs:
             stop_server
           done
 
-          # Diagnostic pass: one representative high-load run per mode/pagination
-          # with instrumentation on, so the clean performance result remains the
-          # source of truth while stage timings explain any bottleneck.
           for pagination in page cursor; do
             start_server async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 1
             run_one async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 100 diagnostic 1
@@ -246,7 +239,7 @@ jobs:
                   k,v=line.split('=',1); d[k]=int(v)
               vals[mode]=d
           lines=['# Optimized Sync vs Async Capacity','',
-                 'Clean final runs disable instrumentation. Diagnostic runs at C=100 keep stage timings for root-cause analysis. Each architecture is independently optimized; DB pool max is 12 per worker and admission is kept below the pool for async.','',
+                 'Clean final runs disable instrumentation. Diagnostic runs at C=100 keep stage timings for root-cause analysis. Each architecture is independently optimized; DB pool max is 12 per worker and async admission stays below the pool for async.','',
                  '| mode | workers | D/worker | total D | pagination | client C | wall s | RPS | p50 ms | p95 ms | p99 ms | failed |',
                  '|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|']
           for p in sorted((root/'final').glob('*.json')):
