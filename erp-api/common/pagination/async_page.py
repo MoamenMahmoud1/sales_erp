@@ -6,7 +6,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param, replace_query_param
 
-from common.services.perf_timing import view_stage
+from common.services.async_db_gate import db_slot
+from common.services.perf_timing import db_operation, view_stage
 
 
 class AsyncPage:
@@ -59,8 +60,12 @@ class AsyncStandardPagination(PageNumberPagination):
                 return None
             raw_page = request.query_params.get(self.page_query_param) or "1"
 
+        # Admission covers only the actual COUNT query. Page math does not
+        # consume a DB slot, so it must never hold the gate.
         with view_stage("view.pagination.count"):
-            count = await queryset.acount()
+            async with db_slot():
+                with db_operation():
+                    count = await queryset.acount()
 
         with view_stage("view.pagination.page_math"):
             num_pages = math.ceil(count / page_size) if count else 1
@@ -85,8 +90,12 @@ class AsyncStandardPagination(PageNumberPagination):
             start = (page_number - 1) * page_size
             queryset_slice = queryset[start : start + page_size]
 
+        # The admission slot ends as soon as the result set is materialized.
+        # Serializer construction and page metadata run outside the DB gate.
         with view_stage("view.pagination.fetch"):
-            objects = [obj async for obj in queryset_slice]
+            async with db_slot():
+                with db_operation():
+                    objects = [obj async for obj in queryset_slice]
 
         with view_stage("view.pagination.page_object"):
             self.page = AsyncPage(objects, page_number, count, page_size)
