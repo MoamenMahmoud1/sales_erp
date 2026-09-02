@@ -69,7 +69,9 @@ class _PaymentDistributionAnimationState
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final visible = (widget.allocations.length * _flow.value).ceil().clamp(0, widget.allocations.length);
+    final visible = (widget.allocations.length * _flow.value)
+        .ceil()
+        .clamp(0, widget.allocations.length) as int;
 
     return Material(
       color: scheme.surface,
@@ -104,9 +106,9 @@ class _PaymentDistributionAnimationState
                   ),
                 ),
                 const SizedBox(height: 26),
-                Text(
+                const Text(
                   'Applying payment',
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -118,7 +120,8 @@ class _PaymentDistributionAnimationState
                 for (var i = 0; i < visible; i++)
                   _AllocationRow(
                     allocation: widget.allocations[i],
-                    progress: ((_flow.value * widget.allocations.length) - i).clamp(0, 1),
+                    progress: ((_flow.value * widget.allocations.length) - i)
+                        .clamp(0.0, 1.0),
                   ),
                 const SizedBox(height: 10),
                 Opacity(
@@ -149,6 +152,7 @@ class _PaymentDistributionAnimationState
                       ),
                     ),
                   ),
+                ),
                 const Spacer(),
               ],
             ),
