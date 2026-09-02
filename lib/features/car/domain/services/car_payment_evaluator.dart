@@ -2,22 +2,26 @@ import '../entities/car_financial_summary.dart';
 import '../entities/car_payment_status.dart';
 import '../entities/car_trip.dart';
 import '../entities/money.dart';
-import 'car_calculator.dart';
 
-/// Derives payment/overdue state for a car trip (or its summary view) at a
-/// point in time.
+/// Pure payment-state rules for Car transactions.
 class CarPaymentEvaluator {
   const CarPaymentEvaluator();
 
-  /// Low-level status computation used by both full trips and summary views,
-  /// centralizing the rule so widgets never derive it themselves.
+  CarMoney remainingAmount({
+    required CarMoney totalValue,
+    required CarMoney paid,
+  }) {
+    final value = totalValue - paid;
+    return value.isNegative ? CarMoney.zero : value;
+  }
+
   CarPaymentStatus statusFor({
     required CarMoney totalValue,
     required CarMoney paid,
     DateTime? dueDate,
     required DateTime now,
   }) {
-    final remaining = _remaining(totalValue, paid);
+    final remaining = remainingAmount(totalValue: totalValue, paid: paid);
 
     if (remaining == CarMoney.zero) {
       return CarPaymentStatus.paid;
@@ -38,7 +42,7 @@ class CarPaymentEvaluator {
     DateTime? dueDate,
     required DateTime now,
   }) {
-    if (_remaining(totalValue, paid) == CarMoney.zero) {
+    if (remainingAmount(totalValue: totalValue, paid: paid) == CarMoney.zero) {
       return 0;
     }
     if (dueDate == null || !now.isAfter(dueDate)) {
@@ -47,47 +51,36 @@ class CarPaymentEvaluator {
     return now.difference(dueDate).inDays;
   }
 
-  /// Remaining amount (pre-computed) with a zero-clamp.
-  CarMoney remaining(CarTrip trip, CarFinancialSummary summary) {
-    final value = summary.finalTotalSoldValue - trip.payment.totalPaid;
-    return value.isNegative ? CarMoney.zero : value;
-  }
+  CarMoney remaining(
+    CarTrip trip,
+    CarFinancialSummary summary,
+  ) =>
+      remainingAmount(
+        totalValue: summary.finalTotalSoldValue,
+        paid: trip.payment.totalPaid,
+      );
 
   CarPaymentStatus statusOf(
     CarTrip trip,
     CarFinancialSummary summary,
     DateTime now,
-  ) {
-    return statusFor(
-      totalValue: summary.finalTotalSoldValue,
-      paid: trip.payment.totalPaid,
-      dueDate: trip.dueDate,
-      now: now,
-    );
-  }
+  ) =>
+      statusFor(
+        totalValue: summary.finalTotalSoldValue,
+        paid: trip.payment.totalPaid,
+        dueDate: trip.dueDate,
+        now: now,
+      );
 
-  /// Whole days the trip is overdue; 0 when not overdue, no due date, or the
-  /// balance is fully paid.
   int daysOverdue(
     CarTrip trip,
     DateTime now, {
-    CarFinancialSummary? summary,
-  }) {
-    return daysOverdueFor(
-      totalValue:
-          (summary ?? /* unreachable fallback */ _fallbackSummary(trip))
-              .finalTotalSoldValue,
-      paid: trip.payment.totalPaid,
-      dueDate: trip.dueDate,
-      now: now,
-    );
-  }
-
-  CarFinancialSummary _fallbackSummary(CarTrip trip) =>
-      const CarCalculator().summary(trip);
-
-  CarMoney _remaining(CarMoney totalValue, CarMoney paid) {
-    final value = totalValue - paid;
-    return value.isNegative ? CarMoney.zero : value;
-  }
+    required CarFinancialSummary summary,
+  }) =>
+      daysOverdueFor(
+        totalValue: summary.finalTotalSoldValue,
+        paid: trip.payment.totalPaid,
+        dueDate: trip.dueDate,
+        now: now,
+      );
 }
