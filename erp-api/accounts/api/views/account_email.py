@@ -3,6 +3,11 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from authentication.throttling import (
+    EmailActionThrottle,
+    SignUpThrottle,
+)
+
 from accounts.api.serializers.account_email import (
     EmailChangeConfirmSerializer,
     EmailChangeRequestSerializer,
@@ -12,10 +17,6 @@ from accounts.api.serializers.account_email import (
 )
 from authsession.http import NoStoreResponseMixin, clear_login_cookies
 from authsession.permissions import VerifiedAuthSessionSyncPermission
-from authentication.throttling import (
-    EmailActionThrottle,
-    SignUpThrottle,
-)
 
 
 class SignUpView(NoStoreResponseMixin, GenericAPIView):
