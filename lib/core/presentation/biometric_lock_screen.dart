@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
@@ -48,9 +50,6 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 650),
-      lowerBound: 0.0,
-      upperBound: 1.0,
-      value: 0.0,
     );
     _prepare();
   }
@@ -104,12 +103,9 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
       await _animationController.forward();
       HapticFeedback.mediumImpact();
 
-      // When biometrics are available, expose an explicit device-credential
-      // fallback after the biometric attempt fails. A single automatic
-      // attempt is still preserved for this screen presentation.
       if (automatic && method != _AuthMethod.deviceCredential) {
         _deviceCredentialOffered = true;
-        setState(() {});
+        if (mounted) setState(() {});
       }
     }
 
@@ -142,7 +138,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
       case _AuthPhase.failed:
         return _method == _AuthMethod.deviceCredential
             ? 'That device credential was not accepted. Try again.'
-            : 'That biometric attempt was not accepted. Try again or use your phone credential.';
+            : 'That biometric was not accepted. Try again or use your phone credential.';
       case _AuthPhase.success:
         return 'Authentication successful. Welcome back.';
     }
@@ -153,7 +149,6 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
       case _AuthMethod.face:
         return Icons.face_retouching_natural_rounded;
       case _AuthMethod.fingerprint:
-        return Icons.fingerprint_rounded;
       case _AuthMethod.biometric:
         return Icons.fingerprint_rounded;
       case _AuthMethod.deviceCredential:
@@ -174,12 +169,104 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     }
   }
 
+  Widget _buildAuthIcon(ColorScheme scheme) {
+    final progress = _animationController.value;
+    final failed = _phase == _AuthPhase.failed;
+    final success = _phase == _AuthPhase.success;
+
+    var scale = 1.0;
+    var rotation = 0.0;
+    var dx = 0.0;
+    var dy = 0.0;
+
+    if (_phase == _AuthPhase.authenticating) {
+      final pulse = (math.sin(progress * math.pi * 2) + 1) / 2;
+      scale = 1.0 + pulse * 0.035;
+    } else if (failed) {
+      switch (_method) {
+        case _AuthMethod.face:
+          dx = math.sin(progress * math.pi * 6) * (1 - progress) * 8;
+        case _AuthMethod.fingerprint:
+          scale = 1.0 + 0.06 * math.sin(progress * math.pi) * (1 - progress);
+        case _AuthMethod.biometric:
+          rotation = math.sin(progress * math.pi * 4) * 0.05 * (1 - progress);
+        case _AuthMethod.deviceCredential:
+          dy = -math.sin(progress * math.pi * 5) * (1 - progress) * 7;
+      }
+    } else if (success) {
+      switch (_method) {
+        case _AuthMethod.face:
+          scale = 1.0 + 0.10 * progress;
+          rotation = 0.04 * math.sin(progress * math.pi);
+        case _AuthMethod.fingerprint:
+          scale = 1.0 + 0.14 * math.sin(progress * math.pi / 2);
+        case _AuthMethod.biometric:
+          scale = 1.0 + 0.08 * progress;
+          rotation = -0.025 * progress;
+        case _AuthMethod.deviceCredential:
+          dy = -10 * progress;
+          scale = 1.0 + 0.05 * progress;
+      }
+    }
+
+    final color = failed ? scheme.error : scheme.primary;
+    final icon = success ? Icons.verified_rounded : _methodIcon;
+
+    return Transform.translate(
+      offset: Offset(dx, dy),
+      child: Transform.rotate(
+        angle: rotation,
+        child: Transform.scale(
+          scale: scale,
+          child: Container(
+            width: 132,
+            height: 132,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: success
+                  ? scheme.primaryContainer
+                  : scheme.surfaceContainerHigh,
+              border: Border.all(
+                color: failed
+                    ? scheme.error.withValues(alpha: 0.7)
+                    : scheme.primary.withValues(alpha: 0.3),
+                width: 2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.14),
+                  blurRadius: 28,
+                  spreadRadius: 4,
+                ),
+              ],
+            ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              transitionBuilder: (child, animation) => ScaleTransition(
+                scale: CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOutBack,
+                ),
+                child: FadeTransition(opacity: animation, child: child),
+              ),
+              child: Icon(
+                icon,
+                key: ValueKey<Object>('$success-$_method'),
+                size: 64,
+                color: color,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isSuccess = _phase == _AuthPhase.success;
-    final isFailure = _phase == _AuthPhase.failed;
 
     return Scaffold(
       body: DecoratedBox(
@@ -205,65 +292,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                   children: [
                     AnimatedBuilder(
                       animation: _animationController,
-                      builder: (context, _) {
-                        final progress = _animationController.value;
-                        final isFailureState = _phase == _AuthPhase.failed;
-                        final scale = isFailureState
-                            ? 1.0 + 0.035 * (1 - progress)
-                            : isSuccess
-                                ? 1.0 + 0.04 * progress
-                                : 1.0;
-                        final rotation = isFailureState
-                            ? 0.025 * (1 - progress)
-                            : 0.0;
-                        return Transform.rotate(
-                          angle: rotation,
-                          child: Transform.scale(
-                            scale: scale,
-                            child: Container(
-                              width: 132,
-                              height: 132,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: isSuccess
-                                    ? scheme.primaryContainer
-                                    : scheme.surfaceContainerHigh,
-                                border: Border.all(
-                                  color: isFailureState
-                                      ? scheme.error.withValues(alpha: 0.7)
-                                      : scheme.primary.withValues(alpha: 0.3),
-                                  width: 2,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: (isFailureState
-                                            ? scheme.error
-                                            : scheme.primary)
-                                        .withValues(alpha: 0.14),
-                                    blurRadius: 28,
-                                    spreadRadius: 4,
-                                  ),
-                                ],
-                              ),
-                              child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 220),
-                                child: Icon(
-                                  isSuccess
-                                      ? Icons.verified_rounded
-                                      : _methodIcon,
-                                  key: ValueKey<Object>(
-                                    '$isSuccess-$_method',
-                                  ),
-                                  size: 64,
-                                  color: isFailureState
-                                      ? scheme.error
-                                      : scheme.primary,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+                      builder: (context, _) => _buildAuthIcon(scheme),
                     ),
                     const SizedBox(height: 30),
                     Text(
@@ -301,7 +330,9 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                             : () => _attempt(_method),
                         icon: Icon(_methodIcon),
                         label: Text(
-                          isFailure ? 'Try again' : _primaryAction,
+                          _phase == _AuthPhase.failed
+                              ? 'Try again'
+                              : _primaryAction,
                         ),
                         style: FilledButton.styleFrom(
                           minimumSize: const Size.fromHeight(54),
