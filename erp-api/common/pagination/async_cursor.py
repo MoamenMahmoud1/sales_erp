@@ -3,7 +3,8 @@ from __future__ import annotations
 from rest_framework.pagination import Cursor, CursorPagination
 from rest_framework.response import Response
 
-from common.services.perf_timing import view_stage
+from common.services.async_db_gate import db_slot
+from common.services.perf_timing import db_operation, view_stage
 
 
 def _reverse_ordering(ordering):
@@ -43,6 +44,8 @@ class AsyncCursorPagination(CursorPagination):
         else:
             offset, reverse, current_position = self.cursor
 
+        # Query construction, cursor decoding, and filtering are local work and
+        # do not need a database slot. Keep the gate strictly around execution.
         with view_stage("view.pagination.cursor.prepare"):
             queryset = queryset.order_by(
                 *_reverse_ordering(self.ordering) if reverse else self.ordering
@@ -59,19 +62,27 @@ class AsyncCursorPagination(CursorPagination):
                 queryset = queryset.filter(**kwargs)
 
         with view_stage("view.pagination.cursor.fetch"):
-            results = [obj async for obj in queryset[offset : offset + self.page_size + 1]]
+            async with db_slot():
+                with db_operation():
+                    results = [
+                        obj
+                        async for obj in queryset[offset : offset + self.page_size + 1]
+                    ]
 
-        self.page = results[: self.page_size]
-        self.has_following_position = len(results) > len(self.page)
-        self.following_position = (
-            self._get_position_from_instance(results[-1], self.ordering)
-            if self.has_following_position
-            else None
-        )
-        self.has_next = self.has_following_position
-        self.has_previous = self.cursor is not None
-        self.next_position = self.following_position
-        self.previous_position = current_position
+        # Cursor metadata is pure Python and should never occupy an admission
+        # slot while the request is heading toward serialization.
+        with view_stage("view.pagination.cursor.page_object"):
+            self.page = results[: self.page_size]
+            self.has_following_position = len(results) > len(self.page)
+            self.following_position = (
+                self._get_position_from_instance(results[-1], self.ordering)
+                if self.has_following_position
+                else None
+            )
+            self.has_next = self.has_following_position
+            self.has_previous = self.cursor is not None
+            self.next_position = self.following_position
+            self.previous_position = current_position
         return self.page
 
     def get_next_link(self):
