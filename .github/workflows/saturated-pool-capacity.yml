@@ -188,29 +188,16 @@ jobs:
             return 1
           }
 
-          sample_threads() {
-            local pgid="$1" out="$2" max=0
-            while kill -0 "$pgid" 2>/dev/null; do
-              local current
-              current="$(ps -eo pgid=,nlwp= | awk -v pg="$pgid" '$1==pg {sum+=$2} END {print sum+0}')"
-              if [[ "$current" -gt "$max" ]]; then max="$current"; fi
-              sleep 0.05
-            done
-            echo "$max" > "$out"
-          }
-
           run_one() {
             local mode="$1" pagination="$2" c="$3" phase="$4" cache_mode="$5" perf="$6"
             local url="http://127.0.0.1:8000/api/v1/products/?page_size=20"
             local out="benchmark-results-saturated/$phase/${mode}-${pagination}-c${c}-${cache_mode}.json"
-            local threads_out="${out%.json}.threads"
             local redis_cache=0
             [[ "$cache_mode" == "hot" ]] && redis_cache=1
+            local server_pid="$(cat /tmp/gunicorn-fair.pid)"
+            local db_dsn="host=127.0.0.1 port=5432 dbname=erp_bench user=erp_bench password=erp_bench"
 
             set +e
-            sample_threads "$(cat /tmp/gunicorn-fair.pid)" "$threads_out" &
-            local sampler_pid=$!
-
             timeout --signal=TERM --kill-after=5s 120s env \
               BENCH_MODE="$mode" \
               BENCH_PAGINATION="$pagination" \
@@ -221,32 +208,38 @@ jobs:
               BENCH_REQUESTS="$BENCH_REQUESTS" \
               BENCH_WARMUP="$BENCH_WARMUP" \
               BENCH_TIMEOUT="$BENCH_TIMEOUT" \
+              BENCH_SERVER_PID="$server_pid" \
+              BENCH_DB_DSN="$db_dsn" \
               BENCH_REQUIRE_INSTRUMENTATION="$perf" \
+              BENCH_REQUIRE_SYSTEM_METRICS=1 \
+              BENCH_REQUIRE_DB_METRICS=1 \
               python benchmarks/http_benchmark.py > "$out"
             local rc=$?
-
-            kill "$sampler_pid" 2>/dev/null || true
-            wait "$sampler_pid" 2>/dev/null || true
             set -e
 
             if [[ $rc -ne 0 ]]; then
               echo "benchmark failed: $mode pagination=$pagination C=$c cache=$cache_mode rc=$rc" >&2
+              cat "$out" >&2 2>/dev/null || true
+              cat /tmp/gunicorn-fair.log >&2 || true
               return 1
             fi
 
-            local observed_threads="$(cat "$threads_out" 2>/dev/null || echo 0)"
-            python - "$out" "$observed_threads" <<'PY'
+            python - "$out" <<'PY'
           import json
           import sys
           from pathlib import Path
 
           path = Path(sys.argv[1])
-          observed = int(sys.argv[2])
           payload = json.loads(path.read_text())
-          payload["max_os_threads_observed"] = observed
-          path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+          metrics = payload.get("cpu_memory_threads", {})
+          db = payload.get("db_connections", {})
+          if not metrics.get("enabled") or not metrics.get("samples") or not metrics.get("os_threads_peak"):
+              raise SystemExit(f"invalid system metrics: {metrics}")
+          if not db.get("enabled") or not db.get("samples") or db.get("connections_peak") is None:
+              raise SystemExit(f"invalid DB metrics: {db}")
+          if payload.get("status") != "complete" or payload.get("failed", 0) != 0:
+              raise SystemExit(f"invalid benchmark result: status={payload.get('status')} failed={payload.get('failed')}")
           PY
-            rm -f "$threads_out"
           }
 
           # Sync baseline: fixed 11 request threads/worker.
@@ -260,10 +253,8 @@ jobs:
             stop_server
           done
 
-          # Async uses Django's real async ORM/request stack. We do NOT cap its
-          # thread-sensitive ORM workers to an artificial number; instead we
-          # observe how many OS threads it actually needs to exploit the same
-          # 11/12 DB capacity per worker.
+          # Async uses Django's native async request/ORM path; OS threads are
+          # observed by http_benchmark.py from the Gunicorn process tree.
           for pagination in "${PAGINATIONS[@]}"; do
             for cache_mode in "${CACHE_MODES[@]}"; do
               start_server async "$pagination" 0 "$cache_mode"
@@ -291,19 +282,23 @@ jobs:
           lines = [
               "# Full DB Pool Sync vs Native Django Async",
               "",
-              "Configuration: 4 workers; DB pool 12/12 per worker; async DB admission 11/worker; Sync uses 11 request threads/worker. Async uses Django's native async ORM path and its real thread-sensitive execution model; OS threads are observed, not artificially capped.",
+              "Configuration: 4 workers; DB pool 12/12 per worker; async DB admission 11/worker; Sync uses 11 request threads/worker. CPU/RAM/OS-thread metrics come from the Gunicorn process tree sampled inside the benchmark; PostgreSQL metrics come from pg_stat_activity with the sampler connection excluded.",
               "",
-              "| mode | pagination | cache | C | wall s | RPS | p50 ms | p95 ms | p99 ms | max OS threads | failed |",
-              "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+              "| mode | pagination | cache | C | wall s | RPS | p50 ms | p95 ms | p99 ms | CPU avg % | CPU peak % | RAM avg MB | RAM peak MB | threads avg | threads peak | DB conn peak | failed |",
+              "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
           ]
           for p in sorted((root / "final").glob("*.json")):
               c = json.loads(p.read_text())
+              sys = c["cpu_memory_threads"]
+              db = c["db_connections"]
               lines.append(
                   f"| {c['mode']} | {c['pagination']} | {'hot' if c.get('redis_product_cache') else 'off'} | {int(c['concurrency'])} | "
                   f"{float(c.get('wall_time_sec') or 0):.3f} | {float(c.get('successful_rps') or 0):.2f} | "
                   f"{float(c.get('p50_ms') or 0):.2f} | {float(c.get('p95_ms') or 0):.2f} | "
-                  f"{float(c.get('p99_ms') or 0):.2f} | {int(c.get('max_os_threads_observed') or 0)} | "
-                  f"{int(c.get('failed') or 0)} |"
+                  f"{float(c.get('p99_ms') or 0):.2f} | {float(sys.get('cpu_avg_pct') or 0):.2f} | "
+                  f"{float(sys.get('cpu_peak_pct') or 0):.2f} | {float(sys.get('ram_avg_mb') or 0):.2f} | "
+                  f"{float(sys.get('ram_peak_mb') or 0):.2f} | {float(sys.get('os_threads_avg') or 0):.2f} | "
+                  f"{int(sys.get('os_threads_peak') or 0)} | {int(db.get('connections_peak') or 0)} | {int(c.get('failed') or 0)} |"
               )
 
           (root / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
