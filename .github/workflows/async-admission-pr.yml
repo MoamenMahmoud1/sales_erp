@@ -61,6 +61,7 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6379/0
       DB_POOL_MIN_SIZE: "4"
       DB_POOL_MAX_SIZE: "8"
+      ASYNC_DB_CONCURRENCY: "4"
       WEB_CONCURRENCY: "4"
       TRUST_PROXY_HEADERS: "false"
       ASYNC_DB_ADMISSION_TIMEOUT_MS: "0"
@@ -215,7 +216,11 @@ jobs:
             done
           done
 
-          printf '%s\n' "${FAILED_CASES[@]:-}" > benchmark-results/failed-cases.txt
+          if ((${#FAILED_CASES[@]} > 0)); then
+            printf '%s\n' "${FAILED_CASES[@]}" > benchmark-results/failed-cases.txt
+          else
+            : > benchmark-results/failed-cases.txt
+          fi
 
       - name: PostgreSQL query diagnostics
         if: always()
