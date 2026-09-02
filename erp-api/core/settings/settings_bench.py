@@ -1,8 +1,8 @@
-"""Benchmark settings using the real async application stack."""
+"""Benchmark settings for the real production API hot path."""
 
 import os
 
-from .settings_prod import *  # noqa: F401,F403
+from .settings_api import *  # noqa: F401,F403
 
 DEBUG = False
 SECURE_SSL_REDIRECT = False
@@ -18,9 +18,11 @@ REST_FRAMEWORK = {
 
 # Benchmark runs explicitly choose the admission limit through the environment.
 ASYNC_DB_CONCURRENCY = int(os.getenv("ASYNC_DB_CONCURRENCY", "0") or "0")
-if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY > DB_POOL_MAX_SIZE:
-    raise ValueError("ASYNC_DB_CONCURRENCY must be between 0 and DB_POOL_MAX_SIZE")
+if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
+    raise ValueError(
+        "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
+    )
 
-# Emit X-Perf-* and Server-Timing headers so the external benchmark can collect
-# the internal stages without relying on Django debug instrumentation.
+# Keep instrumentation enabled for stage-level diagnosis. Production defaults
+# remain disabled through settings_base.py unless explicitly enabled.
 PERF_TIMING_ENABLED = True
