@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../customers/domain/customer.dart';
-import '../../invoices/presentation/widgets/invoice_share_card.dart';
-import '../../invoices/presentation/widgets/invoice_share_page.dart';
 import '../data/local_sale_repository.dart';
+import 'widgets/invoice_share_card.dart';
+import 'widgets/invoice_share_page.dart';
 
-/// صفحة تفاصيل فاتورة واحدة: تعرض البيانات بوضوح + زر مشاركة
-/// البيحولك لمعاينة الكارت القابل للمشاركة كصورة.
+/// Details for one normal customer invoice with clean display numbering.
 class InvoiceDetailsPage extends StatefulWidget {
   final Customer customer;
   final int invoiceId;
@@ -35,10 +34,12 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final invoice = await _repository.getInvoiceWithItems(widget.invoiceId);
       if (!mounted) return;
@@ -46,11 +47,11 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
         _invoice = invoice;
         _loading = false;
       });
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Failed to load invoice: $e';
+        _error = 'Failed to load invoice: $error';
       });
     }
   }
@@ -58,16 +59,17 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
   List<ShareInvoiceItem> _itemsOf(Map<String, Object?> invoice) {
     final raw = invoice['items'] as List? ?? const [];
     return raw.map((item) {
-      final m = Map<String, Object?>.from(item as Map);
+      final map = Map<String, Object?>.from(item as Map);
       return ShareInvoiceItem(
-        name: m['product_name'] as String,
-        quantity: (m['quantity'] as num).toInt(),
-        unitPrice: (m['unit_price'] as num).toDouble(),
+        name: map['product_name'] as String,
+        quantity: (map['quantity'] as num).toInt(),
+        unitPrice: (map['unit_price'] as num).toDouble(),
       );
-    }).toList();
+    }).toList(growable: false);
   }
 
-  String _money(num? v) => '${(v ?? 0).toDouble().toStringAsFixed(2)} EGP';
+  String _money(num? value) =>
+      '${(value ?? 0).toDouble().toStringAsFixed(2)} EGP';
 
   Future<void> _openShare() async {
     final invoice = _invoice;
@@ -81,11 +83,15 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final invoice = _invoice;
+    final number = invoice == null
+        ? null
+        : ShareInvoiceData.fromMap(invoice, _itemsOf(invoice)).displayNumber;
     return Scaffold(
       appBar: AppBar(
-        title: Text('Invoice #${widget.invoiceId}'),
+        title: Text(number == null ? 'Invoice' : 'Invoice $number'),
         actions: [
-          if (_invoice != null)
+          if (invoice != null)
             IconButton(
               tooltip: 'Share',
               icon: const Icon(Icons.ios_share),
@@ -93,10 +99,12 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
             ),
         ],
       ),
-      body: _buildBody(Theme.of(context).colorScheme),
+      body: _buildBody(),
     );
   }
-Widget _buildBody(ColorScheme scheme) {
+
+  Widget _buildBody() {
+    final scheme = Theme.of(context).colorScheme;
     if (_loading) return const Center(child: CircularProgressIndicator());
 
     if (_error != null) {
@@ -123,6 +131,7 @@ Widget _buildBody(ColorScheme scheme) {
     final subtotal = (invoice['subtotal'] as num).toDouble();
     final discount = (invoice['coupon_discount'] as num).toDouble();
     final paid = (invoice['paid_amount'] as num?)?.toDouble() ?? 0;
+    final remaining = (total - paid).clamp(0, total).toDouble();
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -136,7 +145,7 @@ Widget _buildBody(ColorScheme scheme) {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(widget.customer.name,
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 4),
                   Text(widget.customer.phone,
                       style: TextStyle(color: scheme.onSurfaceVariant)),
@@ -170,8 +179,7 @@ Widget _buildBody(ColorScheme scheme) {
                                     style: const TextStyle(fontWeight: FontWeight.w600)),
                                 Text(
                                   '${item.quantity} × ${_money(item.unitPrice)}',
-                                  style: TextStyle(
-                                      fontSize: 12, color: scheme.onSurfaceVariant),
+                                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                                 ),
                               ],
                             ),
@@ -199,9 +207,11 @@ Widget _buildBody(ColorScheme scheme) {
                   _totalRow(scheme, 'Subtotal', _money(subtotal)),
                   if (discount > 0)
                     _totalRow(scheme, 'Discount', '-${_money(discount)}'),
-                  if (paid > 0) _totalRow(scheme, 'Paid', '-${_money(paid)}'),
+                  _totalRow(scheme, 'Paid', _money(paid)),
                   const Divider(),
                   _totalRow(scheme, 'Total', _money(total), emphasized: true),
+                  if (remaining > 0)
+                    _totalRow(scheme, 'Remaining', _money(remaining), emphasized: true),
                 ],
               ),
             ),
@@ -218,8 +228,12 @@ Widget _buildBody(ColorScheme scheme) {
     );
   }
 
-  Widget _totalRow(ColorScheme scheme, String label, String value,
-      {bool emphasized = false}) {
+  Widget _totalRow(
+    ColorScheme scheme,
+    String label,
+    String value, {
+    bool emphasized = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
@@ -227,13 +241,15 @@ Widget _buildBody(ColorScheme scheme) {
         children: [
           Text(label,
               style: TextStyle(
-                  fontSize: emphasized ? 16 : 13,
-                  fontWeight: emphasized ? FontWeight.w800 : FontWeight.w500)),
+                fontSize: emphasized ? 16 : 13,
+                fontWeight: emphasized ? FontWeight.w800 : FontWeight.w500,
+              )),
           Text(value,
               style: TextStyle(
-                  fontSize: emphasized ? 17 : 13,
-                  fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
-                  color: emphasized ? scheme.primary : scheme.onSurface)),
+                fontSize: emphasized ? 17 : 13,
+                fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
+                color: emphasized ? scheme.primary : scheme.onSurface,
+              )),
         ],
       ),
     );

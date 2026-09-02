@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../features/car/presentation/car_app_shell.dart';
 import '../../features/customers/presentation/customers_page.dart';
 import '../../features/products/presentation/products_page.dart';
 import '../../features/sales/presentation/invoices_page.dart';
@@ -12,8 +13,7 @@ import '../ui/dialogs.dart';
 import 'dashboard_page.dart';
 import 'settings_page.dart';
 
-/// The primary application shell: hosts the main sections behind a premium
-/// custom bottom navigation and adapts to tablets via a navigation rail.
+/// The primary Sales ERP shell.
 class AppShell extends StatefulWidget {
   final AppThemeController themeController;
   final VoidCallback onLock;
@@ -35,31 +35,11 @@ class _AppShellState extends State<AppShell> {
   late final List<Widget> _pages;
 
   static const _items = [
-    AppNavItem(
-      icon: Icons.space_dashboard_outlined,
-      selectedIcon: Icons.space_dashboard_rounded,
-      label: 'Home',
-    ),
-    AppNavItem(
-      icon: Icons.receipt_long_outlined,
-      selectedIcon: Icons.receipt_long_rounded,
-      label: 'Sales',
-    ),
-    AppNavItem(
-      icon: Icons.inventory_2_outlined,
-      selectedIcon: Icons.inventory_2_rounded,
-      label: 'Products',
-    ),
-    AppNavItem(
-      icon: Icons.people_outline_rounded,
-      selectedIcon: Icons.people_rounded,
-      label: 'Customers',
-    ),
-    AppNavItem(
-      icon: Icons.more_horiz_rounded,
-      selectedIcon: Icons.tune_rounded,
-      label: 'More',
-    ),
+    AppNavItem(icon: Icons.space_dashboard_outlined, selectedIcon: Icons.space_dashboard_rounded, label: 'Home'),
+    AppNavItem(icon: Icons.receipt_long_outlined, selectedIcon: Icons.receipt_long_rounded, label: 'Sales'),
+    AppNavItem(icon: Icons.inventory_2_outlined, selectedIcon: Icons.inventory_2_rounded, label: 'Products'),
+    AppNavItem(icon: Icons.people_outline_rounded, selectedIcon: Icons.people_rounded, label: 'Customers'),
+    AppNavItem(icon: Icons.more_horiz_rounded, selectedIcon: Icons.tune_rounded, label: 'More'),
   ];
 
   @override
@@ -67,10 +47,7 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     _index = widget.initialIndex;
     _pages = [
-      DashboardPage(
-        onNavigateTo: _goToTab,
-        themeController: widget.themeController,
-      ),
+      DashboardPage(onNavigateTo: _goToTab, themeController: widget.themeController),
       const InvoicesPage(),
       const ProductsPage(),
       const CustomersPage(),
@@ -78,18 +55,27 @@ class _AppShellState extends State<AppShell> {
         themeController: widget.themeController,
         onLock: widget.onLock,
         onReset: _resetDeviceData,
+        onOpenCarApp: _openCarApp,
       ),
     ];
   }
 
   void _goToTab(int index) => setState(() => _index = index);
 
+  Future<void> _openCarApp() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CarAppShell(themeController: widget.themeController),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
   Future<void> _resetDeviceData() async {
     final confirmed = await showConfirmDialog(
       context: context,
       title: 'Reset device data?',
-      message: 'This deletes all local records and re-seeds the demo dataset. '
-          'This cannot be undone.',
+      message: 'This deletes all local records and re-seeds the demo dataset. This cannot be undone.',
       confirmLabel: 'Reset',
       destructive: true,
     );
@@ -146,11 +132,7 @@ class _AppShellState extends State<AppShell> {
               bottom: 0,
               child: SafeArea(
                 minimum: const EdgeInsets.only(bottom: 12),
-                child: AppBottomNav(
-                  index: _index,
-                  items: _items,
-                  onChanged: _goToTab,
-                ),
+                child: AppBottomNav(index: _index, items: _items, onChanged: _goToTab),
               ),
             ),
         ],

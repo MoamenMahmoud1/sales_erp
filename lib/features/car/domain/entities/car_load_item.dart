@@ -1,22 +1,21 @@
 import 'money.dart';
 
-/// A single product entry inside a car trip, with carton quantities and a
-/// product-specific discount.
+/// A single product entry inside a car trip.
 ///
-/// This is a **snapshot**: product name and unit price are captured when the
+/// This is a snapshot: product name and unit price are captured when the
 /// product is added so later product edits never change an existing trip or
 /// its revisions. Quantities are expressed in whole cartons.
 class CarLoadItem {
   final int productId;
   final String productName;
 
-  /// Snapshot unit price (per carton) at load time, in precise minor units.
+  /// Snapshot unit price (per carton) in precise minor units.
   final CarMoney unitPrice;
 
   final int loadedCartons;
   final int returnedCartons;
 
-  /// Product-level discount percentage in the `0..100` range.
+  /// Product-level discount percentage in the 0..100 range.
   final double discountPercent;
 
   const CarLoadItem({
@@ -27,8 +26,6 @@ class CarLoadItem {
     this.returnedCartons = 0,
     this.discountPercent = 0,
   });
-
-  int get soldCartons => loadedCartons - returnedCartons;
 
   CarLoadItem copyWith({
     int? productId,

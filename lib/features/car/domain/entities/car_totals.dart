@@ -1,26 +1,22 @@
 import 'money.dart';
 
-/// Aggregate quantities, finances and payment-status counts across car trips.
-///
-/// All monetary fields are integer minor units. Used by the Car dashboard and
-/// reports; computed in the data layer from stored summary columns.
+/// Aggregate operational and financial totals across Car trips.
 class CarTotals {
   final int totalLoadedCartons;
   final int totalReturnedCartons;
   final int totalSoldCartons;
+  final CarMoney totalReturnedValue;
 
   final CarMoney grossSubtotal;
   final CarMoney productDiscountTotal;
   final CarMoney subtotalAfterProducts;
   final CarMoney globalDiscountAmount;
   final CarMoney finalValue;
-
   final CarMoney totalPaid;
   final CarMoney totalRemaining;
 
   final int openCount;
   final int closedCount;
-
   final int paidCount;
   final int partiallyPaidCount;
   final int unpaidCount;
@@ -30,6 +26,7 @@ class CarTotals {
     required this.totalLoadedCartons,
     required this.totalReturnedCartons,
     required this.totalSoldCartons,
+    this.totalReturnedValue = CarMoney.zero,
     required this.grossSubtotal,
     required this.productDiscountTotal,
     required this.subtotalAfterProducts,

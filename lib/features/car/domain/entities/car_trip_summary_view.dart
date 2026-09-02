@@ -3,18 +3,12 @@ import 'car_trip_status.dart';
 import 'money.dart';
 import '../services/car_payment_evaluator.dart';
 
-/// Lightweight, fully queryable projection of a car trip used in lists and
-/// reports. Unlike a full [CarTrip], it carries no product items, so large
-/// lists/reports can be served efficiently from stored summary columns.
-///
-/// Financial rows are integer minor units (never doubles). Payment/overdue
-/// status is derived via the domain evaluator, never computed in widgets.
+/// Lightweight projection used by Car lists and dashboards.
 class CarTripSummaryView {
   final int id;
   final String displayNumber;
   final String salesCarName;
   final String warehouseName;
-
   final DateTime openedAt;
   final DateTime? closedAt;
   final DateTime? dueDate;
@@ -23,13 +17,12 @@ class CarTripSummaryView {
   final int totalLoadedCartons;
   final int totalReturnedCartons;
   final int totalSoldCartons;
-
+  final CarMoney totalReturnedValue;
   final CarMoney grossSubtotal;
   final CarMoney productDiscountTotal;
   final CarMoney subtotalAfterProducts;
   final CarMoney globalDiscountAmount;
   final CarMoney finalValue;
-
   final CarMoney paidCash;
   final CarMoney paidTransfer;
 
@@ -45,6 +38,7 @@ class CarTripSummaryView {
     required this.totalLoadedCartons,
     required this.totalReturnedCartons,
     required this.totalSoldCartons,
+    this.totalReturnedValue = CarMoney.zero,
     required this.grossSubtotal,
     required this.productDiscountTotal,
     required this.subtotalAfterProducts,
@@ -56,7 +50,6 @@ class CarTripSummaryView {
 
   CarMoney get paidTotal => paidCash + paidTransfer;
 
-  /// Remaining balance (clamped at zero). Pure derivation — no float math.
   CarMoney get remaining {
     final value = finalValue - paidTotal;
     return value.isNegative ? CarMoney.zero : value;
@@ -64,14 +57,6 @@ class CarTripSummaryView {
 
   CarPaymentStatus paymentStatus(CarPaymentEvaluator evaluator, DateTime now) =>
       evaluator.statusFor(
-        totalValue: finalValue,
-        paid: paidTotal,
-        dueDate: dueDate,
-        now: now,
-      );
-
-  int daysOverdue(CarPaymentEvaluator evaluator, DateTime now) =>
-      evaluator.daysOverdueFor(
         totalValue: finalValue,
         paid: paidTotal,
         dueDate: dueDate,
