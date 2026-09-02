@@ -38,7 +38,7 @@ class CarTripSummaryView {
     required this.totalLoadedCartons,
     required this.totalReturnedCartons,
     required this.totalSoldCartons,
-    required this.totalReturnedValue,
+    this.totalReturnedValue = CarMoney.zero,
     required this.grossSubtotal,
     required this.productDiscountTotal,
     required this.subtotalAfterProducts,
