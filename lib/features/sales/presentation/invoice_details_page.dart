@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../customers/domain/customer.dart';
 import '../data/local_sale_repository.dart';
-import '../presentation/widgets/invoice_share_card.dart';
-import '../presentation/widgets/invoice_share_page.dart';
+import 'widgets/invoice_share_card.dart';
+import 'widgets/invoice_share_page.dart';
 
 /// Details for one normal customer invoice with clean display numbering.
 class InvoiceDetailsPage extends StatefulWidget {
