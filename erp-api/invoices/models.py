@@ -57,8 +57,25 @@ class Invoice(models.Model):
 
     @property
     def paid_amount(self):
+        """Return an annotated total when available, otherwise calculate it lazily.
+
+        Invoice list/retrieve querysets annotate ``_paid_amount`` so serializers
+        don't issue one aggregation query per invoice. The fallback preserves
+        the model property's standalone behaviour for callers that don't use
+        the optimized queryset.
+        """
+        annotated = getattr(self, "_paid_amount", None)
+        if annotated is not None:
+            from common.money import quantize_money
+            return quantize_money(annotated)
+
         from common.money import quantize_money
-        return quantize_money(sum((allocation.total_amount for allocation in self.payment_allocations.all()), Decimal("0")))
+        return quantize_money(
+            sum(
+                (allocation.total_amount for allocation in self.payment_allocations.all()),
+                Decimal("0"),
+            )
+        )
 
     @property
     def outstanding_amount(self):
