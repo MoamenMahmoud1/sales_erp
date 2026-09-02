@@ -3,7 +3,12 @@ name: Backend CI
 on:
   push:
     branches: [main]
+    paths:
+      - 'erp-api/**'
   pull_request:
+    branches: [main]
+    paths:
+      - 'erp-api/**'
 
 jobs:
   backend:
