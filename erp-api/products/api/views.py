@@ -56,35 +56,36 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     async def alist(self, request, *args, **kwargs):
         """List products with bounded DB concurrency and one serializer hop."""
-        with view_stage("view.queryset.build"):
-            queryset = await self.afilter_queryset(self.get_queryset())
+        with view_stage("view.total"):
+            with view_stage("view.queryset.build"):
+                queryset = await self.afilter_queryset(self.get_queryset())
 
-        try:
-            async with db_slot():
-                with db_operation():
-                    page = await self.apaginate_queryset(queryset)
-        except DBAdmissionTimeout:
-            with view_stage("view.response.busy"):
-                response = Response(
-                    {"detail": "The database is temporarily busy. Please retry."},
-                    status=503,
-                )
-                response["Retry-After"] = "1"
-                return response
+            try:
+                async with db_slot():
+                    with db_operation():
+                        page = await self.apaginate_queryset(queryset)
+            except DBAdmissionTimeout:
+                with view_stage("view.response.busy"):
+                    response = Response(
+                        {"detail": "The database is temporarily busy. Please retry."},
+                        status=503,
+                    )
+                    response["Retry-After"] = "1"
+                    return response
 
-        if page is not None:
+            if page is not None:
+                with view_stage("view.serializer.instantiate"):
+                    serializer = self.get_serializer(page, many=True)
+                with view_stage("view.serializer.adata"):
+                    data = await AsyncSerializerService.adata(serializer)
+                return await self.get_apaginated_response(data)
+
             with view_stage("view.serializer.instantiate"):
-                serializer = self.get_serializer(page, many=True)
+                serializer = self.get_serializer(queryset, many=True)
             with view_stage("view.serializer.adata"):
                 data = await AsyncSerializerService.adata(serializer)
-            return await self.get_apaginated_response(data)
-
-        with view_stage("view.serializer.instantiate"):
-            serializer = self.get_serializer(queryset, many=True)
-        with view_stage("view.serializer.adata"):
-            data = await AsyncSerializerService.adata(serializer)
-        with view_stage("view.response.unpaginated"):
-            return Response(data, status=200)
+            with view_stage("view.response.unpaginated"):
+                return Response(data, status=200)
 
     def get_queryset(self):
         with view_stage("view.queryset.sold_subquery"):
