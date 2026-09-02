@@ -65,7 +65,7 @@ class ConfirmPurchaseService:
 
         # Always acquire StockBalance rows in deterministic product-id order.
         for item in sorted(items, key=lambda value: value.product_id):
-            StockBalanceService.increase(
+            StockBalanceService.increase_in_transaction(
                 location=warehouse,
                 product=item.product,
                 quantity=item.quantity,
