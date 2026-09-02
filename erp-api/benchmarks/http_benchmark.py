@@ -147,17 +147,19 @@ async def run_requests(
                             except ValueError:
                                 parsed = False
                         elif lower.startswith("x-perf-sql-") and (
-                            lower.endswith("-total-ms") or lower.endswith("-max-ms") or lower.endswith("-count")
+                            lower.endswith("-total-ms")
+                            or lower.endswith("-max-ms")
+                            or lower.endswith("-count")
                         ):
                             parts = header_name.split("-")
                             if lower.endswith("-total-ms"):
-                                kind = "-".join(parts[3:-1]).lower()
+                                kind = "-".join(parts[3:-2]).lower()
                                 try:
                                     sql_samples[f"{kind}.total"].append(float(value))
                                 except ValueError:
                                     parsed = False
                             elif lower.endswith("-max-ms"):
-                                kind = "-".join(parts[3:-1]).lower()
+                                kind = "-".join(parts[3:-2]).lower()
                                 try:
                                     sql_samples[f"{kind}.max"].append(float(value))
                                 except ValueError:
