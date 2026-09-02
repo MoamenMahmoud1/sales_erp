@@ -4,6 +4,7 @@ import time
 
 from asgiref.sync import sync_to_async
 
+from common.services.async_executor import run_sync
 from common.services.perf_timing import add_serializer_cpu, add_serializer_wait
 
 
@@ -32,10 +33,7 @@ class AsyncSerializerService:
             finally:
                 finished_at = time.perf_counter_ns()
 
-        data = await sync_to_async(
-            serialize,
-            thread_sensitive=False,
-        )()
+        data = await run_sync(serialize)
 
         add_serializer_wait(max(started_at - queued_at, 0))
         add_serializer_cpu(max(finished_at - started_at, 0))
