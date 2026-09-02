@@ -5,17 +5,12 @@ import '../entities/car_trip.dart';
 import '../entities/car_validation_issue.dart';
 import '../entities/money.dart';
 
-/// Centralized calculation + validation for car trips.
-///
-/// All money math lives here (and in [CarMoney]) so widgets never compute
-/// `sold = loaded - returned`, discounts, totals or remaining amounts.
+/// Authoritative quantity, discount and financial calculations for Car trips.
 class CarCalculator {
   const CarCalculator();
 
-  /// Number of cartons actually sold for an item.
   int soldCartons(CarLoadItem item) => item.loadedCartons - item.returnedCartons;
 
-  /// Produces the fully computed line for a single item.
   CarItemLine itemLine(CarLoadItem item) {
     final sold = soldCartons(item);
     final gross = item.unitPrice * sold;
@@ -29,15 +24,6 @@ class CarCalculator {
     );
   }
 
-  /// Computes the complete quantity + financial summary of a trip.
-  ///
-  /// Order is fixed:
-  /// ```
-  /// loaded ─▶ returned ─▶ sold
-  /// sold   ─▶ grossSubtotal
-  /// grossSubtotal − productDiscounts ─▶ subtotalAfterProducts
-  /// subtotalAfterProducts − globalDiscount ─▶ finalTotalSoldValue
-  /// ```
   CarFinancialSummary summary(CarTrip trip) {
     var totalLoaded = 0;
     var totalReturned = 0;
@@ -74,19 +60,14 @@ class CarCalculator {
     );
   }
 
-  /// Remaining balance for a trip after payments.
-  ///
-  /// Clamped at zero so an overpaid trip never reports a negative balance.
   CarMoney remaining(CarTrip trip, {CarFinancialSummary? summaryOf}) {
     final computed = summaryOf ?? summary(trip);
     final remaining = computed.finalTotalSoldValue - trip.payment.totalPaid;
     return remaining.isNegative ? CarMoney.zero : remaining;
   }
 
-  /// Aggregated validation issues. Returns an empty list when the trip is valid.
   List<CarValidationIssue> validate(CarTrip trip) {
     final issues = <CarValidationIssue>[];
-
     if (trip.items.isEmpty) {
       issues.add(const CarValidationIssue(
         message: 'A car trip must contain at least one product.',
@@ -95,7 +76,7 @@ class CarCalculator {
 
     for (var i = 0; i < trip.items.length; i++) {
       final item = trip.items[i];
-      final label = item.productName.isEmpty ? 'Product #${i + 1}' : item.productName;
+      final label = item.productName.isEmpty ? 'Product ${i + 1}' : item.productName;
 
       if (item.loadedCartons < 0) {
         issues.add(CarValidationIssue(
@@ -115,9 +96,9 @@ class CarCalculator {
           productIndex: i,
         ));
       }
-      if (item.unitPrice.isNegative) {
+      if (item.unitPrice.minorUnits <= 0) {
         issues.add(CarValidationIssue(
-          message: '$label: unit price cannot be negative.',
+          message: '$label: unit price must be greater than zero.',
           productIndex: i,
         ));
       }
@@ -134,11 +115,8 @@ class CarCalculator {
         message: 'Global discount must be between 0 and 100%.',
       ));
     }
-
     return issues;
   }
 
-  /// Whether a trip can be closed (valid quantity/product data present).
-  bool canBeClosed(CarTrip trip) =>
-      trip.items.isNotEmpty && validate(trip).isEmpty;
+  bool canBeClosed(CarTrip trip) => validate(trip).isEmpty && trip.items.isNotEmpty;
 }
