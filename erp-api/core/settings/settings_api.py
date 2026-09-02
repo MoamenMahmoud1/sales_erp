@@ -45,8 +45,14 @@ if ASYNC_PG_MAX_WAITING < 0:
     raise ValueError("ASYNC_PG_MAX_WAITING must be >= 0")
 
 # Retained only for the Django async ORM fallback path (for example, cursor
-# pagination and endpoints not yet migrated to native async SQL).
-ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=8, cast=int)
+# pagination and endpoints not yet migrated to native async SQL). Keep the
+# default automatically below the synchronous pool capacity so changing the
+# pool size cannot make the API fail at import time.
+ASYNC_DB_CONCURRENCY = config(
+    "ASYNC_DB_CONCURRENCY",
+    default=max(0, min(8, DB_POOL_MAX_SIZE - 1)),
+    cast=int,
+)
 if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
     raise ValueError(
         "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
