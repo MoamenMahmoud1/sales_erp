@@ -119,8 +119,10 @@ def main() -> None:
 
     out = ROOT / STACK / "selected-stack-budget.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Keep legacy variable names so the workflow can consume the same result,
+    # while also exposing the architecture-specific names for human-readable use.
     (ROOT / STACK / "selected-stack-budget.env").write_text(
-        f"STACK_CONTROL={CONTROL_NAME}\nCONTROL_PER_WORKER={selected['knob']}\nCONTROL_TOTAL={selected['knob'] * WORKERS}\n",
+        f"STACK_CONTROL={CONTROL_NAME}\nCONTROL_PER_WORKER={selected['knob']}\nCONTROL_TOTAL={selected['knob'] * WORKERS}\nDB_BUDGET_PER_WORKER={selected['knob']}\nDB_BUDGET_TOTAL={selected['knob'] * WORKERS}\n",
         encoding="utf-8",
     )
     print("\n".join(lines))
