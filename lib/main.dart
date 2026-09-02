@@ -64,6 +64,10 @@ class _SalesErpAppState extends State<SalesErpApp> {
     if (mounted) setState(() {});
   }
 
+  void _recordActivity() {
+    widget.lockController?.recordActivity();
+  }
+
   Widget _buildHome() {
     final lock = widget.lockController;
 
@@ -94,7 +98,8 @@ class _SalesErpAppState extends State<SalesErpApp> {
 
   @override
   Widget build(BuildContext context) {
-    return SmoothTheme(
+    final lock = widget.lockController;
+    final content = SmoothTheme(
       theme: _theme,
       child: Builder(
         builder: (context) => MaterialApp(
@@ -114,6 +119,15 @@ class _SalesErpAppState extends State<SalesErpApp> {
           ),
         ),
       ),
+    );
+
+    if (lock == null) return content;
+
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _recordActivity(),
+      onPointerMove: (_) => _recordActivity(),
+      child: content,
     );
   }
 
