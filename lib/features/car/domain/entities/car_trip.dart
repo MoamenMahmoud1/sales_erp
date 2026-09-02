@@ -2,6 +2,9 @@ import 'car_load_item.dart';
 import 'car_payment.dart';
 import 'car_trip_status.dart';
 
+export 'car_payment.dart' show CarPayment;
+export 'car_trip_status.dart' show CarTripStatus;
+
 /// One daily load → sell → return cycle for a sales car.
 class CarTrip {
   final int id;
@@ -69,8 +72,7 @@ class CarTrip {
       dueDate: dueDate ?? this.dueDate,
       status: status ?? this.status,
       items: items ?? this.items,
-      globalDiscountPercent:
-          globalDiscountPercent ?? this.globalDiscountPercent,
+      globalDiscountPercent: globalDiscountPercent ?? this.globalDiscountPercent,
       payment: payment ?? this.payment,
     );
   }
