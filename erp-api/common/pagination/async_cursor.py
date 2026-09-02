@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from rest_framework.exceptions import NotFound
 from rest_framework.pagination import Cursor, CursorPagination
 from rest_framework.response import Response
-from rest_framework.utils.urls import replace_query_param
 
 from common.services.perf_timing import view_stage
 
@@ -16,13 +14,19 @@ def _reverse_ordering(ordering):
 
 
 class AsyncCursorPagination(CursorPagination):
-    """Cursor pagination that evaluates the queryset without a sync DB hop."""
+    """Forward/backward cursor pagination with async queryset evaluation."""
 
     page_size = 20
     page_size_query_param = "page_size"
     max_page_size = 100
-    ordering = "-created_at"
+    ordering = "-pk"
     offset_cutoff = 1000
+
+    def get_ordering(self, request, queryset, view=None):
+        # Keep cursor pagination on one unique, indexed ordering. The regular
+        # Product endpoint supports arbitrary OrderingFilter fields, but a
+        # cursor should remain stable and seekable.
+        return (self.ordering,) if isinstance(self.ordering, str) else tuple(self.ordering)
 
     async def paginate_queryset(self, queryset, request, view=None):
         self.request = request
@@ -64,18 +68,6 @@ class AsyncCursorPagination(CursorPagination):
             if self.has_following_position
             else None
         )
-
-        if self.page:
-            self.first_position = self._get_position_from_instance(
-                self.page[0], self.ordering
-            )
-            self.last_position = self._get_position_from_instance(
-                self.page[-1], self.ordering
-            )
-        else:
-            self.first_position = None
-            self.last_position = None
-
         self.has_next = self.has_following_position
         self.has_previous = self.cursor is not None
         self.next_position = self.following_position
@@ -85,21 +77,16 @@ class AsyncCursorPagination(CursorPagination):
     def get_next_link(self):
         if not self.has_next:
             return None
-
-        offset = self.page_size
-        position = self.next_position
-        cursor = Cursor(offset=offset, reverse=False, position=position)
-        return self.encode_cursor(cursor)
+        return self.encode_cursor(
+            Cursor(offset=self.page_size, reverse=False, position=self.next_position)
+        )
 
     def get_previous_link(self):
-        if not self.has_previous:
+        if not self.has_previous or self.previous_position is None:
             return None
-
-        position = self.previous_position
-        if position is None:
-            return None
-        cursor = Cursor(offset=0, reverse=True, position=position)
-        return self.encode_cursor(cursor)
+        return self.encode_cursor(
+            Cursor(offset=0, reverse=True, position=self.previous_position)
+        )
 
     async def get_paginated_response(self, data):
         with view_stage("view.response.paginated"):
