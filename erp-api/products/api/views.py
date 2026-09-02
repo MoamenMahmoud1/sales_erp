@@ -88,43 +88,49 @@ class ProductViewSet(viewsets.ModelViewSet):
                 return Response(data, status=200)
 
     def get_queryset(self):
-        with view_stage("view.queryset.sold_subquery"):
-            sold_subquery = self._confirmed_invoice_item_qty()
-        with view_stage("view.queryset.stock_subquery"):
-            stock_subquery = self._total_stock_subquery()
         with view_stage("view.queryset.annotate"):
             return Product.objects.annotate(
-                _total_stock=Coalesce(Subquery(stock_subquery), Value(0)),
-                _sold_quantity=Coalesce(Subquery(sold_subquery), Value(0)),
+                _total_stock=Coalesce(
+                    Subquery(self._total_stock_subquery()),
+                    Value(0),
+                ),
+                _sold_quantity=Coalesce(
+                    Subquery(self._confirmed_invoice_item_qty()),
+                    Value(0),
+                ),
             )
 
     @staticmethod
     def _total_stock_subquery():
-        from inventory.models import StockBalance
+        """Build the stock aggregation subquery and measure this service."""
+        with view_stage("view.service.stock.build"):
+            from inventory.models import StockBalance
 
-        return (
-            StockBalance.objects.filter(product_id=OuterRef("pk"))
-            .values("product_id")
-            .annotate(total=Sum("quantity"))
-            .values("total")
-        )
+            return (
+                StockBalance.objects.filter(product_id=OuterRef("pk"))
+                .values("product_id")
+                .annotate(total=Sum("quantity"))
+                .values("total")
+            )
 
     @staticmethod
     def _confirmed_invoice_item_qty():
-        from invoices.models import Invoice, InvoiceItem
+        """Build the sold aggregation subquery and measure this service."""
+        with view_stage("view.service.sold.build"):
+            from invoices.models import Invoice, InvoiceItem
 
-        return (
-            InvoiceItem.objects.filter(
-                product_id=OuterRef("pk"),
-                invoice__status__in=(
-                    Invoice.Status.CONFIRMED,
-                    Invoice.Status.PAID,
-                ),
+            return (
+                InvoiceItem.objects.filter(
+                    product_id=OuterRef("pk"),
+                    invoice__status__in=(
+                        Invoice.Status.CONFIRMED,
+                        Invoice.Status.PAID,
+                    ),
+                )
+                .values("product_id")
+                .annotate(total=Sum("quantity"))
+                .values("total")
             )
-            .values("product_id")
-            .annotate(total=Sum("quantity"))
-            .values("total")
-        )
 
 
 class CartonPricingViewSet(viewsets.ModelViewSet):
