@@ -1,5 +1,6 @@
 """Core middleware: proxy headers, request ids, and perf timings."""
 import logging
+import threading
 import uuid
 from contextvars import ContextVar
 from inspect import iscoroutinefunction, markcoroutinefunction
@@ -107,6 +108,7 @@ class RequestIdAndPerfMiddleware:
         response["X-Perf-DB-Operation-ms"] = f"{ms(timing.db_operation_ns):.3f}"
         response["X-Perf-DB-Operation-Count"] = str(timing.db_operation_count)
         response["X-Perf-SQL-Count"] = str(len(timing.sql_samples))
+        response["X-Perf-Thread-Count"] = str(threading.active_count())
         for kind, stats in timing.sql_stats().items():
             prefix = "X-Perf-SQL-" + kind.replace("_", "-")
             response[f"{prefix}-Count"] = str(stats["count"])
