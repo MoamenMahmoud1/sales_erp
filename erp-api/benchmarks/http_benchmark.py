@@ -2,9 +2,9 @@
 """End-to-end HTTP benchmark for fair Sync/Async comparisons.
 
 Set BENCH_SERVER_PID to the Gunicorn master PID to collect server CPU/RAM/thread
-metrics. Set BENCH_DB_DSN (or the individual PG* variables) to collect database
-connection metrics. System sampling is disabled when BENCH_SERVER_PID is absent,
-so a normal client-only benchmark remains cheap.
+metrics. Set BENCH_DB_DSN (or PGHOST/PGDATABASE/PGUSER/PGPASSWORD/PGPORT) to
+collect PostgreSQL connection metrics. System sampling is disabled when
+BENCH_SERVER_PID is absent, keeping a normal client-only benchmark cheap.
 """
 
 from __future__ import annotations
@@ -47,24 +47,10 @@ def env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"} if value is not None else default
 
 
-def summarize(values: list[float]) -> dict[str, float | int | None]:
-    return {
-        "count": len(values),
-        "mean_ms": statistics.fmean(values) if values else None,
-        "p50_ms": percentile(values, 0.50),
-        "p95_ms": percentile(values, 0.95),
-        "p99_ms": percentile(values, 0.99),
-        "max_ms": max(values) if values else None,
-    }
-
-
-def _read_proc_stat(pid: int) -> tuple[float, int] | None:
+def _read_proc_stat(pid: int) -> tuple[int, int] | None:
     try:
         fields = Path(f"/proc/{pid}/stat").read_text().split()
-        # utime/stime are fields 14/15 in procfs, i.e. indexes 13/14 here.
-        cpu_ticks = int(fields[13]) + int(fields[14])
-        threads = int(fields[19])
-        return cpu_ticks, threads
+        return int(fields[13]) + int(fields[14]), int(fields[19])
     except (FileNotFoundError, PermissionError, ValueError, IndexError):
         return None
 
@@ -74,14 +60,16 @@ def _proc_tree(root_pid: int) -> list[int]:
     changed = True
     while changed:
         changed = False
-        for entry in Path("/proc").iterdir():
+        try:
+            entries = list(Path("/proc").iterdir())
+        except OSError:
+            entries = []
+        for entry in entries:
             if not entry.name.isdigit():
                 continue
             try:
-                stat = entry / "stat"
-                fields = stat.read_text().split()
-                parent = int(fields[3])
-                pid = int(entry.name)
+                fields = (entry / "stat").read_text().split()
+                pid, parent = int(entry.name), int(fields[3])
             except (FileNotFoundError, PermissionError, ValueError, IndexError):
                 continue
             if parent in pids and pid not in pids:
@@ -124,47 +112,43 @@ class ServerSampler:
         previous_t = time.perf_counter()
         while not self._stop.is_set():
             now = time.perf_counter()
+            elapsed = max(now - previous_t, 1e-6)
+            previous_t = now
             pids = _proc_tree(self.root_pid)
-            total_ticks = 0
+            current: dict[int, int] = {}
             rss = 0.0
             threads = 0
             for pid in pids:
                 stat = _read_proc_stat(pid)
                 if stat:
                     ticks, thread_count = stat
-                    total_ticks += ticks
+                    current[pid] = ticks
                     threads += thread_count
                 rss_mb = _read_rss_mb(pid)
                 if rss_mb is not None:
                     rss += rss_mb
-            elapsed = max(now - previous_t, 1e-6)
-            previous_t = now
-            old_total = sum(previous.values())
-            previous = {}
-            for pid in pids:
-                stat = _read_proc_stat(pid)
-                if stat:
-                    previous[pid] = stat[0]
-            cpu_seconds = max((total_ticks - old_total) / self._hz, 0.0)
-            cpu_pct = cpu_seconds / elapsed * 100.0
+            delta_ticks = sum(max(current[pid] - previous.get(pid, current[pid]), 0) for pid in current)
+            cpu_seconds = delta_ticks / self._hz
             self.samples.append({
-                "cpu_pct": cpu_pct,
+                "cpu_pct": cpu_seconds / elapsed * 100.0,
+                "cpu_seconds": cpu_seconds,
                 "rss_mb": rss,
                 "threads": threads,
                 "processes": len(pids),
             })
+            previous = current
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self.interval_s)
             except asyncio.TimeoutError:
                 pass
 
-    def summary(self, wall_time: float, completed: int) -> dict[str, object]:
+    def summary(self, completed: int, wall_time: float) -> dict[str, object]:
         cpu = [float(s["cpu_pct"]) for s in self.samples]
         rss = [float(s["rss_mb"]) for s in self.samples]
         threads = [int(s["threads"]) for s in self.samples]
         processes = [int(s["processes"]) for s in self.samples]
-        cpu_time = sum(cpu) / 100.0 * self.interval_s
-        # CPU time/request is intentionally based on server process CPU, not client CPU.
+        cpu_time = sum(float(s["cpu_seconds"]) for s in self.samples)
+        rps = completed / wall_time if wall_time else 0.0
         return {
             "enabled": True,
             "samples": len(self.samples),
@@ -174,11 +158,7 @@ class ServerSampler:
             "cpu_time_ms_per_request": cpu_time * 1000 / completed if completed else None,
             "ram_avg_mb": statistics.fmean(rss) if rss else None,
             "ram_peak_mb": max(rss) if rss else None,
-            "ram_min_mb": min(rss) if rss else None,
-            "ram_mb_per_100_rps": (
-                statistics.fmean(rss) / (completed / wall_time) * 100
-                if rss and wall_time and completed else None
-            ),
+            "ram_mb_per_100_rps": statistics.fmean(rss) / rps * 100 if rss and rps else None,
             "os_threads_avg": statistics.fmean(threads) if threads else None,
             "os_threads_peak": max(threads) if threads else None,
             "processes_peak": max(processes) if processes else None,
@@ -186,7 +166,7 @@ class ServerSampler:
 
 
 class DbSampler:
-    """Optional PostgreSQL pg_stat_activity sampler; never affects HTTP results."""
+    """Optional PostgreSQL pg_stat_activity sampler."""
 
     def __init__(self, dsn: str | None, interval_s: float = 0.50) -> None:
         self.dsn = dsn
@@ -196,9 +176,8 @@ class DbSampler:
         self._task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
-        if not self.dsn:
-            return
-        self._task = asyncio.create_task(self._run())
+        if self.dsn:
+            self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
         if self._task:
@@ -208,25 +187,27 @@ class DbSampler:
     async def _run(self) -> None:
         try:
             import psycopg
-        except ImportError:
+            conn = await psycopg.AsyncConnection.connect(self.dsn, application_name="bench-db-sampler")
+        except Exception:
             return
-        while not self._stop.is_set():
-            try:
-                async with await psycopg.AsyncConnection.connect(self.dsn) as conn:
+        async with conn:
+            while not self._stop.is_set():
+                try:
                     async with conn.cursor() as cur:
                         await cur.execute(
                             "SELECT count(*) FROM pg_stat_activity "
-                            "WHERE datname = current_database()"
+                            "WHERE datname = current_database() "
+                            "AND application_name <> 'bench-db-sampler'"
                         )
                         row = await cur.fetchone()
                         if row:
                             self.samples.append(int(row[0]))
-            except Exception:
-                pass
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.interval_s)
-            except asyncio.TimeoutError:
-                pass
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=self.interval_s)
+                except asyncio.TimeoutError:
+                    pass
 
     def summary(self) -> dict[str, object]:
         return {
@@ -238,13 +219,22 @@ class DbSampler:
         }
 
 
+def _dsn_from_env() -> str | None:
+    if os.getenv("BENCH_DB_DSN"):
+        return os.environ["BENCH_DB_DSN"]
+    host, db, user = os.getenv("PGHOST"), os.getenv("PGDATABASE"), os.getenv("PGUSER")
+    if not all((host, db, user)):
+        return None
+    parts = [f"host={host}", f"dbname={db}", f"user={user}"]
+    for env, key in (("PGPORT", "port"), ("PGPASSWORD", "password")):
+        if os.getenv(env):
+            parts.append(f"{key}={os.environ[env]}")
+    return " ".join(parts)
+
+
 async def run_requests(
-    url: str,
-    token: str,
-    requests: int,
-    concurrency: int,
-    client: httpx.AsyncClient,
-    progress_every: int = 0,
+    url: str, token: str, requests: int, concurrency: int,
+    client: httpx.AsyncClient, progress_every: int = 0,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     queue: asyncio.Queue[int] = asyncio.Queue()
@@ -259,15 +249,11 @@ async def run_requests(
             except asyncio.QueueEmpty:
                 return
             request_started = time.perf_counter()
-            row: dict[str, object] = {
-                "request_index": index,
-                "worker_id": worker_id,
-                "request_start_offset_ms": (request_started - started) * 1000,
-            }
+            row: dict[str, object] = {"request_index": index, "worker_id": worker_id,
+                                      "request_start_offset_ms": (request_started - started) * 1000}
             try:
                 response = await client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                    url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}
                 )
                 finished = time.perf_counter()
                 row.update({
@@ -284,13 +270,9 @@ async def run_requests(
                 })
             except Exception as exc:
                 finished = time.perf_counter()
-                row.update({
-                    "status_code": None,
-                    "request_wire_ms": (finished - request_started) * 1000,
-                    "request_end_offset_ms": (finished - started) * 1000,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                })
+                row.update({"status_code": None, "request_wire_ms": (finished - request_started) * 1000,
+                            "request_end_offset_ms": (finished - started) * 1000,
+                            "error_type": type(exc).__name__, "error": str(exc)})
             rows.append(row)
             queue.task_done()
             if progress_every and len(rows) % progress_every == 0:
@@ -310,25 +292,8 @@ def _header_float(response: httpx.Response, name: str) -> float | None:
         return None
 
 
-def _dsn_from_env() -> str | None:
-    if os.getenv("BENCH_DB_DSN"):
-        return os.environ["BENCH_DB_DSN"]
-    host = os.getenv("PGHOST")
-    db = os.getenv("PGDATABASE")
-    user = os.getenv("PGUSER")
-    if not all((host, db, user)):
-        return None
-    parts = [f"host={host}", f"dbname={db}", f"user={user}"]
-    if os.getenv("PGPORT"):
-        parts.append(f"port={os.environ['PGPORT']}")
-    if os.getenv("PGPASSWORD"):
-        parts.append(f"password={os.environ['PGPASSWORD']}")
-    return " ".join(parts)
-
-
 async def main() -> None:
-    url = os.environ["BENCH_URL"]
-    token = os.environ["BENCH_TOKEN"]
+    url, token = os.environ["BENCH_URL"], os.environ["BENCH_TOKEN"]
     requests = env_int("BENCH_REQUESTS", 300)
     concurrency = env_int("BENCH_CONCURRENCY", 50)
     warmup = env_int("BENCH_WARMUP", 50)
@@ -343,19 +308,21 @@ async def main() -> None:
 
     limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency, keepalive_expiry=30)
     server_pid = os.getenv("BENCH_SERVER_PID")
-    server_sampler = ServerSampler(int(server_pid), env_float("BENCH_SYSTEM_SAMPLE_INTERVAL", 0.20)) if server_pid else None
+    sampler = ServerSampler(int(server_pid), env_float("BENCH_SYSTEM_SAMPLE_INTERVAL", 0.20)) if server_pid else None
     db_sampler = DbSampler(_dsn_from_env(), env_float("BENCH_DB_SAMPLE_INTERVAL", 0.50))
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s), limits=limits, http2=False, trust_env=False) as client:
         warmup_requests = 1 if redis_cache and warmup > 0 else (max(warmup, concurrency) if warmup > 0 else 0)
         if warmup_requests:
             await run_requests(url, token, warmup_requests, 1 if redis_cache else concurrency, client)
-        await server_sampler.start() if server_sampler else asyncio.sleep(0)
+        if sampler:
+            await sampler.start()
         await db_sampler.start()
         batch_started = time.perf_counter()
         rows = await run_requests(url, token, requests, concurrency, client, progress_every)
         wall_time = time.perf_counter() - batch_started
-        await server_sampler.stop() if server_sampler else asyncio.sleep(0)
+        if sampler:
+            await sampler.stop()
         await db_sampler.stop()
 
     rows.sort(key=lambda row: int(row["request_index"]))
@@ -364,6 +331,8 @@ async def main() -> None:
     failed = len(rows) - len(successful)
     rps = len(rows) / wall_time if wall_time else 0.0
     errors = Counter(str(r.get("error_type")) for r in rows if r.get("error_type"))
+    server_app = [float(r["server_app_ms"]) for r in successful if r.get("server_app_ms") is not None]
+    db_operation = [float(r["db_operation_ms"]) for r in successful if r.get("db_operation_ms") is not None]
 
     payload = {
         "phase": "measured",
@@ -386,14 +355,14 @@ async def main() -> None:
         "p99_ms": percentile(latencies, 0.99),
         "errors": dict(errors),
         "status_counts": dict(Counter(str(r.get("status_code")) for r in rows)),
-        "server_cpu_memory_threads": server_sampler.summary(wall_time, len(rows)) if server_sampler else {"enabled": False},
+        "cpu_memory_threads": sampler.summary(len(rows), wall_time) if sampler else {"enabled": False},
         "db_connections": db_sampler.summary(),
-        "server_p50_ms": percentile([float(r["server_app_ms"]) for r in successful if r.get("server_app_ms") is not None], 0.50),
-        "server_p95_ms": percentile([float(r["server_app_ms"]) for r in successful if r.get("server_app_ms") is not None], 0.95),
-        "server_p99_ms": percentile([float(r["server_app_ms"]) for r in successful if r.get("server_app_ms") is not None], 0.99),
-        "db_p50_ms": percentile([float(r["db_operation_ms"]) for r in successful if r.get("db_operation_ms") is not None], 0.50),
-        "db_p95_ms": percentile([float(r["db_operation_ms"]) for r in successful if r.get("db_operation_ms") is not None], 0.95),
-        "db_p99_ms": percentile([float(r["db_operation_ms"]) for r in successful if r.get("db_operation_ms") is not None], 0.99),
+        "server_p50_ms": percentile(server_app, 0.50),
+        "server_p95_ms": percentile(server_app, 0.95),
+        "server_p99_ms": percentile(server_app, 0.99),
+        "db_p50_ms": percentile(db_operation, 0.50),
+        "db_p95_ms": percentile(db_operation, 0.95),
+        "db_p99_ms": percentile(db_operation, 0.99),
         "request_rows": rows,
     }
     if detail_path:
