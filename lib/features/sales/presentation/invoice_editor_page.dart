@@ -5,7 +5,6 @@ import '../../customers/domain/payment_method.dart';
 import '../../products/data/local_product_repository.dart';
 import '../../products/domain/product.dart';
 import '../data/local_sale_repository.dart';
-import '../domain/services/invoice_display_number.dart';
 import 'widgets/quantity_stepper.dart';
 
 class InvoiceEditorPage extends StatefulWidget {
@@ -85,13 +84,10 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
     });
   }
 
-  double get _subtotal {
-    var total = 0.0;
-    for (final product in _products) {
-      total += product.price * (_quantities[product.id] ?? 0);
-    }
-    return total;
-  }
+  double get _subtotal => _products.fold<double>(
+        0,
+        (total, product) => total + product.price * (_quantities[product.id] ?? 0),
+      );
 
   double get _discount {
     final value = double.tryParse(_discountController.text) ?? 0;
@@ -108,29 +104,27 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
       final method = widget.customer.paymentType == CustomerPaymentType.cash
           ? PaymentMethod.cash
           : PaymentMethod.transfer;
-      final discount = _discount;
+      final products = Map.of(_quantities);
       if (widget.invoiceId == null) {
         await _saleRepository.createInvoice(
           customerId: widget.customer.id,
-          products: Map.of(_quantities),
+          products: products,
           paymentMethod: method,
-          couponDiscount: discount,
+          couponDiscount: _discount,
         );
       } else {
         await _saleRepository.updateInvoice(
           invoiceId: widget.invoiceId!,
           customerId: widget.customer.id,
-          products: Map.of(_quantities),
+          products: products,
           paymentMethod: method,
-          couponDiscount: discount,
+          couponDiscount: _discount,
         );
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -140,17 +134,9 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
   @override
   Widget build(BuildContext context) {
     final editing = widget.invoiceId != null;
-    final number = editing
-        ? const InvoiceDisplayNumber().forInvoice(
-            id: widget.invoiceId!,
-            createdAt: DateTime.now(),
-          )
-        : null;
     return Scaffold(
       appBar: AppBar(
-        title: Text(number == null
-            ? (editing ? 'Edit Invoice' : 'New Invoice')
-            : 'Edit Invoice $number'),
+        title: Text(editing ? 'Edit Invoice' : 'New Invoice'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -172,7 +158,7 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
             child: Row(
               children: [
                 CircleAvatar(
-                  child: Text(widget.customer.name.isEmpty
+                  child: Text(widget.customer.name.trim().isEmpty
                       ? '?'
                       : widget.customer.name.trim()[0].toUpperCase()),
                 ),
