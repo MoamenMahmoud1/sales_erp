@@ -173,7 +173,9 @@ jobs:
             for workers in "${WORKER_VALUES[@]}"; do
               for d in "${d_values[@]}"; do
                 start_server "$mode" cursor "$workers" "$d" 1
-                run_one "$mode" cursor "$workers" "$d" "$CALIBRATION_C" calibration 1
+                # Calibration uses request completion + error rate as health signals.
+                # Instrumentation is collected, but validated separately in diagnostics.
+                run_one "$mode" cursor "$workers" "$d" "$CALIBRATION_C" calibration 0
                 stop_server
               done
             done
@@ -227,10 +229,10 @@ jobs:
 
           for pagination in page cursor; do
             start_server async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 1
-            run_one async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 100 diagnostic 1
+            run_one async "$pagination" "$ASYNC_WORKERS" "$ASYNC_D" 100 diagnostic 0
             stop_server
             start_server sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" 1
-            run_one sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" 100 diagnostic 1
+            run_one sync "$pagination" "$SYNC_WORKERS" "$SYNC_D" 100 diagnostic 0
             stop_server
           done
 
@@ -238,6 +240,11 @@ jobs:
           import json
           from pathlib import Path
           root=Path('benchmark-results')
+          for p in sorted((root/'diagnostic').glob('*.json')):
+              payload=json.loads(p.read_text())
+              app=payload.get('server_timing',{}).get('app',{}).get('count',0)
+              if int(app or 0) <= 0:
+                  raise SystemExit(f'Instrumentation missing from {p.name}')
           vals={}
           for mode in ('async','sync'):
               d={}
