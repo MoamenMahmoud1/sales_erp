@@ -64,6 +64,10 @@ def _page_number(request) -> int:
     return page
 
 
+def _escape_like_term(term: str) -> str:
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _where_clause(request) -> tuple[str, list[Any]]:
     search = request.query_params.get("search", "").strip()
     if not search:
@@ -76,8 +80,8 @@ def _where_clause(request) -> tuple[str, list[Any]]:
     clauses = []
     params: list[Any] = []
     for term in terms:
-        clauses.append("p.name ILIKE %s")
-        params.append(f"%{term}%")
+        clauses.append("p.name ILIKE %s ESCAPE '\\'")
+        params.append(f"%{_escape_like_term(term)}%")
     return "WHERE " + " AND ".join(clauses), params
 
 
