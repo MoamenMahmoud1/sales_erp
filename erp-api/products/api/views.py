@@ -7,12 +7,14 @@ from rest_framework.response import Response
 from common.pagination import AsyncCursorPagination, AsyncStandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
 from common.services.async_db_gate import DBAdmissionTimeout
+from common.services.async_postgres import enabled as native_async_db_enabled
 from common.services.async_serializer import AsyncSerializerService
 from common.services.perf_timing import timed_function, view_stage
 from products.api.serializers import CartonPricingSerializer, ProductSerializer
 from products.models import CartonPricing
 from products.services import cache as product_cache
 from products.services.metrics import ProductMetricsQueryService
+from products.services.native_async_list import NativeProductListService
 
 
 _BENCH_PAGINATION = os.getenv("BENCH_PAGINATION", "page").lower()
@@ -67,14 +69,31 @@ class ProductViewSet(viewsets.ModelViewSet):
                 with view_stage("view.redis.cache.hit"):
                     return Response(cached, status=200)
 
+        # Use native psycopg AsyncConnectionPool for the hot page-number read.
+        # Cursor pagination and the special `last` page keep the existing ORM
+        # implementation until they receive an equivalent native cursor layer.
+        if native_async_db_enabled() and isinstance(
+            self.pagination_class, type
+        ) and issubclass(self.pagination_class, AsyncStandardPagination):
+            try:
+                response = await NativeProductListService.response(
+                    request, self.get_serializer_class()
+                )
+            except NotImplementedError:
+                pass
+            else:
+                if product_cache.enabled() and response.status_code == 200:
+                    with view_stage("view.redis.cache.set"):
+                        await product_cache.set_async(cache_key, response.data)
+                return response
+
         with view_stage("view.total"):
             with view_stage("view.queryset.build"):
                 queryset = await self.afilter_queryset(self.get_queryset())
 
             try:
-                # Pagination owns admission around each actual DB execution.
-                # This prevents CPU-only page math, cursor preparation and
-                # metadata construction from occupying a DB slot.
+                # Pagination owns admission around each actual DB execution for
+                # the legacy Django async ORM fallback path.
                 page = await self.apaginate_queryset(queryset)
             except DBAdmissionTimeout:
                 with view_stage("view.response.busy"):
