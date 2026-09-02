@@ -86,6 +86,37 @@ jobs:
       - name: Apply migrations
         run: python manage.py migrate --noinput
 
+      - name: Native async PostgreSQL smoke test
+        env:
+          DJANGO_SETTINGS_MODULE: core.settings.settings_api
+          ASYNC_NATIVE_DB: "1"
+          ASYNC_PG_POOL_MIN_SIZE: "1"
+          ASYNC_PG_POOL_MAX_SIZE: "2"
+          ASYNC_PG_POOL_TIMEOUT: "2"
+          ASYNC_PG_MAX_WAITING: "0"
+          DB_POOL_MIN_SIZE: "1"
+          DB_POOL_MAX_SIZE: "3"
+        run: |
+          python - <<'PY'
+          import asyncio
+
+          import django
+
+          django.setup()
+
+          from common.services.async_postgres import close_pool, fetch_one, open_pool
+
+          async def main():
+              await open_pool(wait=True)
+              try:
+                  row = await fetch_one("SELECT 1 AS ok")
+                  assert row == {"ok": 1}, row
+              finally:
+                  await close_pool()
+
+          asyncio.run(main())
+          PY
+
       - name: Test suite
         env:
           DJANGO_SETTINGS_MODULE: core.settings.settings_test
