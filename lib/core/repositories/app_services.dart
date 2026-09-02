@@ -11,6 +11,7 @@ import '../../features/customers/data/local_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
 import '../../features/products/data/local_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
+import 'car_trip_event_bus.dart';
 
 /// Central composition root for application services and repositories.
 ///
@@ -23,6 +24,7 @@ class AppServices {
   static final AppServices instance = AppServices._();
 
   final DataModeController dataMode = DataModeController();
+  final CarTripEventBus carTripEvents = CarTripEventBus();
 
   final CustomerRepository customerRepository = LocalCustomerRepository();
   final ProductRepository productRepository = LocalProductRepository();
