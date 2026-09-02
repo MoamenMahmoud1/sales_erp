@@ -115,12 +115,15 @@ async def connection() -> AsyncIterator[Any]:
     """Acquire an async PostgreSQL connection and return it to the pool."""
     pool = await get_pool()
     started = time.perf_counter_ns()
+    acquired = False
     try:
         async with pool.connection() as conn:
             add_pool_wait(time.perf_counter_ns() - started)
+            acquired = True
             yield conn
     except Exception:
-        add_pool_wait(time.perf_counter_ns() - started)
+        if not acquired:
+            add_pool_wait(time.perf_counter_ns() - started)
         raise
 
 
