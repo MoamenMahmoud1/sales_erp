@@ -8,7 +8,7 @@ from common.pagination import AsyncStandardPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
 from common.services.async_db_gate import DBAdmissionTimeout, db_slot
 from common.services.async_serializer import AsyncSerializerService
-from common.services.perf_timing import db_operation, view_stage
+from common.services.perf_timing import db_operation, timed_function, view_stage
 
 from products.api.serializers import (
     CartonPricingSerializer,
@@ -46,6 +46,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         "pk",
     )
 
+    @timed_function("ProductViewSet.afilter_queryset")
     async def afilter_queryset(self, queryset):
         """Apply lazy QuerySet filters without a sync-to-async thread hop."""
         for backend_class in self.filter_backends:
@@ -54,6 +55,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 queryset = backend_class().filter_queryset(self.request, queryset, self)
         return queryset
 
+    @timed_function("ProductViewSet.alist")
     async def alist(self, request, *args, **kwargs):
         """List products with bounded DB concurrency and one serializer hop."""
         with view_stage("view.total"):
@@ -87,6 +89,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             with view_stage("view.response.unpaginated"):
                 return Response(data, status=200)
 
+    @timed_function("ProductViewSet.get_queryset")
     def get_queryset(self):
         with view_stage("view.queryset.annotate"):
             return Product.objects.annotate(
@@ -101,11 +104,11 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
 
     @staticmethod
+    @timed_function("ProductViewSet._total_stock_subquery")
     def _total_stock_subquery():
-        """Build the stock aggregation subquery and measure this service."""
-        with view_stage("view.service.stock.build"):
-            from inventory.models import StockBalance
+        from inventory.models import StockBalance
 
+        with view_stage("view.service.stock.build"):
             return (
                 StockBalance.objects.filter(product_id=OuterRef("pk"))
                 .values("product_id")
@@ -114,11 +117,11 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
 
     @staticmethod
+    @timed_function("ProductViewSet._confirmed_invoice_item_qty")
     def _confirmed_invoice_item_qty():
-        """Build the sold aggregation subquery and measure this service."""
-        with view_stage("view.service.sold.build"):
-            from invoices.models import Invoice, InvoiceItem
+        from invoices.models import Invoice, InvoiceItem
 
+        with view_stage("view.service.sold.build"):
             return (
                 InvoiceItem.objects.filter(
                     product_id=OuterRef("pk"),
