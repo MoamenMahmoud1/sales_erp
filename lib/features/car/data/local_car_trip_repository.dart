@@ -17,9 +17,8 @@ import 'car_mappers.dart';
 /// List reads use summary rows and batch-load child items to avoid N+1 reads.
 /// Detail reads load the selected trip's items only.
 class LocalCarTripRepository implements CarTripRepository {
-  LocalCarTripRepository({
-    Future<Database> Function()? database,
-  }) : _database = database ?? (() => AppDatabase.database);
+  LocalCarTripRepository({Future<Database> Function()? database})
+      : _database = database ?? (() => AppDatabase.database);
 
   final Future<Database> Function() _database;
   static const _calculator = CarCalculator();
@@ -37,9 +36,7 @@ class LocalCarTripRepository implements CarTripRepository {
         'car_trips',
         _mappers.tripToRow(trip, summary, updatedAt: DateTime.now()),
       );
-      for (final item in trip.items) {
-        await txn.insert('car_trip_items', _mappers.itemToRow(item, id));
-      }
+      await _insertItems(txn, id, trip.items);
       return trip.copyWith(id: id);
     });
   }
@@ -47,11 +44,9 @@ class LocalCarTripRepository implements CarTripRepository {
   @override
   Future<CarTrip> updateTrip(CarTrip trip) async {
     if (trip.id <= 0) throw ArgumentError('A saved trip must have an id.');
-    if (trip.isClosed) {
-      throw StateError('Closed car trips cannot be updated directly.');
-    }
     _ensureOpen(trip);
-    _calculator.validate(trip).firstOrNull;
+    final issues = _calculator.validate(trip);
+    if (issues.isNotEmpty) throw ArgumentError(issues.first.message);
 
     final db = await _database();
     final summary = _calculator.summary(trip);
@@ -59,11 +54,8 @@ class LocalCarTripRepository implements CarTripRepository {
     return db.transaction((txn) async {
       final updated = await txn.update(
         'car_trips',
-        _mappers.tripToRow(
-          trip,
-          summary,
-          updatedAt: DateTime.now(),
-        )..remove('created_at'),
+        _mappers.tripToRow(trip, summary, updatedAt: DateTime.now())
+          ..remove('created_at'),
         where: 'id = ? AND status = ?',
         whereArgs: [trip.id, CarTripStatus.open.value],
       );
@@ -107,21 +99,25 @@ class LocalCarTripRepository implements CarTripRepository {
       await txn.delete('car_trip_items', where: 'trip_id = ?', whereArgs: [trip.id]);
       await _insertItems(txn, trip.id, finalized.items);
 
-      final nextRevision = _nextRevisionNumber(await txn.query(
+      final latest = await txn.query(
         'car_revisions',
         columns: ['revision_number'],
         where: 'trip_id = ?',
         whereArgs: [trip.id],
         orderBy: 'revision_number DESC',
         limit: 1,
-      ));
-
-      final revision = _revisionFrom(
-        finalized,
-        revisionNumber: nextRevision,
-        triggeredBy: triggeredBy,
       );
-      await _insertRevision(txn, revision);
+      final revisionNumber =
+          latest.isEmpty ? 1 : (latest.first['revision_number'] as int) + 1;
+
+      await _insertRevision(
+        txn,
+        _revisionFrom(
+          finalized,
+          revisionNumber: revisionNumber,
+          triggeredBy: triggeredBy,
+        ),
+      );
 
       return finalized;
     });
@@ -167,28 +163,28 @@ class LocalCarTripRepository implements CarTripRepository {
       orderBy: 'opened_at DESC',
     );
 
-    final summaryRows = rows
-        .map(_mappers.tripSummaryFromRow)
-        .where((view) =>
-            filter?.paymentStatus == null ||
-            view.paymentStatus(_evaluator, DateTime.now()) == filter!.paymentStatus)
-        .toList(growable: false);
-    if (summaryRows.isEmpty) return const [];
+    final now = DateTime.now();
+    final matchingRows = rows.where((row) {
+      if (filter?.paymentStatus == null) return true;
+      final view = _mappers.tripSummaryFromRow(row);
+      return view.paymentStatus(_evaluator, now) == filter!.paymentStatus;
+    }).toList(growable: false);
+    if (matchingRows.isEmpty) return const [];
 
-    final ids = summaryRows.map((e) => e.id).toList(growable: false);
+    final ids = matchingRows.map((row) => row['id'] as int).toList(growable: false);
     final itemsByTrip = await _loadItems(db, ids);
-    final rowsById = {for (final row in rows) row['id'] as int: row};
 
     return [
-      for (final view in summaryRows)
-        _mappers.tripFromRow(rowsById[view.id]!, itemsByTrip[view.id] ?? const []),
+      for (final row in matchingRows)
+        _mappers.tripFromRow(
+          row,
+          itemsByTrip[row['id'] as int] ?? const [],
+        ),
     ];
   }
 
   @override
-  Future<List<CarTripSummaryView>> getTripSummaries({
-    CarTripFilter? filter,
-  }) async {
+  Future<List<CarTripSummaryView>> getTripSummaries({CarTripFilter? filter}) async {
     final db = await _database();
     final (where, args) = _buildWhere(filter);
     final rows = await db.query(
@@ -197,7 +193,6 @@ class LocalCarTripRepository implements CarTripRepository {
       whereArgs: args.isEmpty ? null : args,
       orderBy: 'opened_at DESC',
     );
-
     final now = DateTime.now();
     return rows
         .map(_mappers.tripSummaryFromRow)
@@ -264,10 +259,7 @@ class LocalCarTripRepository implements CarTripRepository {
     }
   }
 
-  Future<void> _insertRevision(
-    Transaction txn,
-    CarRevision revision,
-  ) async {
+  Future<void> _insertRevision(Transaction txn, CarRevision revision) async {
     final id = await txn.insert(
       'car_revisions',
       _mappers.revisionToRow(revision),
@@ -303,9 +295,6 @@ class LocalCarTripRepository implements CarTripRepository {
         globalDiscountPercent: trip.globalDiscountPercent,
         payment: trip.payment,
       );
-
-  int _nextRevisionNumber(List<Map<String, Object?>> rows) =>
-      rows.isEmpty ? 1 : ((rows.first['revision_number'] as int) + 1);
 
   Future<Map<int, List<CarLoadItem>>> _loadItems(
     DatabaseExecutor db,
@@ -380,8 +369,4 @@ class LocalCarTripRepository implements CarTripRepository {
     }
     return (clauses.join(' AND '), args);
   }
-}
-
-extension<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }
