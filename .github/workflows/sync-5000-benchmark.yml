@@ -1,0 +1,112 @@
+name: Sync 5000 Request Benchmark
+
+on:
+  push:
+    branches: [bench/sync-5000]
+  workflow_dispatch:
+
+concurrency:
+  group: sync-5000-benchmark
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: erp-api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: erp_bench
+          POSTGRES_USER: erp_bench
+          POSTGRES_PASSWORD: erp_bench
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U erp_bench -d erp_bench"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    strategy:
+      fail-fast: false
+      matrix:
+        concurrency: [10, 50, 100, 250, 500, 1000]
+    env:
+      DJANGO_SETTINGS_MODULE: core.settings.settings_bench
+      SECRET_KEY: bench-secret-key-please-use-32-or-more-random-characters-2026
+      JWT_SIGNING_KEY: bench-jwt-signing-key-please-use-32-or-more-random-characters-2026
+      ALLOWED_HOSTS: 127.0.0.1,localhost
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      CSRF_TRUSTED_ORIGINS: http://localhost:3000
+      DB_NAME: erp_bench
+      DB_USER: erp_bench
+      DB_PASSWORD: erp_bench
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      REDIS_URL: redis://127.0.0.1:6379/0
+      DB_POOL_MIN_SIZE: "12"
+      DB_POOL_MAX_SIZE: "12"
+      BENCH_REQUESTS: "5000"
+      BENCH_TIMEOUT: "30"
+      PRODUCT_LIST_CACHE_ENABLED: "0"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: erp-api/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx
+      - name: Migrate
+        run: python manage.py migrate --noinput
+      - name: Seed benchmark database
+        run: python benchmarks/seed_sync_benchmark.py
+      - name: Tune PostgreSQL for benchmark
+        run: |
+          set -euo pipefail
+          C="$(docker ps --filter 'ancestor=postgres:16' --format '{{.ID}}' | head -n1)"
+          test -n "$C"
+          docker exec "$C" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_buffers='512MB';"
+          docker exec "$C" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET work_mem='16MB';"
+          docker exec "$C" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET random_page_cost='1.1';"
+          docker exec "$C" psql -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET jit='off';"
+          docker restart "$C"
+          for i in $(seq 1 30); do PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c 'ANALYZE;'
+      - name: Start production-like sync server
+        run: |
+          set -euo pipefail
+          setsid env ASYNC_NATIVE_DB=0 ASYNC_BENCH_THREADS=0 DB_POOL_MIN_SIZE=12 DB_POOL_MAX_SIZE=12 \
+            gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers 4 --threads 12 \
+            --worker-class gthread --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn.log --log-level warning &
+          echo $! > /tmp/gunicorn.pid
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1 && exit 0; sleep 0.5; done
+          cat /tmp/gunicorn.log
+          exit 1
+      - name: Warm up
+        run: |
+          TOKEN="$(cat bench_token.txt)"
+          BENCH_URL='http://127.0.0.1:8000/api/v1/products/?page_size=20' BENCH_TOKEN="$TOKEN" BENCH_REQUESTS=200 BENCH_CONCURRENCY=${{ matrix.concurrency }} python benchmarks/sync_5000.py >/tmp/warmup.json
+      - name: Run 5000 requests
+        run: |
+          set -euo pipefail
+          TOKEN="$(cat bench_token.txt)"
+          BENCH_URL='http://127.0.0.1:8000/api/v1/products/?page_size=20' \
+          BENCH_TOKEN="$TOKEN" BENCH_REQUESTS=5000 BENCH_CONCURRENCY=${{ matrix.concurrency }} \
+          python benchmarks/sync_5000.py | tee "sync-c${{ matrix.concurrency }}.json"
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-5000-c${{ matrix.concurrency }}
+          path: erp-api/sync-c${{ matrix.concurrency }}.json
