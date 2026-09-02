@@ -69,6 +69,7 @@ Future<void> _createTrips(DatabaseExecutor db) async {
       final_total_value_minor INTEGER NOT NULL DEFAULT 0,
       total_loaded_cartons INTEGER NOT NULL DEFAULT 0,
       total_returned_cartons INTEGER NOT NULL DEFAULT 0,
+      total_returned_value_minor INTEGER NOT NULL DEFAULT 0,
       total_sold_cartons INTEGER NOT NULL DEFAULT 0,
       paid_cash_minor INTEGER NOT NULL DEFAULT 0,
       paid_transfer_minor INTEGER NOT NULL DEFAULT 0,
@@ -86,7 +87,7 @@ Future<void> _createTrips(DatabaseExecutor db) async {
 }
 
 Future<void> _createTripItems(DatabaseExecutor db) async {
-  if (await _exists(db, 'car_trip_items')) return;
+  if (!await _exists(db, 'car_trip_items')) return;
   await db.execute('''
     CREATE TABLE car_trip_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,7 +109,7 @@ Future<void> _createTripItems(DatabaseExecutor db) async {
 }
 
 Future<void> _createRevisions(DatabaseExecutor db) async {
-  if (await _exists(db, 'car_revisions')) return;
+  if (!await _exists(db, 'car_revisions')) return;
   await db.execute('''
     CREATE TABLE car_revisions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +135,7 @@ Future<void> _createRevisions(DatabaseExecutor db) async {
       final_total_value_minor INTEGER NOT NULL DEFAULT 0,
       total_loaded_cartons INTEGER NOT NULL DEFAULT 0,
       total_returned_cartons INTEGER NOT NULL DEFAULT 0,
+      total_returned_value_minor INTEGER NOT NULL DEFAULT 0,
       total_sold_cartons INTEGER NOT NULL DEFAULT 0,
       paid_cash_minor INTEGER NOT NULL DEFAULT 0,
       paid_transfer_minor INTEGER NOT NULL DEFAULT 0,
@@ -147,7 +149,7 @@ Future<void> _createRevisions(DatabaseExecutor db) async {
 }
 
 Future<void> _createRevisionItems(DatabaseExecutor db) async {
-  if (await _exists(db, 'car_revision_items')) return;
+  if (!await _exists(db, 'car_revision_items')) return;
   await db.execute('''
     CREATE TABLE car_revision_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,7 +169,7 @@ Future<void> _createRevisionItems(DatabaseExecutor db) async {
 }
 
 Future<void> _createPaymentTransactions(DatabaseExecutor db) async {
-  if (await _exists(db, 'car_payment_transactions')) return;
+  if (!await _exists(db, 'car_payment_transactions')) return;
   await db.execute('''
     CREATE TABLE car_payment_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -182,7 +184,7 @@ Future<void> _createPaymentTransactions(DatabaseExecutor db) async {
 }
 
 Future<void> _createPaymentAllocations(DatabaseExecutor db) async {
-  if (await _exists(db, 'car_payment_allocations')) return;
+  if (!await _exists(db, 'car_payment_allocations')) return;
   await db.execute('''
     CREATE TABLE car_payment_allocations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
