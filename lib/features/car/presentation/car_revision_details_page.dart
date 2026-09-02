@@ -47,7 +47,7 @@ class CarRevisionDetailsPage extends StatelessWidget {
         children: [
           AppCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Historical snapshot', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+              const Text('Historical snapshot', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
               const SizedBox(height: 8),
               Text('${revision.salesCarName} · ${revision.warehouseName}', style: TextStyle(color: scheme.onSurfaceVariant)),
               const SizedBox(height: 4),
@@ -90,7 +90,7 @@ class CarRevisionDetailsPage extends StatelessWidget {
               const Divider(height: 22),
               _amount('Actual sold value', summary.finalTotalSoldValue, strong: true),
               _amount('Paid', revision.payment.totalPaid),
-              _amount('Remaining', _calculator.remaining(trip, summary), strong: true),
+              _amount('Remaining', _calculator.remaining(trip, summaryOf: summary), strong: true),
             ]),
           ),
         ],
@@ -100,19 +100,20 @@ class CarRevisionDetailsPage extends StatelessWidget {
 
   Widget _flowCard(dynamic summary, ColorScheme scheme) => AppCard(
         child: Row(children: [
-          _flow('Loaded', summary.totalLoadedCartons, Icons.outbox_rounded, scheme.primary),
+          _flow('Loaded', summary.totalLoadedCartons, Icons.outbox_rounded, scheme.primary, scheme),
           const Icon(Icons.arrow_forward_rounded, size: 18),
-          _flow('Returned', summary.totalReturnedCartons, Icons.assignment_return_rounded, scheme.error),
+          _flow('Returned', summary.totalReturnedCartons, Icons.assignment_return_rounded, scheme.error, scheme),
           const Icon(Icons.arrow_forward_rounded, size: 18),
-          _flow('Sold', summary.totalSoldCartons, Icons.point_of_sale_rounded, scheme.primary),
+          _flow('Sold', summary.totalSoldCartons, Icons.point_of_sale_rounded, scheme.primary, scheme),
         ]),
       );
 
-  Widget _flow(String label, int value, IconData icon, Color color) => Expanded(child: Column(children: [
+  Widget _flow(String label, int value, IconData icon, Color color, ColorScheme scheme) =>
+      Expanded(child: Column(children: [
         Icon(icon, color: color),
         const SizedBox(height: 4),
         Text('$value', style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900)),
-        Text(label, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        Text(label, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
       ]));
 
   Widget _amount(String label, dynamic amount, {bool strong = false}) => Padding(
