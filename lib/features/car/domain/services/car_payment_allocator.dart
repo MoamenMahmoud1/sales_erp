@@ -18,8 +18,8 @@ class CarPaymentAllocationPlan {
   bool get isFullyAllocated => unallocated == CarMoney.zero;
 }
 
-/// Allocates one real payment sequentially to finalized outstanding Car
-/// invoices, oldest first. Open trips are never eligible for payment.
+/// Allocates one real payment to finalized outstanding invoices from exactly
+/// one Car + Warehouse group. Open trips are never eligible.
 class CarPaymentAllocator {
   const CarPaymentAllocator({this.calculator = const CarCalculator()});
 
@@ -28,9 +28,14 @@ class CarPaymentAllocator {
   CarPaymentAllocationPlan allocate({
     required CarPaymentTransaction transaction,
     required List<CarTrip> trips,
+    int? salesCarId,
+    int? warehouseId,
   }) {
     if (transaction.totalAmount.minorUnits <= 0) {
       throw ArgumentError('Payment amount must be greater than zero.');
+    }
+    if ((salesCarId == null) != (warehouseId == null)) {
+      throw ArgumentError('A payment scope must include both Car and Warehouse.');
     }
 
     var cashRemaining = transaction.cashAmount;
@@ -38,7 +43,26 @@ class CarPaymentAllocator {
     final allocations = <CarPaymentAllocation>[];
     final updatedTrips = <CarTrip>[];
 
-    final eligibleTrips = trips.where((trip) => trip.isClosed).toList()
+    final closedTrips = trips.where((trip) => trip.isClosed).toList();
+
+    if (salesCarId == null) {
+      final groups = closedTrips
+          .map((trip) => (trip.salesCarId, trip.warehouseId))
+          .toSet();
+      if (groups.length > 1) {
+        throw StateError(
+          'A payment cannot span different Cars or Warehouses. Select one Car + Warehouse group.',
+        );
+      }
+    }
+
+    final eligibleTrips = closedTrips
+        .where(
+          (trip) =>
+              salesCarId == null ||
+              (trip.salesCarId == salesCarId && trip.warehouseId == warehouseId),
+        )
+        .toList()
       ..sort((a, b) {
         final date = a.openedAt.compareTo(b.openedAt);
         return date != 0 ? date : a.id.compareTo(b.id);
