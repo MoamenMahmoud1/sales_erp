@@ -107,6 +107,7 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
                 data = serializer.data
                 return self.get_paginated_response(data)
             serializer = self.get_serializer(queryset, many=True)
+            data = serializer.data
             return Response(data, status=200)
 
     def get_queryset(self):
