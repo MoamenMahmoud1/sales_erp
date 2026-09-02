@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """End-to-end HTTP benchmark with optional server-stage instrumentation."""
 
+# Keep clean performance and diagnostic/instrumented runs as separate modes.
+
 from __future__ import annotations
 
 import asyncio
@@ -230,8 +232,6 @@ async def main() -> None:
     benchmark_mode = os.getenv("BENCH_MODE", "unknown")
     pagination_mode = os.getenv("BENCH_PAGINATION", "page")
     detail_path = Path(os.environ["BENCH_DETAIL_PATH"]) if os.getenv("BENCH_DETAIL_PATH") else None
-    # Calibration/diagnostic passes explicitly require instrumentation; clean
-    # final performance passes deliberately do not.
     require_instrumentation = env_bool("BENCH_REQUIRE_INSTRUMENTATION", False)
 
     if requests <= 0 or concurrency <= 0:
