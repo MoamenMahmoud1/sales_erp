@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sqflite_common_ffi/sqflite_common_ffi.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:sales_erp/core/storage/app_schema.dart';
 import 'package:sales_erp/features/car/data/local_car_catalog_repository.dart';
@@ -7,7 +7,6 @@ import 'package:sales_erp/features/car/data/local_car_trip_repository.dart';
 import 'package:sales_erp/features/car/domain/entities/car_load_item.dart';
 import 'package:sales_erp/features/car/domain/entities/car_payment.dart';
 import 'package:sales_erp/features/car/domain/entities/car_trip.dart';
-import 'package:sales_erp/features/car/domain/entities/car_trip_status.dart';
 import 'package:sales_erp/features/car/domain/entities/money.dart';
 import 'package:sales_erp/features/car/domain/entities/sales_car.dart';
 import 'package:sales_erp/features/car/domain/entities/warehouse.dart';
@@ -121,7 +120,7 @@ void main() {
     );
 
     final revisedAttempt = closed.copyWith(
-      payment: const CarPayment(cashAmount: CarMoney(100000)),
+      payment: CarPayment(cashAmount: const CarMoney(100000)),
       items: [
         CarLoadItem(
           productId: productId,
