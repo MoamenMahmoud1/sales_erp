@@ -1,4 +1,4 @@
-"""Benchmark settings for the real production API hot path."""
+"""Benchmark settings for the production JSON API hot path."""
 
 import os
 
@@ -9,6 +9,15 @@ SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+
+# The benchmark is API-only. The Django admin is intentionally not installed
+# here because settings_api deliberately removes the admin/session/message
+# middleware from the API hot path. This keeps Django system checks aligned
+# with the process we actually benchmark.
+INSTALLED_APPS = [
+    app for app in INSTALLED_APPS if app != "django.contrib.admin"
+]
+ROOT_URLCONF = "core.benchmark_urls"
 
 # Benchmark raw application capacity, not the configured rate-limit policy.
 REST_FRAMEWORK = {
