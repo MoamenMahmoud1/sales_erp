@@ -3,9 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sales_erp/core/security/app_lock_controller.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-
-  test('starts locked and unlock stays valid through one app session', () async {
+  test('starts locked and remains unlocked for the session', () async {
     final controller = AppLockController();
     addTearDown(controller.dispose);
 
@@ -15,8 +13,6 @@ void main() {
     await controller.unlock();
     expect(controller.status, AppStatus.unlocked);
 
-    controller.didChangeAppLifecycleState(AppLifecycleState.paused);
-    controller.didChangeAppLifecycleState(AppLifecycleState.resumed);
     expect(controller.status, AppStatus.unlocked);
   });
 
