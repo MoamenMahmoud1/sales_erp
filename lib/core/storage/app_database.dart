@@ -3,6 +3,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'app_migrations.dart';
 import 'app_schema.dart';
+import 'car_return_value_migration.dart';
 
 /// The application's single SQLite database.
 class AppDatabase {
@@ -44,6 +45,7 @@ class AppDatabase {
       onUpgrade: (db, oldVersion, _) => runAppMigrations(db, oldVersion),
     );
 
+    await ensureCarReturnedValueColumns(database);
     _database = database;
     await _cleanupExpiredInvoiceChanges(database);
     return database;
