@@ -14,22 +14,18 @@ CSRF_TRUSTED_ORIGINS = config(
 )
 
 # PostgreSQL production pooling.
-# Keep explicit per-worker pool capacity with deliberate headroom above the
-# application admission limit. The admission layer is the primary backpressure
-# point for async DB work; the pool remains an execution resource with room for
-# framework/administrative queries that are not part of the guarded hot path.
+# Keep a conservative default for the general web/admin process. The dedicated
+# async JSON API settings override this with a larger pool and a lower bounded
+# admission level after load testing.
 DB_POOL_MIN_SIZE = config("DB_POOL_MIN_SIZE", default=2, cast=int)
-DB_POOL_MAX_SIZE = config("DB_POOL_MAX_SIZE", default=12, cast=int)
+DB_POOL_MAX_SIZE = config("DB_POOL_MAX_SIZE", default=8, cast=int)
 if DB_POOL_MIN_SIZE < 0 or DB_POOL_MAX_SIZE < 1 or DB_POOL_MIN_SIZE > DB_POOL_MAX_SIZE:
     raise ValueError("DB_POOL_MIN_SIZE and DB_POOL_MAX_SIZE are invalid")
 
-# Keep admission below the pool so the pool is not the first queue under normal
-# async API load. Production deployments may tune this pair together after load
-# testing against the actual PostgreSQL connection budget.
-ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=8, cast=int)
-if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY >= DB_POOL_MAX_SIZE:
+ASYNC_DB_CONCURRENCY = config("ASYNC_DB_CONCURRENCY", default=4, cast=int)
+if ASYNC_DB_CONCURRENCY < 0 or ASYNC_DB_CONCURRENCY > DB_POOL_MAX_SIZE:
     raise ValueError(
-        "ASYNC_DB_CONCURRENCY must be 0 or strictly less than DB_POOL_MAX_SIZE"
+        "ASYNC_DB_CONCURRENCY must be between 0 and DB_POOL_MAX_SIZE"
     )
 
 # Fail fast when a DB-bound request has been queued behind the application
@@ -48,8 +44,6 @@ DATABASES = {
         "PASSWORD": config("DB_PASSWORD"),
         "HOST": config("DB_HOST", default="localhost"),
         "PORT": config("DB_PORT", default="5432"),
-        # Django recommends disabling persistent connections with ASGI and
-        # using the backend's connection pool instead.
         "CONN_MAX_AGE": 0,
         "CONN_HEALTH_CHECKS": True,
         "OPTIONS": {
