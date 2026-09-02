@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/storage/app_database.dart';
+import '../domain/entities/car_financial_summary.dart';
 import '../domain/entities/car_load_item.dart';
 import '../domain/entities/car_revision.dart';
 import '../domain/entities/car_trip.dart';
@@ -29,27 +30,47 @@ class LocalCarTripRepository implements CarTripRepository {
   Future<CarTrip> createTrip(CarTrip trip) async {
     _ensureOpen(trip);
     final db = await _database();
-    final summary = _calculator.summary(trip);
-    final placeholder = 'pending-${DateTime.now().microsecondsSinceEpoch}';
-    final draft = trip.copyWith(displayNumber: placeholder);
+    return db.transaction((txn) async => _insertTrip(txn, trip));
+  }
 
+  @override
+  Future<CarTrip> createAndConfirmTrip(
+    CarTrip trip, {
+    String? triggeredBy,
+  }) async {
+    if (trip.id != 0) {
+      throw ArgumentError('A new Car trip cannot already have an id.');
+    }
+    if (trip.status != CarTripStatus.open) {
+      throw ArgumentError('A new Car trip must start open.');
+    }
+
+    final issues = _calculator.validate(trip);
+    if (issues.isNotEmpty) throw ArgumentError(issues.first.message);
+
+    final now = DateTime.now().toUtc();
+    final finalized = trip.copyWith(
+      status: CarTripStatus.closed,
+      closedAt: trip.closedAt ?? now,
+    );
+    final summary = _calculator.summary(finalized);
+
+    final db = await _database();
     return db.transaction((txn) async {
-      final id = await txn.insert(
-        'car_trips',
-        _mappers.tripToRow(draft, summary, updatedAt: DateTime.now()),
+      final saved = await _insertTrip(
+        txn,
+        finalized,
+        summary: summary,
       );
-      final displayNumber = _displayNumbers.create(
-        year: draft.openedAt.year,
-        sequence: id,
+      await _insertRevision(
+        txn,
+        _revisionFrom(
+          saved,
+          revisionNumber: 1,
+          triggeredBy: triggeredBy,
+        ),
       );
-      await txn.update(
-        'car_trips',
-        {'display_number': displayNumber},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      await _insertItems(txn, id, draft.items);
-      return draft.copyWith(id: id, displayNumber: displayNumber);
+      return saved;
     });
   }
 
@@ -59,7 +80,8 @@ class LocalCarTripRepository implements CarTripRepository {
     _ensureOpen(trip);
     final issues = _calculator.validate(trip);
     // Empty drafts are allowed; validation becomes mandatory on confirmation.
-    final blocking = issues.where((issue) => issue.message.contains('cannot')).toList();
+    final blocking =
+        issues.where((issue) => issue.message.contains('cannot')).toList();
     if (blocking.isNotEmpty) throw ArgumentError(blocking.first.message);
 
     final db = await _database();
@@ -101,6 +123,13 @@ class LocalCarTripRepository implements CarTripRepository {
       closedAt: trip.closedAt ?? now,
     );
     final summary = _calculator.summary(finalized);
+
+    final dbTotalPaid = trip.payment.totalPaid;
+    if (dbTotalPaid > summary.finalTotalSoldValue) {
+      throw StateError(
+        'A Car invoice cannot be confirmed with payments above its final value.',
+      );
+    }
 
     return db.transaction((txn) async {
       final updated = await txn.update(
@@ -147,10 +176,13 @@ class LocalCarTripRepository implements CarTripRepository {
     String? triggeredBy,
   }) async {
     if (trip.id <= 0) throw ArgumentError('A saved trip must have an id.');
+    if (!trip.isClosed) {
+      throw StateError('Only a closed car trip can be revised.');
+    }
+
     final issues = _calculator.validate(trip);
     if (issues.isNotEmpty) throw ArgumentError(issues.first.message);
 
-    final db = await _database();
     final now = DateTime.now().toUtc();
     final revised = trip.copyWith(
       status: CarTripStatus.closed,
@@ -158,6 +190,13 @@ class LocalCarTripRepository implements CarTripRepository {
     );
     final summary = _calculator.summary(revised);
 
+    if (revised.payment.totalPaid > summary.finalTotalSoldValue) {
+      throw StateError(
+        'A closed Car invoice cannot be revised below the amount already paid.',
+      );
+    }
+
+    final db = await _database();
     return db.transaction((txn) async {
       final updated = await txn.update(
         'car_trips',
@@ -305,6 +344,33 @@ class LocalCarTripRepository implements CarTripRepository {
     );
   }
 
+  Future<CarTrip> _insertTrip(
+    Transaction txn,
+    CarTrip trip, {
+    CarFinancialSummary? summary,
+  }) async {
+    final calculated = summary ?? _calculator.summary(trip);
+    final placeholder = 'pending-${DateTime.now().microsecondsSinceEpoch}';
+    final draft = trip.copyWith(displayNumber: placeholder);
+    final now = DateTime.now().toUtc();
+    final id = await txn.insert(
+      'car_trips',
+      _mappers.tripToRow(draft, calculated, updatedAt: now),
+    );
+    final displayNumber = _displayNumbers.create(
+      year: draft.openedAt.year,
+      sequence: id,
+    );
+    await txn.update(
+      'car_trips',
+      {'display_number': displayNumber},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    await _insertItems(txn, id, draft.items);
+    return draft.copyWith(id: id, displayNumber: displayNumber);
+  }
+
   void _ensureOpen(CarTrip trip) {
     if (trip.status != CarTripStatus.open) {
       throw StateError('Only open car trips can be created or edited.');
@@ -425,7 +491,9 @@ class LocalCarTripRepository implements CarTripRepository {
     final query = filter.query?.trim();
     if (query != null && query.isNotEmpty) {
       final pattern = '%$query%';
-      clauses.add('(display_number LIKE ? OR sales_car_name LIKE ? OR warehouse_name LIKE ?)');
+      clauses.add(
+        '(display_number LIKE ? OR sales_car_name LIKE ? OR warehouse_name LIKE ?)',
+      );
       args.addAll([pattern, pattern, pattern]);
     }
     return (clauses.join(' AND '), args);
