@@ -1,12 +1,13 @@
 import 'money.dart';
 
-/// Payments recorded against a car trip, split by method.
+/// Payments recorded against a Car trip, split by method.
 ///
-/// Cash payments are considered immediately paid; transfer payments are paid
-/// once confirmed. [totalPaid] is what is applied against a trip's final
-/// value when computing the remaining balance. The history of transactions
-/// and their per-invoice allocations is tracked separately so it is never
-/// destroyed when a new payment is recorded.
+/// Both cash and transfer amounts are considered paid once the payment
+/// transaction is successfully persisted. The current domain model does not
+/// expose a separate pending-transfer state; transaction persistence is the
+/// confirmation boundary. The history of transactions and their per-invoice
+/// allocations is tracked separately so it is never destroyed when a new
+/// payment is recorded.
 class CarPayment {
   final CarMoney cashAmount;
   final CarMoney transferAmount;
