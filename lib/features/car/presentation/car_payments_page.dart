@@ -7,6 +7,8 @@ import '../../../core/ui/empty_state.dart';
 import '../application/usecases/allocate_car_payment.dart';
 import '../domain/entities/car_payment_transaction.dart';
 import '../domain/entities/car_trip.dart';
+import '../domain/entities/money.dart';
+import '../domain/services/car_calculator.dart';
 import '../domain/services/car_payment_allocator.dart';
 import '../presentation/animations/payment_distribution_animation.dart';
 
@@ -68,8 +70,6 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
   }
 
   int _totalFor(CarTrip trip) {
-    // Read the materialized final value by using the trip model's domain
-    // calculator through a compact helper rather than duplicating formulas.
     final summary = const CarTripValue().value(trip);
     return summary;
   }
@@ -138,8 +138,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
   CarTrip tripById(List<CarTrip> trips, int id) =>
       trips.firstWhere((trip) => trip.id == id);
 
-  CarMoney _money(double amount) =>
-      CarMoney.fromUnits(amount);
+  CarMoney _money(double amount) => CarMoney.fromUnits(amount);
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
