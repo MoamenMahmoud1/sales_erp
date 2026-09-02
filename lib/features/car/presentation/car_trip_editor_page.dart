@@ -36,7 +36,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   final _calculator = const CarCalculator();
 
   late final CreateCarTrip _create = CreateCarTrip(_trips);
-  late final CreateAndConfirmCarTrip _createAndConfirm =
+  late final CreateAndConfirmCarTrip _createAndConfirmUseCase =
       CreateAndConfirmCarTrip(_trips);
   late final UpdateCarTripDraft _update = UpdateCarTripDraft(_trips);
   late final ConfirmCarTrip _confirm = ConfirmCarTrip(_trips);
@@ -92,8 +92,9 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         final trip = await _trips.getTripById(widget.tripId!);
         if (trip == null) throw StateError('Car invoice not found.');
         _original = trip;
-        _selectedCar = _findById(_cars, trip.salesCarId);
-        _selectedWarehouse = _findById(_warehouses, trip.warehouseId);
+        _selectedCar = _cars.where((c) => c.id == trip.salesCarId).firstOrNull;
+        _selectedWarehouse =
+            _warehouses.where((w) => w.id == trip.warehouseId).firstOrNull;
         _dueDate = trip.dueDate?.toLocal();
         _displayNumber = trip.displayNumber;
         _globalDiscountPercent = trip.globalDiscountPercent;
@@ -118,13 +119,6 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         _error = '$error';
       });
     }
-  }
-
-  T? _findById<T>(List<T> items, int id) {
-    for (final item in items) {
-      if ((item as dynamic).id == id) return item;
-    }
-    return null;
   }
 
   Future<void> _reloadProducts() async {
@@ -160,11 +154,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       openedAt: _original?.openedAt ?? now,
       closedAt: closed ? (_original?.closedAt ?? now) : _original?.closedAt,
       dueDate: _dueDate?.toUtc(),
-      status: closed
-          ? (_original?.isClosed ?? false
-              ? CarTripStatus.closed
-              : CarTripStatus.closed)
-          : CarTripStatus.open,
+      status: closed ? CarTripStatus.closed : CarTripStatus.open,
       items: _items,
       globalDiscountPercent: _globalDiscountPercent,
       payment: _original?.payment ?? const CarPayment(),
@@ -234,7 +224,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     setState(() => _saving = true);
     try {
       final persisted = !_editing
-          ? await _createAndConfirm(
+          ? await _createAndConfirmUseCase(
               _buildTrip(closed: false),
               triggeredBy: 'invoice_close',
             )
@@ -262,13 +252,6 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
-  }
-
-  Future<CarTrip> _createAndConfirm(
-    CarTrip trip, {
-    required String triggeredBy,
-  }) {
-    return _createAndConfirm.call(trip, triggeredBy: triggeredBy);
   }
 
   Future<void> _addProduct() async {
@@ -831,7 +814,10 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [Text(label), Text(_money(amount), style: const TextStyle(fontWeight: FontWeight.w700))],
+        children: [
+          Text(label),
+          Text(_money(amount), style: const TextStyle(fontWeight: FontWeight.w700)),
+        ],
       ),
     );
   }
@@ -840,4 +826,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
 
   String _formatDate(DateTime date) =>
       '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+}
+
+extension<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }
