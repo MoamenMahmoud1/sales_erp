@@ -1,208 +1,245 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/storage/app_database.dart';
-import '../domain/entities/car_financial_summary.dart';
 import '../domain/entities/car_load_item.dart';
+import '../domain/entities/car_payment_allocation.dart';
+import '../domain/entities/car_payment_transaction.dart';
 import '../domain/entities/car_payment_status.dart';
 import '../domain/entities/car_revision.dart';
+import '../domain/entities/car_totals.dart';
 import '../domain/entities/car_trip.dart';
 import '../domain/entities/car_trip_filter.dart';
 import '../domain/entities/car_trip_summary_view.dart';
 import '../domain/entities/money.dart';
+import '../domain/entities/sales_car.dart';
+import '../domain/entities/warehouse.dart';
+import '../domain/repositories/car_repository.dart';
 import '../domain/services/car_calculator.dart';
 import '../domain/services/car_payment_evaluator.dart';
-import '../domain/repositories/car_trip_repository.dart';
 import 'car_mappers.dart';
 
-/// Local persistence for the Car trip aggregate.
-class LocalCarTripRepository implements CarTripRepository {
-  LocalCarTripRepository({Future<Database> Function()? database})
+/// SQLite-backed [CarRepository].
+class LocalCarRepository implements CarRepository {
+  final Future<Database> Function() _database;
+  final CarMappers _mappers = const CarMappers();
+  static const CarCalculator _calculator = CarCalculator();
+  static const CarPaymentEvaluator _evaluator = CarPaymentEvaluator();
+
+  LocalCarRepository({Future<Database> Function()? database})
       : _database = database ?? (() => AppDatabase.database);
 
-  final Future<Database> Function() _database;
-  static const _mappers = CarMappers();
-  static const _calculator = CarCalculator();
-  static const _evaluator = CarPaymentEvaluator();
+  @override
+  Future<SalesCar> saveCar(SalesCar car) async {
+    final db = await _database();
+    final id = await db.insert('sales_cars', _mappers.salesCarToInsertRow(car));
+    return car.copyWith(id: id);
+  }
+
+  @override
+  Future<List<SalesCar>> getCars() async {
+    final db = await _database();
+    final rows = await db.query('sales_cars', orderBy: 'name COLLATE NOCASE ASC');
+    return rows.map(_mappers.salesCarFromRow).toList(growable: false);
+  }
+
+  @override
+  Future<Warehouse> saveWarehouse(Warehouse warehouse) async {
+    final db = await _database();
+    final id = await db.insert('warehouses', _mappers.warehouseToInsertRow(warehouse));
+    return warehouse.copyWith(id: id);
+  }
+
+  @override
+  Future<List<Warehouse>> getWarehouses() async {
+    final db = await _database();
+    final rows = await db.query('warehouses', orderBy: 'name COLLATE NOCASE ASC');
+    return rows.map(_mappers.warehouseFromRow).toList(growable: false);
+  }
+
+  @override
+  Future<CarTrip> createTrip(CarTrip trip) async {
+    final db = await _database();
+    final summary = _calculator.summary(trip);
+    return db.transaction((txn) async {
+      final id = await txn.insert('car_trips', _mappers.tripToRow(trip, summary, updatedAt: DateTime.now()));
+      for (final item in trip.items) {
+        await txn.insert('car_trip_items', _mappers.itemToRow(item, id));
+      }
+      return trip.copyWith(id: id);
+    });
+  }
+
+  @override
+  Future<CarTrip> updateTrip(CarTrip trip) async {
+    final db = await _database();
+    final summary = _calculator.summary(trip);
+    return db.transaction((txn) async {
+      final row = _mappers.tripToRow(trip, summary, updatedAt: DateTime.now())..remove('created_at');
+      await txn.update('car_trips', row, where: 'id = ?', whereArgs: [trip.id]);
+      await txn.delete('car_trip_items', where: 'trip_id = ?', whereArgs: [trip.id]);
+      for (final item in trip.items) {
+        await txn.insert('car_trip_items', _mappers.itemToRow(item, trip.id));
+      }
+      return trip;
+    });
+  }
+
+  @override
+  Future<CarTrip> confirmTrip(CarTrip trip, {required int revisionNumber, String? triggeredBy}) async {
+    final db = await _database();
+    final summary = _calculator.summary(trip);
+    return db.transaction((txn) async {
+      final row = _mappers.tripToRow(trip, summary, updatedAt: DateTime.now())..remove('created_at');
+      await txn.update('car_trips', row, where: 'id = ?', whereArgs: [trip.id]);
+      await txn.delete('car_trip_items', where: 'trip_id = ?', whereArgs: [trip.id]);
+      for (final item in trip.items) {
+        await txn.insert('car_trip_items', _mappers.itemToRow(item, trip.id));
+      }
+      await _insertRevision(
+        txn,
+        _revisionFrom(trip, revisionNumber, triggeredBy, createdAt: trip.closedAt ?? DateTime.now()),
+      );
+      return trip;
+    });
+  }
+
+  @override
+  Future<void> saveRevision(CarTrip trip, {required int revisionNumber, String? triggeredBy}) async {
+    final db = await _database();
+    await db.transaction((txn) async {
+      await _insertRevision(
+        txn,
+        _revisionFrom(trip, revisionNumber, triggeredBy, createdAt: DateTime.now()),
+      );
+    });
+  }
+
+  @override
+  Future<CarTrip?> getTripById(int tripId) async {
+    final db = await _database();
+    final rows = await db.query('car_trips', where: 'id = ?', whereArgs: [tripId], limit: 1);
+    if (rows.isEmpty) return null;
+    return _loadTripWithItems(db, rows.first);
+  }
+
+  @override
+  Future<CarTrip?> getTripByDisplayNumber(String displayNumber) async {
+    final db = await _database();
+    final rows = await db.query('car_trips', where: 'display_number = ?', whereArgs: [displayNumber], limit: 1);
+    if (rows.isEmpty) return null;
+    return _loadTripWithItems(db, rows.first);
+  }
 
   @override
   Future<List<CarTrip>> getTrips({CarTripFilter? filter}) async {
     final db = await _database();
     final (where, args) = _buildWhere(filter);
-    final rows = await db.query(
-      'car_trips',
-      where: where.isEmpty ? null : where,
-      whereArgs: args,
-      orderBy: 'opened_at DESC, id DESC',
-    );
+    final now = DateTime.now();
+    final rows = await db.query('car_trips', where: where.isEmpty ? null : where, whereArgs: args.isEmpty ? null : args, orderBy: 'opened_at DESC');
     final trips = <CarTrip>[];
     for (final row in rows) {
-      trips.add(await _loadTripWithItems(db, row));
+      final trip = await _loadTripWithItems(db, row);
+      if (filter?.paymentStatus != null) {
+        final summary = _calculator.summary(trip);
+        if (_evaluator.statusOf(trip, summary, now) != filter!.paymentStatus) continue;
+      }
+      trips.add(trip);
     }
-    return List.unmodifiable(trips);
-  }
-
-  @override
-  Future<CarTrip?> getTripById(int id) async {
-    final db = await _database();
-    final rows = await db.query('car_trips', where: 'id = ?', whereArgs: [id], limit: 1);
-    if (rows.isEmpty) return null;
-    return _loadTripWithItems(db, rows.first);
+    return trips;
   }
 
   @override
   Future<List<CarTripSummaryView>> getTripSummaries({CarTripFilter? filter}) async {
     final db = await _database();
     final (where, args) = _buildWhere(filter);
-    final rows = await db.query(
-      'car_trips',
-      where: where.isEmpty ? null : where,
-      whereArgs: args,
-      orderBy: 'opened_at DESC, id DESC',
-    );
-    return rows.map(_mappers.tripSummaryFromRow).toList(growable: false);
+    final now = DateTime.now();
+    final rows = await db.query('car_trips', where: where.isEmpty ? null : where, whereArgs: args.isEmpty ? null : args, orderBy: 'opened_at DESC');
+    final views = <CarTripSummaryView>[];
+    for (final row in rows) {
+      final view = _mappers.tripSummaryFromRow(row);
+      if (filter?.paymentStatus != null && view.paymentStatus(_evaluator, now) != filter!.paymentStatus) continue;
+      views.add(view);
+    }
+    return views;
   }
 
   @override
-  Future<CarTrip> createDraft(CarTrip trip) async {
-    if (trip.items.isEmpty) throw StateError('A Car trip must contain at least one product.');
-    final issues = _calculator.validate(trip);
-    if (issues.isNotEmpty) throw StateError(issues.first.message);
+  Future<List<CarRevision>> getRevisionsForTrip(int tripId) async {
     final db = await _database();
-    return db.transaction((txn) async {
-      final now = DateTime.now().toUtc();
-      final displayNumber = trip.displayNumber.isEmpty
-          ? await _nextDisplayNumber(txn, now.year)
-          : trip.displayNumber;
-      final normalized = trip.copyWith(
-        displayNumber: displayNumber,
-        status: trip.status,
-      );
-      final summary = _calculator.summary(normalized);
-      final id = await txn.insert(
-        'car_trips',
-        _mappers.tripToRow(normalized, summary, updatedAt: now),
-      );
-      for (final item in normalized.items) {
-        await txn.insert('car_trip_items', _mappers.itemToRow(item, id));
-      }
-      return normalized.copyWith(id: id, displayNumber: displayNumber);
-    });
-  }
-
-  @override
-  Future<CarTrip> updateDraft(CarTrip trip) async {
-    final issues = _calculator.validate(trip);
-    if (issues.isNotEmpty) throw StateError(issues.first.message);
-    final db = await _database();
-    return db.transaction((txn) async {
-      final current = await txn.query('car_trips', where: 'id = ?', whereArgs: [trip.id], limit: 1);
-      if (current.isEmpty) throw StateError('Car invoice not found.');
-      if ((current.first['status'] as String?) == 'closed') {
-        throw StateError('Closed Car invoices must be revised, not overwritten.');
-      }
-      final now = DateTime.now().toUtc();
-      final summary = _calculator.summary(trip);
-      await txn.update(
-        'car_trips',
-        _mappers.tripToRow(trip, summary, updatedAt: now),
-        where: 'id = ? AND status = ?',
-        whereArgs: [trip.id, 'open'],
-      );
-      await txn.delete('car_trip_items', where: 'trip_id = ?', whereArgs: [trip.id]);
-      for (final item in trip.items) {
-        await txn.insert('car_trip_items', _mappers.itemToRow(item, trip.id));
-      }
-      return trip.copyWith(status: trip.status);
-    });
-  }
-
-  @override
-  Future<CarTrip> confirmTrip(CarTrip trip, {String? triggeredBy}) async {
-    final issues = _calculator.validate(trip);
-    if (issues.isNotEmpty) throw StateError(issues.first.message);
-    final db = await _database();
-    return db.transaction((txn) async {
-      final currentRows = await txn.query('car_trips', where: 'id = ?', whereArgs: [trip.id], limit: 1);
-      if (currentRows.isEmpty) throw StateError('Car invoice not found.');
-      final current = await _loadTripWithItems(txn, currentRows.first);
-      if (current.isClosed) return current;
-      final now = DateTime.now().toUtc();
-      final closed = trip.copyWith(status: current.status, closedAt: trip.closedAt ?? now);
-      final finalTrip = closed.copyWith(status: current.status == current.status ? current.status : closed.status);
-      final confirmed = finalTrip.copyWith(status: current.status == CarTripStatus.closed ? CarTripStatus.closed : CarTripStatus.closed);
-      final summary = _calculator.summary(confirmed);
-      await txn.update(
-        'car_trips',
-        {
-          ..._mappers.tripToRow(confirmed, summary, updatedAt: now),
-          'status': CarTripStatus.closed.value,
-          'closed_at': (confirmed.closedAt ?? now).toUtc().toIso8601String(),
-        },
-        where: 'id = ? AND status = ?',
-        whereArgs: [trip.id, CarTripStatus.open.value],
-      );
-      final stored = confirmed.copyWith(status: CarTripStatus.closed, closedAt: confirmed.closedAt ?? now);
-      final revisionNumber = await _nextRevisionNumber(txn, trip.id);
-      await _insertRevision(txn, _revisionFrom(stored, revisionNumber, triggeredBy, createdAt: now));
-      return stored;
-    });
-  }
-
-  @override
-  Future<CarTrip> reviseClosedTrip(CarTrip trip, {String? triggeredBy}) async {
-    final issues = _calculator.validate(trip);
-    if (issues.isNotEmpty) throw StateError(issues.first.message);
-    final db = await _database();
-    return db.transaction((txn) async {
-      final currentRows = await txn.query('car_trips', where: 'id = ?', whereArgs: [trip.id], limit: 1);
-      if (currentRows.isEmpty) throw StateError('Car invoice not found.');
-      final current = await _loadTripWithItems(txn, currentRows.first);
-      if (!current.isClosed) throw StateError('Only closed Car invoices can be revised.');
-      final now = DateTime.now().toUtc();
-      final revised = trip.copyWith(status: CarTripStatus.closed, closedAt: trip.closedAt ?? now);
-      final summary = _calculator.summary(revised);
-      await txn.update(
-        'car_trips',
-        _mappers.tripToRow(revised, summary, updatedAt: now),
-        where: 'id = ?',
-        whereArgs: [trip.id],
-      );
-      await txn.delete('car_trip_items', where: 'trip_id = ?', whereArgs: [trip.id]);
-      for (final item in revised.items) {
-        await txn.insert('car_trip_items', _mappers.itemToRow(item, trip.id));
-      }
-      final revisionNumber = await _nextRevisionNumber(txn, trip.id);
-      await _insertRevision(txn, _revisionFrom(revised, revisionNumber, triggeredBy, createdAt: now));
-      return revised;
-    });
-  }
-
-  @override
-  Future<List<CarRevision>> getRevisions(int tripId) async {
-    final db = await _database();
-    final rows = await db.query('car_revisions', where: 'trip_id = ?', whereArgs: [tripId], orderBy: 'revision_number DESC');
+    final rows = await db.query('car_revisions', where: 'trip_id = ?', whereArgs: [tripId], orderBy: 'revision_number ASC');
     final revisions = <CarRevision>[];
     for (final row in rows) {
-      revisions.add(_mappers.revisionFromRow(row, await _loadRevisionItems(db, row['id'] as int)));
+      final items = await _loadRevisionItems(db, row['id'] as int);
+      revisions.add(_mappers.revisionFromRow(row, items));
     }
-    return List.unmodifiable(revisions);
+    return revisions;
   }
 
   @override
-  Future<CarTotals> getTotals({CarTripFilter? filter}) async {
-    final views = await getTripSummaries(filter: filter);
+  Future<CarRevision?> getRevision(int revisionId) async {
+    final db = await _database();
+    final rows = await db.query('car_revisions', where: 'id = ?', whereArgs: [revisionId], limit: 1);
+    if (rows.isEmpty) return null;
+    final items = await _loadRevisionItems(db, rows.first['id'] as int);
+    return _mappers.revisionFromRow(rows.first, items);
+  }
+
+  @override
+  Future<void> persistPaymentAllocation({required CarPaymentTransaction transaction, required List<CarPaymentAllocation> allocations, required List<CarTrip> updatedTrips}) async {
+    final db = await _database();
+    await db.transaction((txn) async {
+      final txnId = await txn.insert('car_payment_transactions', _mappers.paymentTransactionToRow(transaction));
+      for (final allocation in allocations) {
+        await txn.insert('car_payment_allocations', _mappers.allocationToRow(allocation, txnId));
+      }
+      final now = DateTime.now().toUtc().toIso8601String();
+      for (final trip in updatedTrips) {
+        await txn.update('car_trips', {
+          'paid_cash_minor': trip.payment.cashAmount.minorUnits,
+          'paid_transfer_minor': trip.payment.transferAmount.minorUnits,
+          'updated_at': now,
+        }, where: 'id = ?', whereArgs: [trip.id]);
+      }
+    });
+  }
+
+  @override
+  Future<List<CarPaymentTransaction>> getPaymentTransactions() async {
+    final db = await _database();
+    final rows = await db.query('car_payment_transactions', orderBy: 'created_at DESC');
+    return rows.map(_mappers.paymentTransactionFromRow).toList(growable: false);
+  }
+
+  @override
+  Future<List<CarPaymentAllocation>> getAllocationsForTransaction(int transactionId) async {
+    final db = await _database();
+    final rows = await db.query('car_payment_allocations', where: 'payment_transaction_id = ?', whereArgs: [transactionId]);
+    return rows.map(_mappers.allocationFromRow).toList(growable: false);
+  }
+
+  @override
+  Future<List<CarPaymentAllocation>> getAllocationsForTrip(int tripId) async {
+    final db = await _database();
+    final rows = await db.query('car_payment_allocations', where: 'trip_id = ?', whereArgs: [tripId]);
+    return rows.map(_mappers.allocationFromRow).toList(growable: false);
+  }
+
+  @override
+  Future<CarTotals> computeTotals() async {
+    final db = await _database();
     final now = DateTime.now();
-    var loaded = 0, returned = 0, sold = 0;
-    var returnedValue = 0;
+    final rows = await db.query('car_trips');
+    var loaded = 0, returned = 0, sold = 0, returnedValue = 0;
     var gross = 0, productDiscount = 0, subtotalAfter = 0, globalDiscount = 0, finalValue = 0, paid = 0, remaining = 0;
     var openCount = 0, closedCount = 0;
     var paidCount = 0, partialCount = 0, unpaidCount = 0, overdueCount = 0;
 
-    for (final view in views) {
+    for (final row in rows) {
+      final view = _mappers.tripSummaryFromRow(row);
       loaded += view.totalLoadedCartons;
       returned += view.totalReturnedCartons;
-      returnedValue += view.totalReturnedValue.minorUnits;
       sold += view.totalSoldCartons;
+      returnedValue += view.totalReturnedValue.minorUnits;
       gross += view.grossSubtotal.minorUnits;
       productDiscount += view.productDiscountTotal.minorUnits;
       subtotalAfter += view.subtotalAfterProducts.minorUnits;
@@ -210,11 +247,7 @@ class LocalCarTripRepository implements CarTripRepository {
       finalValue += view.finalValue.minorUnits;
       paid += view.paidTotal.minorUnits;
       remaining += view.remaining.minorUnits;
-      if (view.status.value == CarTripStatus.closed.value) {
-        closedCount++;
-      } else {
-        openCount++;
-      }
+      if (view.status.value == 'closed') closedCount++; else openCount++;
       switch (view.paymentStatus(_evaluator, now)) {
         case CarPaymentStatus.paid:
           paidCount++;
@@ -254,7 +287,8 @@ class LocalCarTripRepository implements CarTripRepository {
 
   Future<CarTrip> _loadTripWithItems(DatabaseExecutor db, Map<String, Object?> row) async {
     final itemRows = await db.query('car_trip_items', where: 'trip_id = ?', whereArgs: [row['id']], orderBy: 'id ASC');
-    return _mappers.tripFromRow(row, itemRows.map(_mappers.itemFromRow).toList(growable: false));
+    final items = itemRows.map(_mappers.itemFromRow).toList(growable: false);
+    return _mappers.tripFromRow(row, items);
   }
 
   Future<List<CarLoadItem>> _loadRevisionItems(DatabaseExecutor db, int revisionId) async {
@@ -272,19 +306,8 @@ class LocalCarTripRepository implements CarTripRepository {
     if (filter.from != null) { clauses.add('opened_at >= ?'); args.add(filter.from!.toUtc().toIso8601String()); }
     if (filter.to != null) { clauses.add('opened_at <= ?'); args.add(filter.to!.toUtc().toIso8601String()); }
     final query = filter.query?.trim();
-    if (query != null && query.isNotEmpty) { final q = '%$query%'; clauses.add('(display_number LIKE ? OR sales_car_name LIKE ? OR warehouse_name LIKE ?)'); args.addAll([q, q, q]); }
+    if (query != null && query.isNotEmpty) { final q = '%$query%'; clauses.add('(display_number LIKE ? OR sales_car_name LIKE ?)'); args.addAll([q, q]); }
     return (clauses.join(' AND '), args);
-  }
-
-  Future<int> _nextRevisionNumber(DatabaseExecutor db, int tripId) async {
-    final rows = await db.rawQuery('SELECT COALESCE(MAX(revision_number), 0) AS n FROM car_revisions WHERE trip_id = ?', [tripId]);
-    return ((rows.first['n'] as num?)?.toInt() ?? 0) + 1;
-  }
-
-  Future<String> _nextDisplayNumber(DatabaseExecutor db, int year) async {
-    final rows = await db.rawQuery('SELECT COUNT(*) AS n FROM car_trips WHERE display_number LIKE ?', ['$year-%']);
-    final next = ((rows.first['n'] as num?)?.toInt() ?? 0) + 1;
-    return '$year-${next.toString().padLeft(6, '0')}';
   }
 
   Future<void> _insertRevision(DatabaseExecutor txn, CarRevision r) async {
