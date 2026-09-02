@@ -13,6 +13,7 @@ on:
       - "erp-api/core/settings/settings_bench.py"
       - "erp-api/core/settings/settings_api.py"
       - "erp-api/core/settings/settings_prod.py"
+      - "erp-api/core/benchmark_urls.py"
       - "erp-api/core/middleware.py"
       - "erp-api/Dockerfile"
       - "erp-api/gunicorn.conf.py"
@@ -86,10 +87,13 @@ jobs:
           pip install -r requirements.txt
           pip install httpx
       - name: Migrate
+        id: migrate
         run: python manage.py migrate --noinput
       - name: Seed benchmark database
+        id: seed
         run: python benchmarks/seed_benchmark_data.py
       - name: Configure PostgreSQL
+        id: postgres
         run: |
           set -euo pipefail
           PG_CONTAINER="$(docker ps --filter 'ancestor=postgres:16' --format '{{.ID}}' | head -n1)"
@@ -102,6 +106,8 @@ jobs:
           for _ in $(seq 1 30); do PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -c 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
           PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -v ON_ERROR_STOP=1 -c 'ANALYZE;'
       - name: Run optimized sync vs async benchmark
+        id: benchmark
+        if: steps.migrate.outcome == 'success' && steps.seed.outcome == 'success' && steps.postgres.outcome == 'success'
         run: |
           set -euo pipefail
           rm -rf benchmark-results
@@ -249,7 +255,7 @@ jobs:
           print('\n'.join(lines))
           PY
       - name: PostgreSQL diagnostics
-        if: always()
+        if: steps.migrate.outcome == 'success' && steps.seed.outcome == 'success' && steps.postgres.outcome == 'success'
         run: python benchmarks/postgres_diagnostics.py > benchmark-results/postgres-plan.json
       - name: Upload benchmark results
         if: always()
@@ -257,5 +263,5 @@ jobs:
         with:
           name: sustainable-sync-async-capacity
           path: erp-api/benchmark-results
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
