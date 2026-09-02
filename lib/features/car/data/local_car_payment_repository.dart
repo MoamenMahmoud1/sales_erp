@@ -4,15 +4,15 @@ import '../../../core/storage/app_database.dart';
 import '../domain/entities/car_payment_allocation.dart';
 import '../domain/entities/car_payment_transaction.dart';
 import '../domain/entities/car_trip.dart';
+import '../domain/entities/car_trip_status.dart';
 import '../domain/entities/money.dart';
 import '../domain/repositories/car_payment_repository.dart';
 
 /// Persists payment events and allocations atomically in AppDatabase.
 ///
-/// The database is authoritative for the current paid balances. The caller
-/// may provide projected trips for the presentation/domain flow, but balances
-/// are always derived from the transaction allocations inside the same SQLite
-/// transaction. This prevents stale objects from overwriting newer payments.
+/// A single payment transaction must never allocate across different
+/// Car + Warehouse groups. The database validates that rule again so UI/domain
+/// mistakes cannot corrupt payment attribution.
 class LocalCarPaymentRepository implements CarPaymentRepository {
   LocalCarPaymentRepository({Future<Database> Function()? database})
       : _database = database ?? (() => AppDatabase.database);
@@ -81,12 +81,17 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
         'created_at': transaction.createdAt.toUtc().toIso8601String(),
       });
 
+      int? scopeCarId;
+      int? scopeWarehouseId;
+
       for (final allocation in allocations) {
         final tripRows = await txn.query(
           'car_trips',
           columns: [
             'id',
             'status',
+            'sales_car_id',
+            'warehouse_id',
             'final_total_value_minor',
             'paid_cash_minor',
             'paid_transfer_minor',
@@ -102,6 +107,17 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
         final row = tripRows.single;
         if (row['status'] != CarTripStatus.closed.value) {
           throw StateError('Payments can only be allocated to closed trips.');
+        }
+
+        final tripCarId = (row['sales_car_id'] as num).toInt();
+        final tripWarehouseId = (row['warehouse_id'] as num).toInt();
+        scopeCarId ??= tripCarId;
+        scopeWarehouseId ??= tripWarehouseId;
+
+        if (tripCarId != scopeCarId || tripWarehouseId != scopeWarehouseId) {
+          throw StateError(
+            'A single payment cannot mix different Cars or Warehouses.',
+          );
         }
 
         final currentPaidCash = (row['paid_cash_minor'] as num).toInt();
@@ -208,7 +224,6 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
         transactionId: row['payment_transaction_id'] as int,
         tripId: row['trip_id'] as int,
         cashAmount: CarMoney((row['cash_amount_minor'] as num).toInt()),
-        transferAmount:
-            CarMoney((row['transfer_amount_minor'] as num).toInt()),
+        transferAmount: CarMoney((row['transfer_amount_minor'] as num).toInt()),
       );
 }
