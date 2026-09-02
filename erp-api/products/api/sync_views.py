@@ -1,24 +1,27 @@
-"""Pure synchronous DRF implementation used only by the benchmark."""
+"""Pure synchronous DRF implementation used by production-compatible tests/benchmarks."""
 
-import time
+import os
 
-from django.db.models import OuterRef, Subquery, Sum, Value
-from django.db.models.functions import Coalesce
 from rest_framework import filters, viewsets
 from rest_framework.response import Response
 
-from common.pagination import StandardPagination
+from common.pagination import StandardPagination, InfiniteScrollPagination
 from common.permissions import ReadAuthenticatedWriteStaffPermission
-from common.services.perf_timing import add_serializer_cpu, db_operation
-
+from common.services.perf_timing import db_operation, timed_function, view_stage
 from products.api.serializers import CartonPricingSerializer, ProductSerializer
-from products.models import CartonPricing, Product
+from products.models import CartonPricing
+from products.services.metrics import ProductMetricsQueryService
+
+
+_BENCH_PAGINATION = os.getenv("BENCH_PAGINATION", "page").lower()
 
 
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = (ReadAuthenticatedWriteStaffPermission,)
-    pagination_class = StandardPagination
+    pagination_class = (
+        InfiniteScrollPagination if _BENCH_PAGINATION == "cursor" else StandardPagination
+    )
 
     filter_backends = (filters.SearchFilter, filters.OrderingFilter)
     search_fields = ("name",)
@@ -31,64 +34,42 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     ordering = ("name", "pk")
 
+    @timed_function("ProductViewSet.filter_queryset")
+    def filter_queryset(self, queryset):
+        for backend_class in self.filter_backends:
+            name = backend_class.__name__.removesuffix("Filter").lower()
+            with view_stage(f"view.filter.{name}"):
+                queryset = backend_class().filter_queryset(self.request, queryset, self)
+        return queryset
+
+    @timed_function("ProductViewSet.list")
     def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-        with db_operation():
-            page = self.paginate_queryset(queryset)
+        with view_stage("view.total"):
+            with view_stage("view.queryset.build"):
+                queryset = self.filter_queryset(self.get_queryset())
 
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            started = time.perf_counter_ns()
-            try:
+            with db_operation():
+                page = self.paginate_queryset(queryset)
+
+            if page is not None:
+                with view_stage("view.serializer.instantiate"):
+                    serializer = self.get_serializer(page, many=True)
+                with view_stage("view.serializer.data"):
+                    data = serializer.data
+                with view_stage("view.response.paginated"):
+                    return self.get_paginated_response(data)
+
+            with view_stage("view.serializer.instantiate"):
+                serializer = self.get_serializer(queryset, many=True)
+            with view_stage("view.serializer.data"):
                 data = serializer.data
-            finally:
-                add_serializer_cpu(time.perf_counter_ns() - started)
-            return self.get_paginated_response(data)
+            with view_stage("view.response.unpaginated"):
+                return Response(data, status=200)
 
-        serializer = self.get_serializer(queryset, many=True)
-        started = time.perf_counter_ns()
-        try:
-            data = serializer.data
-        finally:
-            add_serializer_cpu(time.perf_counter_ns() - started)
-        return Response(data, status=200)
-
+    @timed_function("ProductViewSet.get_queryset")
     def get_queryset(self):
-        sold_subquery = self._confirmed_invoice_item_qty()
-        stock_subquery = self._total_stock_subquery()
-
-        return Product.objects.annotate(
-            _total_stock=Coalesce(Subquery(stock_subquery), Value(0)),
-            _sold_quantity=Coalesce(Subquery(sold_subquery), Value(0)),
-        )
-
-    @staticmethod
-    def _total_stock_subquery():
-        from inventory.models import StockBalance
-
-        return (
-            StockBalance.objects.filter(product_id=OuterRef("pk"))
-            .values("product_id")
-            .annotate(total=Sum("quantity"))
-            .values("total")
-        )
-
-    @staticmethod
-    def _confirmed_invoice_item_qty():
-        from invoices.models import Invoice, InvoiceItem
-
-        return (
-            InvoiceItem.objects.filter(
-                product_id=OuterRef("pk"),
-                invoice__status__in=(
-                    Invoice.Status.CONFIRMED,
-                    Invoice.Status.PAID,
-                ),
-            )
-            .values("product_id")
-            .annotate(total=Sum("quantity"))
-            .values("total")
-        )
+        with view_stage("view.queryset.annotate"):
+            return ProductMetricsQueryService.with_metrics()
 
 
 class CartonPricingViewSet(viewsets.ModelViewSet):
@@ -106,6 +87,19 @@ class CartonPricingViewSet(viewsets.ModelViewSet):
         "updated_at",
     )
     ordering = ("name", "pk")
+
+    @timed_function("CartonPricingViewSet.list")
+    def list(self, request, *args, **kwargs):
+        with view_stage("view.total"):
+            queryset = self.filter_queryset(self.get_queryset())
+            with db_operation():
+                page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                data = serializer.data
+                return self.get_paginated_response(data)
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data, status=200)
 
     def get_queryset(self):
         return CartonPricing.objects.all()
