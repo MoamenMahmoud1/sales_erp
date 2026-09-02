@@ -113,6 +113,13 @@ class RequestIdAndPerfMiddleware:
         response["X-Perf-DB-Pool-ms"] = f"{ms(timing.pool_wait_ns):.3f}"
         response["X-Perf-DB-Operation-ms"] = f"{ms(timing.db_operation_ns):.3f}"
         response["X-Perf-DB-Operation-Count"] = str(timing.db_operation_count)
+        response["X-Perf-SQL-Count"] = str(len(timing.sql_samples))
+        sql_stats = timing.sql_stats()
+        for kind, stats in sql_stats.items():
+            prefix = "X-Perf-SQL-" + kind.replace("_", "-").title().replace("-", "-")
+            response[f"{prefix}-Count"] = str(stats["count"])
+            response[f"{prefix}-Total-ms"] = f"{float(stats['total_ms']):.3f}"
+            response[f"{prefix}-Max-ms"] = f"{float(stats['max_ms']):.3f}"
         response["X-Perf-Serializer-Wait-ms"] = f"{ms(timing.serializer_wait_ns):.3f}"
         response["X-Perf-Serializer-CPU-ms"] = f"{ms(timing.serializer_cpu_ns):.3f}"
 
@@ -124,6 +131,8 @@ class RequestIdAndPerfMiddleware:
             f"serializer-wait;dur={ms(timing.serializer_wait_ns):.3f}",
             f"serializer-cpu;dur={ms(timing.serializer_cpu_ns):.3f}",
         ]
+        for kind, stats in sql_stats.items():
+            server_timing.append(f"sql-{kind};dur={float(stats['total_ms']):.3f}")
 
         # Detailed view timings are opt-in through PERF_TIMING_ENABLED and are
         # emitted as individual headers so the benchmark can calculate exact
