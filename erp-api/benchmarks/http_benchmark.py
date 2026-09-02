@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end HTTP benchmark with request and server timings."""
+"""End-to-end HTTP benchmark with optional server-stage instrumentation."""
 
 from __future__ import annotations
 
@@ -36,6 +36,13 @@ def env_int(name: str, default: int) -> int:
 def env_float(name: str, default: float) -> float:
     value = os.getenv(name)
     return float(value) if value else default
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def summarize(values: list[float]) -> dict[str, float | int | None]:
@@ -223,6 +230,7 @@ async def main() -> None:
     benchmark_mode = os.getenv("BENCH_MODE", "unknown")
     pagination_mode = os.getenv("BENCH_PAGINATION", "page")
     detail_path = Path(os.environ["BENCH_DETAIL_PATH"]) if os.getenv("BENCH_DETAIL_PATH") else None
+    require_instrumentation = env_bool("BENCH_REQUIRE_INSTRUMENTATION", True)
 
     if requests <= 0 or concurrency <= 0:
         raise SystemExit("BENCH_REQUESTS and BENCH_CONCURRENCY must be > 0")
@@ -280,7 +288,8 @@ async def main() -> None:
     completed = len(request_rows)
     successful = len(successful_rows)
     failed = completed - successful
-    stack_verified = completed == requests and successful == requests and instrumented == successful
+    request_complete = completed == requests and successful == requests
+    stack_verified = request_complete and (instrumented == successful or not require_instrumentation)
 
     payload = {
         "phase": "measured",
@@ -332,6 +341,7 @@ async def main() -> None:
         "serializer_wait_p50_ms": stage_stats.get("serializer_wait", {}).get("p50_ms"),
         "serializer_cpu_p50_ms": stage_stats.get("serializer_cpu", {}).get("p50_ms"),
         "instrumented_responses": instrumented,
+        "instrumentation_required": require_instrumentation,
         "stack_verified": stack_verified,
         "deadline_sec": deadline_s,
         "deadline_exceeded": bool(deadline_s and wall_time > deadline_s),
