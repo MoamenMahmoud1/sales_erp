@@ -1,8 +1,6 @@
-name: Async DB admission benchmark (PR)
+name: Product endpoint performance benchmark
 
 on:
-  push:
-    branches: [perf/async-db-admission]
   pull_request:
     branches: [main]
     paths:
@@ -13,14 +11,14 @@ on:
       - "erp-api/common/pagination/**"
       - "erp-api/benchmarks/**"
       - "erp-api/core/settings/settings_bench.py"
-      - "erp-api/core/settings/settings_prod.py"
       - "erp-api/gunicorn.conf.py"
       - ".github/workflows/async-admission-pr.yml"
+  workflow_dispatch:
 
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: erp-api
@@ -64,20 +62,25 @@ jobs:
       BENCH_TIMEOUT: "10"
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: erp-api/requirements.txt
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install httpx
+
       - name: Migrate
         run: python manage.py migrate --noinput
+
       - name: Seed benchmark database
         run: python benchmarks/seed_benchmark_data.py
+
       - name: Configure PostgreSQL diagnostics
         run: |
           set -euo pipefail
@@ -99,23 +102,26 @@ jobs:
       - name: Benchmark async and sync stacks
         run: |
           set -euo pipefail
+          mkdir -p benchmark-results
           TOKEN="$(cat bench_token.txt)"
           URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
+          FAILED_CASES=()
 
           stop_server() {
-            local old_pid="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
-            if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
-              kill -TERM "$old_pid" 2>/dev/null || true
-              pkill -TERM -P "$old_pid" 2>/dev/null || true
-              for attempt in $(seq 1 10); do
-                if ! kill -0 "$old_pid" 2>/dev/null; then break; fi
-                sleep 0.5
+            local pid="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
+            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+              kill -TERM -- "-$pid" 2>/dev/null || true
+              kill -TERM "$pid" 2>/dev/null || true
+              for attempt in $(seq 1 30); do
+                if ! kill -0 "$pid" 2>/dev/null; then break; fi
+                sleep 0.25
               done
-              pkill -KILL -P "$old_pid" 2>/dev/null || true
-              kill -KILL "$old_pid" 2>/dev/null || true
+              kill -KILL -- "-$pid" 2>/dev/null || true
+              kill -KILL "$pid" 2>/dev/null || true
             fi
+            rm -f /tmp/gunicorn.pid
 
-            for attempt in $(seq 1 20); do
+            for attempt in $(seq 1 40); do
               if ! ss -ltnH 'sport = :8000' | grep -q .; then return 0; fi
               sleep 0.25
             done
@@ -128,12 +134,11 @@ jobs:
 
           start_server() {
             local stack="$1"
-            local gate="$2"
-            local pagination="$3"
+            local pagination="$2"
 
             stop_server
             : > /tmp/gunicorn-admission.log
-            BENCH_API_STACK="$stack" ASYNC_DB_CONCURRENCY="$gate" BENCH_PAGINATION="$pagination" \
+            setsid env BENCH_API_STACK="$stack" ASYNC_DB_CONCURRENCY=0 BENCH_PAGINATION="$pagination" \
               gunicorn core.asgi:application --bind 127.0.0.1:8000 \
               --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker \
               --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
@@ -141,18 +146,12 @@ jobs:
 
             for attempt in $(seq 1 60); do
               if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then return 0; fi
-              if [[ -s /tmp/gunicorn-admission.log ]]; then
-                if grep -qiE 'error|traceback|failed|address already in use' /tmp/gunicorn-admission.log; then break; fi
-              fi
               sleep 1
             done
 
-            echo "server failed to become healthy: stack=$stack pagination=$pagination gate=$gate" >&2
-            echo "--- gunicorn log ---" >&2
+            echo "server failed to become healthy: stack=$stack pagination=$pagination" >&2
             cat /tmp/gunicorn-admission.log >&2 || true
-            echo "--- port state ---" >&2
             ss -ltnp || true
-            echo "--- process state ---" >&2
             ps -ef --forest | grep -E 'gunicorn|uvicorn' | grep -v grep || true
             return 1
           }
@@ -162,99 +161,44 @@ jobs:
             local pagination="$2"
             local concurrency="$3"
             local prefix="${stack}-${pagination}-c${concurrency}"
+
+            set +e
             BENCH_MODE="$stack" BENCH_PAGINATION="$pagination" BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" \
               BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 \
               BENCH_DETAIL_PATH="benchmark-results/${prefix}-requests.ndjson" \
               python benchmarks/http_benchmark.py > "benchmark-results/${prefix}.json"
+            local rc=$?
+            set -e
+
+            if [[ "$rc" -ne 0 ]]; then
+              FAILED_CASES+=("$prefix")
+              echo "benchmark case returned non-zero: $prefix (rc=$rc)" >&2
+            fi
           }
 
           for stack in async sync; do
             for pagination in page cursor; do
-              start_server "$stack" 0 "$pagination"
+              start_server "$stack" "$pagination"
               for concurrency in 1 50 100; do
                 bench_case "$stack" "$pagination" "$concurrency"
               done
             done
           done
 
-      - name: Benchmark async admission gates
-        run: |
-          set -euo pipefail
-          TOKEN="$(cat bench_token.txt)"
-          URL="http://127.0.0.1:8000/api/v1/products/?page=1&page_size=20"
-
-          stop_server() {
-            local old_pid="$(cat /tmp/gunicorn.pid 2>/dev/null || true)"
-            if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
-              kill -TERM "$old_pid" 2>/dev/null || true
-              pkill -TERM -P "$old_pid" 2>/dev/null || true
-              for attempt in $(seq 1 10); do
-                if ! kill -0 "$old_pid" 2>/dev/null; then break; fi
-                sleep 0.5
-              done
-              pkill -KILL -P "$old_pid" 2>/dev/null || true
-              kill -KILL "$old_pid" 2>/dev/null || true
-            fi
-            for attempt in $(seq 1 20); do
-              if ! ss -ltnH 'sport = :8000' | grep -q .; then return 0; fi
-              sleep 0.25
-            done
-            echo "port 8000 is still occupied after admission server shutdown" >&2
-            ss -ltnp || true
-            ps -ef --forest | grep -E 'gunicorn|uvicorn' | grep -v grep || true
-            return 1
-          }
-
-          start_server() {
-            local gate="$1"
-            stop_server
-            : > /tmp/gunicorn-admission.log
-            BENCH_API_STACK=async ASYNC_DB_CONCURRENCY="$gate" BENCH_PAGINATION=page \
-              gunicorn core.asgi:application --bind 127.0.0.1:8000 \
-              --workers "$WEB_CONCURRENCY" --worker-class uvicorn_worker.UvicornWorker \
-              --timeout 30 --access-logfile /dev/null --error-logfile /tmp/gunicorn-admission.log --log-level warning &
-            echo $! > /tmp/gunicorn.pid
-            for attempt in $(seq 1 60); do
-              if curl -fsS http://127.0.0.1:8000/health/live/ >/dev/null 2>&1; then return 0; fi
-              sleep 1
-            done
-            echo "admission server failed to become healthy: gate=$gate" >&2
-            cat /tmp/gunicorn-admission.log >&2 || true
-            ss -ltnp || true
-            ps -ef --forest | grep -E 'gunicorn|uvicorn' | grep -v grep || true
-            return 1
-          }
-
-          for gate in 4 6 7; do
-            start_server "$gate"
-            for concurrency in 50 100; do
-              prefix="async-gate${gate}-page-c${concurrency}"
-              BENCH_MODE="async-gate${gate}" BENCH_PAGINATION=page BENCH_URL="$URL" BENCH_TOKEN="$TOKEN" \
-                BENCH_CONCURRENCY="$concurrency" BENCH_REQUESTS=500 BENCH_WARMUP=100 BENCH_TIMEOUT=10 \
-                BENCH_DETAIL_PATH="benchmark-results/${prefix}-requests.ndjson" \
-                python benchmarks/http_benchmark.py > "benchmark-results/${prefix}.json"
-            done
-          done
+          printf '%s\n' "${FAILED_CASES[@]:-}" > benchmark-results/failed-cases.txt
+          stop_server
 
       - name: PostgreSQL query diagnostics
+        if: always()
         run: |
           set -euo pipefail
           python benchmarks/postgres_diagnostics.py > benchmark-results/postgres-plan.json
-          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -At -F $'\t' -c "SELECT calls, total_exec_time, mean_exec_time, rows, shared_blks_hit, shared_blks_read, left(query, 1000) FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 30;" > benchmark-results/pg-stat-statements.tsv
+          PGPASSWORD=erp_bench psql -h 127.0.0.1 -U erp_bench -d erp_bench -At -F $'\t' \
+            -c "SELECT calls, total_exec_time, mean_exec_time, rows, shared_blks_hit, shared_blks_read, left(query, 1000) FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 30;" \
+            > benchmark-results/pg-stat-statements.tsv
 
-      - name: Stop API
+      - name: Build benchmark report
         if: always()
-        run: |
-          if [[ -f /tmp/gunicorn.pid ]]; then
-            PID="$(cat /tmp/gunicorn.pid)"
-            kill -TERM "$PID" 2>/dev/null || true
-            pkill -TERM -P "$PID" 2>/dev/null || true
-            sleep 1
-            pkill -KILL -P "$PID" 2>/dev/null || true
-            kill -KILL "$PID" 2>/dev/null || true
-          fi
-
-      - name: Build detailed report
         run: |
           python - <<'PY'
           import json
@@ -262,9 +206,9 @@ jobs:
 
           root = Path("benchmark-results")
           rows = []
-          inputs = sorted(root.glob("*.json"))
-          inputs = [p for p in inputs if p.name not in {"postgres-plan.json"}]
-          for p in inputs:
+          for p in sorted(root.glob("*.json")):
+              if p.name == "postgres-plan.json":
+                  continue
               case = json.loads(p.read_text())
               if not isinstance(case, dict) or "concurrency" not in case:
                   continue
@@ -293,25 +237,38 @@ jobs:
               )
 
           report = [
-              "# Product endpoint performance benchmark", "",
-              "Each measured request records client-side queue wait (from batch enqueue to HTTP dispatch), full wire latency, and server-side timing headers. Warmup requests are discarded.", "",
-              "| case | mode | pagination | C | wall s | successful RPS | mean ms | p50 | p95 | p99 | queue p50 | queue p95 | DB p50 | pool p50 | successful | failed |",
+              "# Product endpoint performance benchmark",
+              "",
+              "Focused matrix: async/sync × page/cursor × C=1/50/100.",
+              "Each case records wall time, RPS, HTTP latency, client queue wait, DB/pool timing, and per-request details.",
+              "",
+              "| case | mode | pagination | C | wall s | RPS | mean ms | p50 | p95 | p99 | queue p50 | queue p95 | DB p50 | pool p50 | successful | failed |",
               "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
               *rows,
               "",
-              "Every case also has a `*-requests.ndjson` file containing one record per request with enqueue/start/end offsets and server timing headers.",
+              "See `*-requests.ndjson` for request-level enqueue/start/end and server timings.",
+              "See `pg-stat-statements.tsv` and `postgres-plan.json` for PostgreSQL execution details.",
           ]
           (root / "report.md").write_text("\n".join(report) + "\n")
           PY
 
       - name: Add benchmark summary
         if: always()
-        run: cat benchmark-results/report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+        run: cat benchmark-results/report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: async-db-admission-benchmark
+          name: product-endpoint-benchmark
           path: erp-api/benchmark-results/
           if-no-files-found: warn
+
+      - name: Fail when benchmark cases have request errors
+        if: always()
+        run: |
+          if [[ -s benchmark-results/failed-cases.txt ]]; then
+            echo "One or more benchmark cases had request errors:" >&2
+            cat benchmark-results/failed-cases.txt >&2
+            exit 1
+          fi
