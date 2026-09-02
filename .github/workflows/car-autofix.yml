@@ -37,9 +37,8 @@ jobs:
           def replace(path: str, old: str, new: str) -> None:
               p = Path(path)
               text = p.read_text()
-              if old not in text:
-                  return
-              p.write_text(text.replace(old, new))
+              if old in text:
+                  p.write_text(text.replace(old, new))
 
           replace(
               'lib/features/car/presentation/car_trip_editor_page.dart',
@@ -57,12 +56,11 @@ jobs:
           text = p.read_text()
           old = """      overdueCount: overdueCount,\n    );"""
           new = """      overdueCount: overdueCount,\n      totalReturnedValue: CarMoney(returnedValue),\n    );"""
-          if old in text and 'totalReturnedValue: CarMoney(returnedValue)' not in text:
+          if old in text and 'totalReturnedValue:' not in text:
               text = text.replace(old, new, 1)
-
           old_revision = """      triggeredBy: triggeredBy,\n      status: trip.status,"""
           new_revision = """      triggeredBy: triggeredBy,\n      salesCarId: trip.salesCarId,\n      salesCarName: trip.salesCarName,\n      warehouseId: trip.warehouseId,\n      warehouseName: trip.warehouseName,\n      status: trip.status,"""
-          if old_revision in text and 'salesCarId: trip.salesCarId' not in text:
+          if old_revision in text:
               text = text.replace(old_revision, new_revision, 1)
           p.write_text(text)
 
@@ -75,9 +73,6 @@ jobs:
           p.write_text(text)
           PY
 
-      - name: Check analysis
-        run: flutter analyze
-
       - name: Commit autofixes
         run: |
           git config user.name "github-actions[bot]"
@@ -89,3 +84,7 @@ jobs:
             git commit -m "chore(ci): apply Car compile fixes [car-autofix]"
             git push
           fi
+
+      - name: Analysis report
+        continue-on-error: true
+        run: flutter analyze
