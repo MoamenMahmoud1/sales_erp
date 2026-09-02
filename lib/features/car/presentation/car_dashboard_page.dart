@@ -8,7 +8,6 @@ import '../../../core/ui/empty_state.dart';
 import '../../../core/ui/section_header.dart';
 import '../../../core/ui/status_badge.dart';
 import '../application/usecases/load_car_dashboard.dart';
-import '../domain/entities/car_payment_status.dart';
 import '../domain/entities/car_trip_summary_view.dart';
 import 'car_trip_details_page.dart';
 import 'car_trip_editor_page.dart';
@@ -300,7 +299,7 @@ class _StatusHelper {
   const _StatusHelper();
 
   ({StatusType type, String label}) status(CarTripSummaryView trip) {
-    if (trip.remaining == 0) return (type: StatusType.success, label: 'Paid');
+    if (trip.remaining.minorUnits == 0) return (type: StatusType.success, label: 'Paid');
     if (trip.dueDate != null && DateTime.now().isAfter(trip.dueDate!)) {
       return (type: StatusType.error, label: 'Overdue');
     }
