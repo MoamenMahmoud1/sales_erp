@@ -126,7 +126,6 @@ class _SalesErpAppState extends State<SalesErpApp> {
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: (_) => _recordActivity(),
-      onPointerMove: (_) => _recordActivity(),
       child: content,
     );
   }
