@@ -28,6 +28,7 @@ class CarCalculator {
     var totalLoaded = 0;
     var totalReturned = 0;
     var totalSold = 0;
+    var totalReturnedValue = CarMoney.zero;
     var gross = CarMoney.zero;
     var productDiscounts = CarMoney.zero;
     final lines = <CarItemLine>[];
@@ -38,6 +39,7 @@ class CarCalculator {
       totalLoaded += item.loadedCartons;
       totalReturned += item.returnedCartons;
       totalSold += line.soldCartons;
+      totalReturnedValue += item.unitPrice * item.returnedCartons;
       gross += line.grossValue;
       productDiscounts += line.discountAmount;
     }
@@ -50,6 +52,7 @@ class CarCalculator {
       totalLoadedCartons: totalLoaded,
       totalReturnedCartons: totalReturned,
       totalSoldCartons: totalSold,
+      totalReturnedValue: totalReturnedValue,
       grossSubtotal: gross,
       productDiscountTotal: productDiscounts,
       subtotalAfterProducts: subtotalAfterProducts,
