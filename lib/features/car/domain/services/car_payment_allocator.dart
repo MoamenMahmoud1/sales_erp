@@ -18,8 +18,8 @@ class CarPaymentAllocationPlan {
   bool get isFullyAllocated => unallocated == CarMoney.zero;
 }
 
-/// Applies one payment sequentially to the oldest outstanding Car invoices.
-/// Cash and transfer amounts keep their identity throughout the allocation.
+/// Allocates one real payment sequentially to finalized outstanding Car
+/// invoices, oldest first. Open trips are never eligible for payment.
 class CarPaymentAllocator {
   const CarPaymentAllocator({this.calculator = const CarCalculator()});
 
@@ -29,15 +29,22 @@ class CarPaymentAllocator {
     required CarPaymentTransaction transaction,
     required List<CarTrip> trips,
   }) {
+    if (transaction.totalAmount.minorUnits <= 0) {
+      throw ArgumentError('Payment amount must be greater than zero.');
+    }
+
     var cashRemaining = transaction.cashAmount;
     var transferRemaining = transaction.transferAmount;
     final allocations = <CarPaymentAllocation>[];
     final updatedTrips = <CarTrip>[];
 
-    final ordered = [...trips]
-      ..sort((a, b) => a.openedAt.compareTo(b.openedAt));
+    final eligibleTrips = trips.where((trip) => trip.isClosed).toList()
+      ..sort((a, b) {
+        final date = a.openedAt.compareTo(b.openedAt);
+        return date != 0 ? date : a.id.compareTo(b.id);
+      });
 
-    for (final trip in ordered) {
+    for (final trip in eligibleTrips) {
       final summary = calculator.summary(trip);
       var outstanding = calculator.remaining(trip, summaryOf: summary);
       if (outstanding == CarMoney.zero) continue;
@@ -53,15 +60,14 @@ class CarPaymentAllocator {
       final applied = cashAllocation + transferAllocation;
       if (applied == CarMoney.zero) continue;
 
-      final oldCash = trip.payment.cashAmount;
-      final oldTransfer = trip.payment.transferAmount;
-      final updated = trip.copyWith(
-        payment: trip.payment.copyWith(
-          cashAmount: oldCash + cashAllocation,
-          transferAmount: oldTransfer + transferAllocation,
+      updatedTrips.add(
+        trip.copyWith(
+          payment: trip.payment.copyWith(
+            cashAmount: trip.payment.cashAmount + cashAllocation,
+            transferAmount: trip.payment.transferAmount + transferAllocation,
+          ),
         ),
       );
-      updatedTrips.add(updated);
       allocations.add(
         CarPaymentAllocation(
           transactionId: transaction.id,
@@ -84,5 +90,6 @@ class CarPaymentAllocator {
     );
   }
 
-  CarMoney _min(CarMoney a, CarMoney b) => a.minorUnits <= b.minorUnits ? a : b;
+  CarMoney _min(CarMoney a, CarMoney b) =>
+      a.minorUnits <= b.minorUnits ? a : b;
 }
