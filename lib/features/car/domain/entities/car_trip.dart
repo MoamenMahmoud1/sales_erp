@@ -2,22 +2,12 @@ import 'car_load_item.dart';
 import 'car_payment.dart';
 import 'car_trip_status.dart';
 
-/// The main Car aggregate: one daily load/sale/return cycle for a car.
-///
-/// While `open` the loaded quantities can be edited and returns recorded. On
-/// confirmation the trip is `closed`, its display number is finalized and a
-/// new [CarRevision] is captured (revision history lives in `car_revision.dart`).
-///
-/// The car and warehouse names are snapshotted here for stable, historical
-/// display even if the referenced records are renamed later.
-///
-/// Financial values are never stored beyond what is needed to reproduce a
-/// deterministic summary; the authoritative calculations live in the domain
-/// services, so the trips stay precise and API-ready.
+/// One daily load → sell → return cycle for a sales car.
 class CarTrip {
   final int id;
 
-  /// Human-readable display number, e.g. `2026-000123`. Never `#123`.
+  /// Empty while composing a new trip; the repository assigns the stable
+  /// human-readable number when the first save occurs.
   final String displayNumber;
 
   final int salesCarId;
@@ -31,15 +21,12 @@ class CarTrip {
 
   final CarTripStatus status;
   final List<CarLoadItem> items;
-
-  /// Global discount percentage applied to the whole car transaction.
   final double globalDiscountPercent;
-
   final CarPayment payment;
 
   const CarTrip({
     this.id = 0,
-    required this.displayNumber,
+    this.displayNumber = '',
     required this.salesCarId,
     required this.salesCarName,
     required this.warehouseId,
@@ -82,7 +69,8 @@ class CarTrip {
       dueDate: dueDate ?? this.dueDate,
       status: status ?? this.status,
       items: items ?? this.items,
-      globalDiscountPercent: globalDiscountPercent ?? this.globalDiscountPercent,
+      globalDiscountPercent:
+          globalDiscountPercent ?? this.globalDiscountPercent,
       payment: payment ?? this.payment,
     );
   }
