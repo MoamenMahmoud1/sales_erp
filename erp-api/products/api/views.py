@@ -11,6 +11,7 @@ from common.services.async_serializer import AsyncSerializerService
 from common.services.perf_timing import timed_function, view_stage
 from products.api.serializers import CartonPricingSerializer, ProductSerializer
 from products.models import CartonPricing
+from products.services import cache as product_cache
 from products.services.metrics import ProductMetricsQueryService
 
 
@@ -58,6 +59,14 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @timed_function("ProductViewSet.alist")
     async def alist(self, request, *args, **kwargs):
+        cache_key = product_cache.make_key(request.path, request.query_params)
+        if product_cache.enabled():
+            with view_stage("view.redis.cache.get"):
+                cached = await product_cache.get_async(cache_key)
+            if cached is not None:
+                with view_stage("view.redis.cache.hit"):
+                    return Response(cached, status=200)
+
         with view_stage("view.total"):
             with view_stage("view.queryset.build"):
                 queryset = await self.afilter_queryset(self.get_queryset())
@@ -81,14 +90,22 @@ class ProductViewSet(viewsets.ModelViewSet):
                     serializer = self.get_serializer(page, many=True)
                 with view_stage("view.serializer.adata"):
                     data = await AsyncSerializerService.adata(serializer)
-                return await self.get_apaginated_response(data)
+                response = await self.get_apaginated_response(data)
+                if product_cache.enabled() and response.status_code == 200:
+                    with view_stage("view.redis.cache.set"):
+                        await product_cache.set_async(cache_key, response.data)
+                return response
 
             with view_stage("view.serializer.instantiate"):
                 serializer = self.get_serializer(queryset, many=True)
             with view_stage("view.serializer.adata"):
                 data = await AsyncSerializerService.adata(serializer)
             with view_stage("view.response.unpaginated"):
-                return Response(data, status=200)
+                response = Response(data, status=200)
+            if product_cache.enabled():
+                with view_stage("view.redis.cache.set"):
+                    await product_cache.set_async(cache_key, response.data)
+            return response
 
     @timed_function("ProductViewSet.get_queryset")
     def get_queryset(self):
