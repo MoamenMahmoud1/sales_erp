@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end HTTP benchmark with per-request queue and server timings."""
+"""End-to-end HTTP benchmark with request and server timings."""
 
 from __future__ import annotations
 
@@ -59,14 +59,11 @@ async def run_requests(
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     results: list[dict[str, object]] = []
     server_results: list[dict[str, object]] = []
-    queue: asyncio.Queue[tuple[int, float]] = asyncio.Queue()
+    queue: asyncio.Queue[int] = asyncio.Queue()
 
     batch_started = time.perf_counter()
     for index in range(requests):
-        # All logical requests are considered enqueued at batch start. This
-        # makes queue_wait_ms a real client-side load-generator wait, rather
-        # than the time between a worker polling the queue and dispatching.
-        await queue.put((index, batch_started))
+        await queue.put(index)
 
     limits = httpx.Limits(
         max_connections=concurrency,
@@ -83,18 +80,15 @@ async def run_requests(
         async def worker(worker_id: int) -> None:
             while True:
                 try:
-                    index, enqueued_at = queue.get_nowait()
+                    index = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     return
 
                 request_started = time.perf_counter()
-                queue_wait_ms = (request_started - enqueued_at) * 1000
                 row: dict[str, object] = {
                     "request_index": index,
                     "worker_id": worker_id,
-                    "enqueue_offset_ms": (enqueued_at - batch_started) * 1000,
                     "request_start_offset_ms": (request_started - batch_started) * 1000,
-                    "queue_wait_ms": queue_wait_ms,
                 }
 
                 try:
@@ -249,7 +243,6 @@ async def main() -> None:
         if isinstance(row.get("status_code"), int) and 200 <= row["status_code"] < 300
     ]
     latencies = [float(row["request_wire_ms"]) for row in successful_rows]
-    queue_waits = [float(row["queue_wait_ms"]) for row in request_rows]
     errors = Counter(str(row.get("error_type")) for row in request_rows if row.get("error_type"))
 
     stage_samples: dict[str, list[float]] = defaultdict(list)
@@ -310,8 +303,6 @@ async def main() -> None:
         "p99_ms": percentile(latencies, 0.99),
         "latency_min_ms": min(latencies) if latencies else None,
         "latency_max_ms": max(latencies) if latencies else None,
-        "request_queue_wait": summarize(queue_waits),
-        "queue_wait_max_ms": max(queue_waits) if queue_waits else None,
         "request_start_first_ms": min(
             (float(row["request_start_offset_ms"]) for row in request_rows), default=None
         ),
