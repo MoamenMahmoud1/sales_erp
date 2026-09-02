@@ -36,16 +36,24 @@ def enabled() -> bool:
 
 def _db_kwargs() -> dict[str, Any]:
     database = settings.DATABASES["default"]
-    return {
-        "dbname": database["NAME"],
-        "user": database["USER"],
-        "password": database["PASSWORD"],
-        "host": database.get("HOST") or "localhost",
-        "port": database.get("PORT") or "5432",
-        "autocommit": True,
-        "prepare_threshold": int(getattr(settings, "ASYNC_PG_PREPARE_THRESHOLD", 5)),
-        "row_factory": dict_row,
+    options = {
+        key: value
+        for key, value in database.get("OPTIONS", {}).items()
+        if key not in {"pool", "cursor_factory"}
     }
+    options.update(
+        {
+            "dbname": database["NAME"],
+            "user": database["USER"],
+            "password": database["PASSWORD"],
+            "host": database.get("HOST") or "localhost",
+            "port": database.get("PORT") or "5432",
+            "autocommit": True,
+            "prepare_threshold": int(getattr(settings, "ASYNC_PG_PREPARE_THRESHOLD", 5)),
+            "row_factory": dict_row,
+        }
+    )
+    return options
 
 
 def _pool_options() -> dict[str, Any]:
