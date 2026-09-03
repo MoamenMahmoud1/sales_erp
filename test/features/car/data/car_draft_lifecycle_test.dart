@@ -3,7 +3,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:sales_erp/core/storage/app_schema.dart';
 import 'package:sales_erp/features/car/data/local_car_catalog_repository.dart';
-import 'package:sales_erp/features/car/data/local_car_trip_command_repository_v2.dart';
+import 'package:sales_erp/features/car/data/local_car_trip_command_repository.dart';
 import 'package:sales_erp/features/car/domain/entities/car_load_item.dart';
 import 'package:sales_erp/features/car/domain/entities/car_trip.dart';
 import 'package:sales_erp/features/car/domain/entities/car_trip_filter.dart';
@@ -46,7 +46,7 @@ void main() {
     'saving an edit as draft leaves the confirmed invoice unchanged until confirm',
     () async {
       final catalog = LocalCarCatalogRepository(database: () async => database);
-      final repository = LocalCarTripCommandRepositoryV2(
+      final repository = LocalCarTripCommandRepository(
         database: () async => database,
       );
 

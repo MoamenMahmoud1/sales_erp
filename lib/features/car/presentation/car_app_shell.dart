@@ -10,10 +10,10 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/presentation/settings_page.dart';
 import '../../products/presentation/products_page.dart';
-import 'car_daily_dashboard_page_v2.dart';
+import 'car_daily_dashboard_page.dart';
 import 'car_payments_page.dart';
 import 'car_reports_page.dart';
-import 'car_trips_page_v4.dart';
+import 'car_trips_page.dart';
 
 /// Car application shell.
 ///
@@ -57,8 +57,8 @@ class _CarAppShellState extends State<CarAppShell> {
     super.initState();
     _index = 0;
     _pages = [
-      CarDailyDashboardPageV2(onNavigate: _goTo),
-      const CarTripsPageV4(),
+      CarDailyDashboardPage(onNavigate: _goTo),
+      const CarTripsPage(),
       const CarPaymentsPage(),
       ProductsPage(carMode: true),
       const CarReportsPage(),

@@ -17,16 +17,16 @@ import '../domain/services/car_payment_evaluator.dart';
 import 'car_trip_details_page.dart';
 import 'car_trip_editor_page.dart';
 
-class CarDailyDashboardPageV2 extends StatefulWidget {
+class CarDailyDashboardPage extends StatefulWidget {
   final ValueChanged<int>? onNavigate;
 
-  const CarDailyDashboardPageV2({super.key, this.onNavigate});
+  const CarDailyDashboardPage({super.key, this.onNavigate});
 
   @override
-  State<CarDailyDashboardPageV2> createState() => _CarDailyDashboardPageV2State();
+  State<CarDailyDashboardPage> createState() => _CarDailyDashboardPageV2State();
 }
 
-class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
+class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPage>
     with WidgetsBindingObserver {
   final _repository = AppServices.instance.carTripRepository;
   final _calculator = const CarCalculator();
