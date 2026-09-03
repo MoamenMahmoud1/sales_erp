@@ -6,11 +6,8 @@ import '../domain/product_repository.dart';
 import 'api_product_repository.dart';
 import 'local_product_repository.dart';
 
-/// الوضع المختلط (Hybrid) للمنتجات.
-///
-/// نفس فكرة [HybridCustomerRepository]:
-/// قراءة من الـ API مع fallback للمحلي، وكتابة محلية أولًا
-/// + محاولة إرسال للـ API.
+/// Hybrid product storage: local-first writes with API synchronization and
+/// API-first reads with local fallback.
 class HybridProductRepository implements ProductRepository {
   final ApiClient client;
   final LocalProductRepository local;
@@ -42,12 +39,14 @@ class HybridProductRepository implements ProductRepository {
     required double price,
     double? purchasePrice,
     double? sellingPrice,
+    String category = 'General',
   }) async {
     final localId = await local.addProduct(
       name: name,
       price: price,
       purchasePrice: purchasePrice,
       sellingPrice: sellingPrice,
+      category: category,
     );
     try {
       await _remote.addProduct(
@@ -55,6 +54,7 @@ class HybridProductRepository implements ProductRepository {
         price: price,
         purchasePrice: purchasePrice,
         sellingPrice: sellingPrice,
+        category: category,
       );
     } catch (_) {
       // محفوظ محليًا.
@@ -69,6 +69,7 @@ class HybridProductRepository implements ProductRepository {
     required double price,
     double? purchasePrice,
     double? sellingPrice,
+    String category = 'General',
   }) async {
     await local.updateProduct(
       id: id,
@@ -76,6 +77,7 @@ class HybridProductRepository implements ProductRepository {
       price: price,
       purchasePrice: purchasePrice,
       sellingPrice: sellingPrice,
+      category: category,
     );
     try {
       await _remote.updateProduct(
@@ -84,6 +86,7 @@ class HybridProductRepository implements ProductRepository {
         price: price,
         purchasePrice: purchasePrice,
         sellingPrice: sellingPrice,
+        category: category,
       );
     } catch (_) {
       // محفوظ محليًا.
