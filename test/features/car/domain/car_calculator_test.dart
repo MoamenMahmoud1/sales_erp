@@ -13,12 +13,14 @@ void main() {
     required int priceMinor,
     required int loaded,
     int returned = 0,
+    int? purchaseMinor,
     double discountPercent = 0,
   }) {
     return CarLoadItem(
       productId: name.hashCode,
       productName: name,
       unitPrice: CarMoney(priceMinor),
+      purchasePrice: CarMoney(purchaseMinor ?? priceMinor),
       loadedCartons: loaded,
       returnedCartons: returned,
       discountPercent: discountPercent,
@@ -28,6 +30,7 @@ void main() {
   CarTrip trip({
     List<CarLoadItem> items = const [],
     double globalDiscountPercent = 0,
+    CarMoney globalDiscountEgp = CarMoney.zero,
   }) {
     return CarTrip(
       id: 1,
@@ -39,6 +42,7 @@ void main() {
       openedAt: DateTime(2026, 1, 1),
       items: items,
       globalDiscountPercent: globalDiscountPercent,
+      globalDiscountEgp: globalDiscountEgp,
     );
   }
 
@@ -49,6 +53,7 @@ void main() {
       );
       expect(line.soldCartons, 80);
       expect(line.grossValue, const CarMoney(800000));
+      expect(line.netValue, const CarMoney(800000));
     });
 
     test('nothing returned => sold equals loaded', () {
@@ -73,14 +78,8 @@ void main() {
         item(name: 'Q', priceMinor: 10000, loaded: 5, returned: -2),
       ]);
       final issues = calculator.validate(t);
-      expect(
-        issues.any((i) => i.message.contains('loaded cartons cannot be negative')),
-        isTrue,
-      );
-      expect(
-        issues.any((i) => i.message.contains('returned cartons cannot be negative')),
-        isTrue,
-      );
+      expect(issues.any((i) => i.message.contains('loaded cartons cannot be negative')), isTrue);
+      expect(issues.any((i) => i.message.contains('returned cartons cannot be negative')), isTrue);
     });
 
     test('empty product list rejected on close', () {
@@ -97,53 +96,75 @@ void main() {
     });
   });
 
-  group('product discount', () {
-    test('gross = unit x sold, discount independent per product', () {
+  group('buying-side product discount', () {
+    test('product discounts reduce buying cost, never selling revenue', () {
       final t = trip(items: [
-        item(name: 'A', priceMinor: 10000, loaded: 10, discountPercent: 5),
-        item(name: 'B', priceMinor: 15000, loaded: 20, discountPercent: 10),
+        item(name: 'A', priceMinor: 10000, purchaseMinor: 8000, loaded: 10, discountPercent: 5),
+        item(name: 'B', priceMinor: 15000, purchaseMinor: 12000, loaded: 20, discountPercent: 10),
       ]);
       final summary = calculator.summary(t);
-      // A: 10 x 100.00 = 1000.00, 5% -> 50.00; B: 20 x 150.00 = 3000.00, 10% -> 300.00
       expect(summary.grossSubtotal, const CarMoney(400000));
-      expect(summary.productDiscountTotal, const CarMoney(35000));
-      expect(summary.subtotalAfterProducts, const CarMoney(365000));
-      expect(summary.items[0].netValue, const CarMoney(95000));
-      expect(summary.items[1].netValue, const CarMoney(270000));
+      expect(summary.finalTotalSoldValue, const CarMoney(400000));
+      expect(summary.productDiscountTotal, const CarMoney(28000));
+      expect(summary.subtotalAfterProducts, const CarMoney(308000));
+      expect(summary.totalPurchaseCost, const CarMoney(308000));
+      expect(summary.profit, const CarMoney(92000));
+      expect(summary.items[0].netValue, const CarMoney(100000));
+      expect(summary.items[0].purchaseCost, const CarMoney(80000));
+      expect(summary.items[0].discountAmount, const CarMoney(4000));
     });
 
     test('rounds once using integer minor units', () {
       final t = trip(items: [
-        item(name: 'A', priceMinor: 333, loaded: 3, discountPercent: 50),
+        item(name: 'A', priceMinor: 500, purchaseMinor: 333, loaded: 3, discountPercent: 50),
       ]);
       final summary = calculator.summary(t);
       expect(summary.productDiscountTotal, const CarMoney(500));
       expect(summary.subtotalAfterProducts, const CarMoney(499));
+      expect(summary.finalTotalSoldValue, const CarMoney(1500));
     });
   });
 
-  group('global discount', () {
-    test('applied after product discounts, once', () {
+  group('global buying discounts', () {
+    test('percentage applies to buying cost while selling stays unchanged', () {
       final t = trip(
-        items: [item(name: 'A', priceMinor: 100000, loaded: 10)],
+        items: [item(name: 'A', priceMinor: 100000, purchaseMinor: 70000, loaded: 10)],
         globalDiscountPercent: 10,
       );
       final summary = calculator.summary(t);
-      expect(summary.subtotalAfterProducts, const CarMoney(1000000));
-      expect(summary.globalDiscountAmount, const CarMoney(100000));
-      expect(summary.finalTotalSoldValue, const CarMoney(900000));
+      expect(summary.grossSubtotal, const CarMoney(1000000));
+      expect(summary.globalDiscountPercentAmount, const CarMoney(70000));
+      expect(summary.globalDiscountFixedAmount, CarMoney.zero);
+      expect(summary.globalDiscountAmount, const CarMoney(70000));
+      expect(summary.totalPurchaseCost, const CarMoney(630000));
+      expect(summary.finalTotalSoldValue, const CarMoney(1000000));
+      expect(summary.profit, const CarMoney(370000));
     });
 
-    test('product + global combined do not double-discount', () {
+    test('fixed EGP discount is added on buying cost only', () {
       final t = trip(
-        items: [item(name: 'A', priceMinor: 100000, loaded: 10, discountPercent: 10)],
+        items: [item(name: 'A', priceMinor: 100000, purchaseMinor: 70000, loaded: 10)],
         globalDiscountPercent: 10,
+        globalDiscountEgp: const CarMoney(50000),
       );
       final summary = calculator.summary(t);
-      expect(summary.productDiscountTotal, const CarMoney(100000));
-      expect(summary.subtotalAfterProducts, const CarMoney(900000));
-      expect(summary.globalDiscountAmount, const CarMoney(90000));
-      expect(summary.finalTotalSoldValue, const CarMoney(810000));
+      expect(summary.globalDiscountPercentAmount, const CarMoney(70000));
+      expect(summary.globalDiscountFixedAmount, const CarMoney(50000));
+      expect(summary.globalDiscountAmount, const CarMoney(120000));
+      expect(summary.totalPurchaseCost, const CarMoney(580000));
+      expect(summary.finalTotalSoldValue, const CarMoney(1000000));
+      expect(summary.profit, const CarMoney(420000));
+    });
+
+    test('fixed discount cannot exceed remaining buying cost', () {
+      final t = trip(
+        items: [item(name: 'A', priceMinor: 100000, purchaseMinor: 70000, loaded: 10)],
+        globalDiscountEgp: const CarMoney(700001),
+      );
+      expect(
+        calculator.validate(t).any((i) => i.message.contains('cannot exceed the remaining buying cost')),
+        isTrue,
+      );
     });
   });
 
