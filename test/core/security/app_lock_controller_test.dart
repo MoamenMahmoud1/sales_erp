@@ -4,6 +4,8 @@ import 'package:flutter/widgets.dart';
 import 'package:sales_erp/core/security/app_lock_controller.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('starts locked and remains unlocked for an active session', () async {
     var now = DateTime(2026, 1, 1, 12);
     final controller = AppLockController(now: () => now);
