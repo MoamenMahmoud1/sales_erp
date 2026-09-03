@@ -81,7 +81,8 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     _available = available;
     _deviceCredentialAvailable = credentialAvailable;
     final methods = _methods;
-    final preferred = methods.isEmpty ? _AuthMethod.deviceCredential : methods.first;
+    final preferred =
+        methods.isEmpty ? _AuthMethod.deviceCredential : methods.first;
 
     setState(() {
       _method = preferred;
@@ -303,8 +304,29 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
         for (final method in methods)
           ChoiceChip(
             selected: _method == method,
-            avatar: Icon(_methodIconFor(method), size: 18),
+            avatar: Icon(
+              _methodIconFor(method),
+              size: 18,
+              color: _method == method
+                  ? scheme.primary
+                  : scheme.onSurfaceVariant,
+            ),
             label: Text(_methodLabel(method)),
+            backgroundColor: scheme.surfaceContainerHighest,
+            selectedColor: scheme.primaryContainer,
+            side: BorderSide(
+              color: _method == method
+                  ? scheme.primary
+                  : scheme.outlineVariant,
+              width: _method == method ? 1.5 : 1,
+            ),
+            labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: _method == method
+                  ? scheme.onPrimaryContainer
+                  : scheme.onSurface,
+              fontWeight: _method == method ? FontWeight.w700 : FontWeight.w600,
+            ),
+            showCheckmark: false,
             onSelected: _attemptInFlight ? null : (_) => _attempt(method),
           ),
       ],
@@ -386,6 +408,13 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                               : 'Use ${_methodLabel(_method)}',
                         ),
                         style: FilledButton.styleFrom(
+                          backgroundColor: scheme.primary,
+                          foregroundColor: scheme.onPrimary,
+                          disabledBackgroundColor:
+                              scheme.primary.withValues(alpha: 0.55),
+                          disabledForegroundColor:
+                              scheme.onPrimary.withValues(alpha: 0.85),
+                          elevation: 2,
                           minimumSize: const Size.fromHeight(54),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
