@@ -3,7 +3,7 @@ name: Flutter CI
 on:
   workflow_dispatch:
   push:
-    branches: [main, refactor/car-architecture]
+    branches: [main, refactor/car-architecture, fix/car-dashboard-card-cleanup]
   pull_request:
     branches: [main]
 
