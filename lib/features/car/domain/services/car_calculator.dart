@@ -5,28 +5,27 @@ import '../entities/car_trip.dart';
 import '../entities/car_validation_issue.dart';
 import '../entities/money.dart';
 
-/// Authoritative quantity, discount and financial calculations for Car trips.
+/// Authoritative quantity and buying-side discount calculations for Car trips.
 class CarCalculator {
   const CarCalculator();
 
-  int soldCartons(CarLoadItem item) =>
-      item.loadedCartons - item.returnedCartons;
+  int soldCartons(CarLoadItem item) => item.loadedCartons - item.returnedCartons;
 
   CarItemLine itemLine(CarLoadItem item) {
     final sold = soldCartons(item);
-    final gross = item.sellingPrice * sold;
-    final discount = gross.percentOf(item.discountPercent);
-    final net = gross - discount;
+    final sellingValue = item.sellingPrice * sold;
     final purchaseCost = item.purchasePrice * sold;
+    final discount = purchaseCost.percentOf(item.discountPercent);
+    final purchaseAfterDiscount = purchaseCost - discount;
 
     return CarItemLine(
       item: item,
       soldCartons: sold,
-      grossValue: gross,
+      grossValue: sellingValue,
       discountAmount: discount,
-      netValue: net,
+      netValue: sellingValue,
       purchaseCost: purchaseCost,
-      profitBeforeGlobalDiscount: net - purchaseCost,
+      profitBeforeGlobalDiscount: sellingValue - purchaseAfterDiscount,
     );
   }
 
@@ -35,7 +34,7 @@ class CarCalculator {
     var totalReturned = 0;
     var totalSold = 0;
     var totalReturnedValue = CarMoney.zero;
-    var gross = CarMoney.zero;
+    var sellingRevenue = CarMoney.zero;
     var productDiscounts = CarMoney.zero;
     var purchaseCost = CarMoney.zero;
     final lines = <CarItemLine>[];
@@ -47,30 +46,37 @@ class CarCalculator {
       totalReturned += item.returnedCartons;
       totalSold += line.soldCartons;
       totalReturnedValue += item.sellingPrice * item.returnedCartons;
-      gross += line.grossValue;
+      sellingRevenue += line.grossValue;
       productDiscounts += line.discountAmount;
       purchaseCost += line.purchaseCost;
     }
 
-    final subtotalAfterProducts = gross - productDiscounts;
-    final globalDiscount = subtotalAfterProducts.percentOf(
-      trip.globalDiscountPercent,
-    );
-    final finalValue = subtotalAfterProducts - globalDiscount;
-    final profit = finalValue - purchaseCost;
+    final purchaseAfterProducts = purchaseCost - productDiscounts;
+    final globalPercentAmount =
+        purchaseAfterProducts.percentOf(trip.globalDiscountPercent);
+    final afterPercent = purchaseAfterProducts - globalPercentAmount;
+    final fixedGlobalAmount =
+        trip.globalDiscountEgp.minorUnits > afterPercent.minorUnits
+            ? afterPercent
+            : trip.globalDiscountEgp;
+    final globalDiscountAmount = globalPercentAmount + fixedGlobalAmount;
+    final finalPurchaseCost = afterPercent - fixedGlobalAmount;
+    final profit = sellingRevenue - finalPurchaseCost;
 
     return CarFinancialSummary(
       totalLoadedCartons: totalLoaded,
       totalReturnedCartons: totalReturned,
       totalSoldCartons: totalSold,
       totalReturnedValue: totalReturnedValue,
-      grossSubtotal: gross,
+      grossSubtotal: sellingRevenue,
       productDiscountTotal: productDiscounts,
-      subtotalAfterProducts: subtotalAfterProducts,
+      subtotalAfterProducts: purchaseAfterProducts,
       globalDiscountPercent: trip.globalDiscountPercent,
-      globalDiscountAmount: globalDiscount,
-      finalTotalSoldValue: finalValue,
-      totalPurchaseCost: purchaseCost,
+      globalDiscountPercentAmount: globalPercentAmount,
+      globalDiscountFixedAmount: fixedGlobalAmount,
+      globalDiscountAmount: globalDiscountAmount,
+      finalTotalSoldValue: sellingRevenue,
+      totalPurchaseCost: finalPurchaseCost,
       profit: profit,
       items: List<CarItemLine>.unmodifiable(lines),
     );
@@ -92,9 +98,7 @@ class CarCalculator {
 
     for (var i = 0; i < trip.items.length; i++) {
       final item = trip.items[i];
-      final label = item.productName.isEmpty
-          ? 'Product ${i + 1}'
-          : item.productName;
+      final label = item.productName.isEmpty ? 'Product ${i + 1}' : item.productName;
 
       if (item.loadedCartons < 0) {
         issues.add(CarValidationIssue(
@@ -139,6 +143,21 @@ class CarCalculator {
         message: 'Global discount must be between 0 and 100%.',
       ));
     }
+    if (trip.globalDiscountEgp.isNegative) {
+      issues.add(const CarValidationIssue(
+        message: 'Global discount EGP cannot be negative.',
+      ));
+    }
+
+    final computed = summary(trip);
+    final maxFixed = computed.subtotalAfterProducts -
+        computed.globalDiscountPercentAmount;
+    if (trip.globalDiscountEgp > maxFixed) {
+      issues.add(const CarValidationIssue(
+        message: 'Global discount EGP cannot exceed the remaining buying cost.',
+      ));
+    }
+
     return issues;
   }
 
