@@ -1,1 +1,1 @@
-export 'car_trip_details_page_v3.dart';
+export 'car_trip_details_page_v4.dart';
