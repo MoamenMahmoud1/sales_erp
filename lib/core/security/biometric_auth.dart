@@ -42,6 +42,18 @@ class BiometricAuth {
     }
   }
 
+  /// Clears any stale native authentication session before starting a new one.
+  ///
+  /// This makes Back/Cancel from the OS prompt recoverable so the next
+  /// explicit authentication button press starts a fresh native request.
+  Future<void> resetAuthenticationSession() async {
+    try {
+      await _auth.stopAuthentication();
+    } catch (_) {
+      // No active authentication request is a valid state.
+    }
+  }
+
   /// Requests biometric authentication.
   ///
   /// [method] is the method selected by the app UI and controls the prompt
@@ -55,6 +67,8 @@ class BiometricAuth {
       if (available.isEmpty || !await _auth.canCheckBiometrics) {
         return BiometricResult.unavailable;
       }
+
+      await resetAuthenticationSession();
 
       final label = switch (method) {
         BiometricMethod.face => 'Face',
@@ -81,6 +95,8 @@ class BiometricAuth {
     if (!await isDeviceSupported()) return BiometricResult.unavailable;
 
     try {
+      await resetAuthenticationSession();
+
       final ok = await _auth.authenticate(
         localizedReason: reason,
         biometricOnly: false,
