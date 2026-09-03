@@ -1,6 +1,7 @@
 name: Flutter CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, refactor/car-architecture]
   pull_request:
