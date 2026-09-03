@@ -24,20 +24,38 @@ class ApiProductRepository implements ProductRepository {
   }
 
   @override
-  Future<int> addProduct({required String name, required double price}) async {
+  Future<int> addProduct({
+    required String name,
+    required double price,
+    double? purchasePrice,
+    double? sellingPrice,
+  }) async {
+    final normalizedSellingPrice = sellingPrice ?? price;
+    final normalizedPurchasePrice = purchasePrice ?? normalizedSellingPrice;
+
     final response = await client.dio.post('/products/', data: {
       'name': name.trim(),
-      'price': price,
-      'stock_quantity': 0,
+      'purchase_price': normalizedPurchasePrice,
+      'selling_price': normalizedSellingPrice,
     });
     return (response.data['id'] as num).toInt();
   }
 
   @override
-  Future<void> updateProduct({required int id, required String name, required double price}) async {
+  Future<void> updateProduct({
+    required int id,
+    required String name,
+    required double price,
+    double? purchasePrice,
+    double? sellingPrice,
+  }) async {
+    final normalizedSellingPrice = sellingPrice ?? price;
+    final normalizedPurchasePrice = purchasePrice ?? normalizedSellingPrice;
+
     await client.dio.patch('/products/$id/', data: {
       'name': name.trim(),
-      'price': price,
+      'purchase_price': normalizedPurchasePrice,
+      'selling_price': normalizedSellingPrice,
     });
   }
 
