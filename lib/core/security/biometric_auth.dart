@@ -14,7 +14,6 @@ enum BiometricResult {
 class BiometricAuth {
   final LocalAuthentication _auth;
   Set<BiometricType>? _availableCache;
-  bool _nativeCleanupRequired = false;
 
   BiometricAuth([LocalAuthentication? auth])
       : _auth = auth ?? LocalAuthentication();
@@ -43,32 +42,29 @@ class BiometricAuth {
     }
   }
 
-  /// Clears a stale native authentication state before a retry.
+  /// Cancels any stale native authentication request.
   ///
-  /// We intentionally do this only after a previous attempt completed or was
-  /// canceled. Calling stopAuthentication immediately before every new
-  /// authenticate() can race the platform's completion callback.
-  Future<void> resetAuthenticationSession() async {
+  /// Android can keep the previous biometric prompt alive briefly after the
+  /// user presses Back/Cancel. We only call this as recovery between attempts;
+  /// never while a fresh request is being started.
+  Future<void> _clearStaleAuthentication() async {
     try {
       await _auth.stopAuthentication();
     } catch (_) {
-      // No active authentication request is a valid state.
+      // No active request is a valid state.
     }
-
-    // Android/OEM biometric dialogs can need a short turn to finish tearing
-    // down the previous native request before another prompt is accepted.
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-    _nativeCleanupRequired = false;
   }
 
+  /// Starts a fresh native biometric request.
+  ///
+  /// After a user cancellation some Android implementations can briefly
+  /// report authInProgress. A single recovery retry clears that stale native
+  /// state, waits for the dismissal to settle, and starts a new request.
   Future<bool> _authenticateNative({
     required String localizedReason,
     required bool biometricOnly,
+    bool allowRecovery = true,
   }) async {
-    if (_nativeCleanupRequired) {
-      await resetAuthenticationSession();
-    }
-
     try {
       return await _auth.authenticate(
         localizedReason: localizedReason,
@@ -77,23 +73,18 @@ class BiometricAuth {
         sensitiveTransaction: false,
       );
     } on LocalAuthException catch (error) {
-      if (error.code != LocalAuthExceptionCode.authInProgress) rethrow;
-
-      // Recover once from an OEM/plugin race where the canceled request has
-      // not cleared its native in-progress flag yet.
-      await resetAuthenticationSession();
-      try {
-        return await _auth.authenticate(
-          localizedReason: localizedReason,
-          biometricOnly: biometricOnly,
-          persistAcrossBackgrounding: false,
-          sensitiveTransaction: false,
-        );
-      } finally {
-        _nativeCleanupRequired = true;
+      if (!allowRecovery || error.code != LocalAuthExceptionCode.authInProgress) {
+        rethrow;
       }
-    } finally {
-      _nativeCleanupRequired = true;
+
+      await _clearStaleAuthentication();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      return _authenticateNative(
+        localizedReason: localizedReason,
+        biometricOnly: biometricOnly,
+        allowRecovery: false,
+      );
     }
   }
 
@@ -116,32 +107,48 @@ class BiometricAuth {
         BiometricMethod.fingerprint => 'fingerprint',
         BiometricMethod.generic => 'biometric authentication',
       };
-      final ok = await _authenticateNative(
+
+      return await _authenticateWithRecovery(
         localizedReason: 'Use $label to unlock Sales ERP.',
         biometricOnly: true,
       );
-      return ok ? BiometricResult.success : BiometricResult.failed;
     } catch (_) {
-      _nativeCleanupRequired = true;
+      await _clearStaleAuthentication();
       return BiometricResult.failed;
     }
   }
 
-  /// Uses the device credential flow (PIN, pattern, password or passcode).
-  /// The credential is entered in the OS UI and is never exposed to the app.
   Future<BiometricResult> authenticateDeviceCredential({
     String reason = 'Unlock Sales ERP with your phone PIN or password.',
   }) async {
     if (!await isDeviceSupported()) return BiometricResult.unavailable;
 
+    return _authenticateWithRecovery(
+      localizedReason: reason,
+      biometricOnly: false,
+    );
+  }
+
+  Future<BiometricResult> _authenticateWithRecovery({
+    required String localizedReason,
+    required bool biometricOnly,
+  }) async {
     try {
+      // Clear only an already-finished/stale request before a user-triggered
+      // attempt. This is deliberately followed by a small settling delay.
+      await _clearStaleAuthentication();
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
       final ok = await _authenticateNative(
-        localizedReason: reason,
-        biometricOnly: false,
+        localizedReason: localizedReason,
+        biometricOnly: biometricOnly,
       );
       return ok ? BiometricResult.success : BiometricResult.failed;
+    } on LocalAuthException {
+      await _clearStaleAuthentication();
+      return BiometricResult.failed;
     } catch (_) {
-      _nativeCleanupRequired = true;
+      await _clearStaleAuthentication();
       return BiometricResult.failed;
     }
   }
