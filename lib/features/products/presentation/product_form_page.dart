@@ -37,14 +37,15 @@ class _ProductFormPageState extends State<ProductFormPage> {
   @override
   void initState() {
     super.initState();
-
     final product = widget.product;
     _nameController = TextEditingController(text: product?.name ?? '');
     _priceController = TextEditingController(
       text: product == null ? '' : product.sellingPrice.toStringAsFixed(2),
     );
     _purchasePriceController = TextEditingController(
-      text: product == null ? '' : product.purchasePrice.toStringAsFixed(2),
+      text: product == null
+          ? ''
+          : product.purchasePrice.toStringAsFixed(2),
     );
   }
 
@@ -67,14 +68,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
     if (value == null || value.trim().isEmpty) {
       return '$label is required.';
     }
-
     final price = double.tryParse(value.trim());
-    if (price == null) {
-      return 'Enter a valid $label.';
-    }
-    if (price <= 0) {
-      return '$label must be greater than zero.';
-    }
+    if (price == null) return 'Enter a valid $label.';
+    if (price <= 0) return '$label must be greater than zero.';
     return null;
   }
 
@@ -86,19 +82,17 @@ class _ProductFormPageState extends State<ProductFormPage> {
     final sellingPrice = double.parse(_priceController.text.trim());
     final purchasePrice = widget.carMode
         ? double.parse(_purchasePriceController.text.trim())
-        : sellingPrice;
+        : (widget.product?.purchasePrice ?? sellingPrice);
 
     setState(() => _isSaving = true);
 
     try {
       final productId = widget.isEditing
-          ? await _dataSource.updateProduct(
-              id: widget.product!.id,
-              name: name,
-              price: sellingPrice,
-              purchasePrice: purchasePrice,
-              sellingPrice: sellingPrice,
-            ).then((_) => widget.product!.id)
+          ? await _updateProduct(
+              name,
+              purchasePrice,
+              sellingPrice,
+            )
           : await _dataSource.addProduct(
               name: name,
               price: sellingPrice,
@@ -124,6 +118,22 @@ class _ProductFormPageState extends State<ProductFormPage> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  Future<int> _updateProduct(
+    String name,
+    double purchasePrice,
+    double sellingPrice,
+  ) async {
+    final product = widget.product!;
+    await _dataSource.updateProduct(
+      id: product.id,
+      name: name,
+      price: sellingPrice,
+      purchasePrice: purchasePrice,
+      sellingPrice: sellingPrice,
+    );
+    return product.id;
   }
 
   InputDecoration _decoration({required String label, required IconData icon}) {
