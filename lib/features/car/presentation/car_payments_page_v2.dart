@@ -11,6 +11,7 @@ import '../domain/entities/car_payment_allocation.dart';
 import '../domain/entities/car_payment_transaction.dart';
 import '../domain/entities/car_trip.dart';
 import '../domain/entities/money.dart';
+import '../domain/services/car_calculator.dart';
 import 'animations/payment_distribution_animation.dart';
 import 'car_trip_details_page.dart';
 
@@ -158,8 +159,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
 
   int _totalFor(CarTrip trip) => _calculator.summary(trip).finalTotalSoldValue.minorUnits;
 
-  double _value(TextEditingController controller) =>
-      double.tryParse(controller.text.trim().replaceAll(',', '')) ?? 0;
+  double _value(TextEditingController controller) => double.tryParse(controller.text.trim().replaceAll(',', '')) ?? 0;
 
   CarMoney _money(double amount) => CarMoney.fromUnits(amount);
 
