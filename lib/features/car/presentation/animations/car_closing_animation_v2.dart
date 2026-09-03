@@ -51,7 +51,7 @@ class _CarClosingAnimationState extends State<CarClosingAnimation>
     curve: const Interval(.80, 1, curve: Curves.easeOutCubic),
   );
 
-  bool _dismissing = false;
+  bool _speedingUp = false;
 
   bool get _completed => _controller.status == AnimationStatus.completed;
 
@@ -68,18 +68,15 @@ class _CarClosingAnimationState extends State<CarClosingAnimation>
   }
 
   void _handleTap() {
-    if (_dismissing) return;
-    if (_completed) {
-      Navigator.of(context).pop(true);
-      return;
-    }
-    setState(() => _dismissing = true);
-  }
-
-  void _finishDismiss() {
-    if (!_dismissing || !mounted) return;
-    widget.onComplete?.call();
-    Navigator.of(context).pop(true);
+    if (_completed || _speedingUp) return;
+    setState(() => _speedingUp = true);
+    // Do not skip the closing animation. Make the remaining part run quickly
+    // so the truck visibly rushes to the warehouse and the success state lands.
+    _controller.animateTo(
+      1,
+      duration: const Duration(milliseconds: 360),
+      curve: Curves.easeInCubic,
+    );
   }
 
   @override
@@ -90,164 +87,158 @@ class _CarClosingAnimationState extends State<CarClosingAnimation>
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: _handleTap,
-      child: AnimatedOpacity(
-        opacity: _dismissing ? 0 : 1,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-        onEnd: _finishDismiss,
-        child: Material(
-          color: scheme.surface,
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: AnimatedBuilder(
-                animation: _controller,
-                builder: (context, _) => SingleChildScrollView(
-                  physics: const ClampingScrollPhysics(),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const SizedBox(height: 10),
-                      const Text(
-                        'Finalizing Car trip',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '${widget.displayNumber} · processing load and sale',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: scheme.onSurfaceVariant),
-                      ),
-                      const SizedBox(height: 24),
-                      SizedBox(
-                        height: 150,
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final rightLimit = constraints.maxWidth - 92;
-                            final left = ((rightLimit) * _truck.value).clamp(-96.0, rightLimit);
-                            return Stack(
-                              alignment: Alignment.bottomCenter,
-                              children: [
-                                Positioned(
-                                  left: 14,
-                                  right: 14,
-                                  bottom: 22,
+      child: Material(
+        color: scheme.surface,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) => SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Finalizing Car trip',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${widget.displayNumber} · processing load and sale',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      height: 150,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final rightLimit = constraints.maxWidth - 92;
+                          final left = ((rightLimit) * _truck.value).clamp(-96.0, rightLimit);
+                          return Stack(
+                            alignment: Alignment.bottomCenter,
+                            children: [
+                              Positioned(
+                                left: 14,
+                                right: 14,
+                                bottom: 22,
+                                child: Container(
+                                  height: 5,
+                                  decoration: BoxDecoration(
+                                    color: scheme.outlineVariant,
+                                    borderRadius: BorderRadius.circular(99),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                right: 18,
+                                bottom: 26,
+                                child: Transform.scale(
+                                  scale: .92 + (_success.value * .08),
                                   child: Container(
-                                    height: 5,
+                                    width: 92,
+                                    height: 94,
                                     decoration: BoxDecoration(
-                                      color: scheme.outlineVariant,
-                                      borderRadius: BorderRadius.circular(99),
-                                    ),
-                                  ),
-                                ),
-                                Positioned(
-                                  right: 18,
-                                  bottom: 26,
-                                  child: Transform.scale(
-                                    scale: .92 + (_success.value * .08),
-                                    child: Container(
-                                      width: 92,
-                                      height: 94,
-                                      decoration: BoxDecoration(
-                                        color: scheme.primaryContainer,
-                                        borderRadius: BorderRadius.circular(20),
-                                        border: Border.all(
-                                          color: scheme.primary.withValues(alpha: .35),
-                                        ),
-                                      ),
-                                      child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(Icons.inventory_2_rounded, color: scheme.primary, size: 32),
-                                          const SizedBox(height: 5),
-                                          const Text('WAREHOUSE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800)),
-                                        ],
+                                      color: scheme.primaryContainer,
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: scheme.primary.withValues(alpha: .35),
                                       ),
                                     ),
-                                  ),
-                                ),
-                                Positioned(
-                                  left: left,
-                                  bottom: 26,
-                                  child: Transform.translate(
-                                    offset: Offset(0, -12 * _box.value),
-                                    child: Row(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.local_shipping_rounded, size: 70, color: scheme.primary),
-                                        const SizedBox(width: 3),
-                                        if (_box.value > .2)
-                                          Row(
-                                            children: [
-                                              for (var i = 0; i < (_box.value * 4).floor().clamp(0, 4); i++)
-                                                Padding(
-                                                  padding: const EdgeInsets.only(right: 3),
-                                                  child: Icon(Icons.inventory_2_rounded, size: 18, color: scheme.secondary),
-                                                ),
-                                            ],
-                                          ),
+                                        Icon(Icons.inventory_2_rounded, color: scheme.primary, size: 32),
+                                        const SizedBox(height: 5),
+                                        const Text('WAREHOUSE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800)),
                                       ],
                                     ),
                                   ),
                                 ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      _MetricRow(label: 'Loaded', value: summary.totalLoadedCartons, progress: _numbers.value, icon: Icons.outbox_rounded),
-                      _MetricRow(label: 'Returned', value: summary.totalReturnedCartons, progress: Curves.easeOut.transform((_numbers.value - .18).clamp(0, 1)), icon: Icons.assignment_return_rounded),
-                      _MetricRow(label: 'Sold', value: summary.totalSoldCartons, progress: Curves.easeOut.transform((_numbers.value - .32).clamp(0, 1)), icon: Icons.point_of_sale_rounded),
-                      const SizedBox(height: 12),
-                      Opacity(
-                        opacity: _success.value,
-                        child: Transform.scale(
-                          scale: .94 + .06 * _success.value,
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: scheme.primaryContainer,
-                              borderRadius: BorderRadius.circular(22),
-                            ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  backgroundColor: scheme.primary,
-                                  foregroundColor: scheme.onPrimary,
-                                  child: const Icon(Icons.check_rounded),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                              ),
+                              Positioned(
+                                left: left,
+                                bottom: 26,
+                                child: Transform.translate(
+                                  offset: Offset(0, -12 * _box.value),
+                                  child: Row(
                                     children: [
-                                      const Text('Car trip confirmed', style: TextStyle(fontWeight: FontWeight.w900)),
-                                      const SizedBox(height: 3),
-                                      Text(
-                                        '${summary.finalTotalSoldValue.units.toStringAsFixed(2)} EGP selling total',
-                                        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
-                                      ),
+                                      Icon(Icons.local_shipping_rounded, size: 70, color: scheme.primary),
+                                      const SizedBox(width: 3),
+                                      if (_box.value > .2)
+                                        Row(
+                                          children: [
+                                            for (var i = 0; i < (_box.value * 4).floor().clamp(0, 4); i++)
+                                              Padding(
+                                                padding: const EdgeInsets.only(right: 3),
+                                                child: Icon(Icons.inventory_2_rounded, size: 18, color: scheme.secondary),
+                                              ),
+                                          ],
+                                        ),
                                     ],
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    _MetricRow(label: 'Loaded', value: summary.totalLoadedCartons, progress: _numbers.value, icon: Icons.outbox_rounded),
+                    _MetricRow(label: 'Returned', value: summary.totalReturnedCartons, progress: Curves.easeOut.transform((_numbers.value - .18).clamp(0, 1)), icon: Icons.assignment_return_rounded),
+                    _MetricRow(label: 'Sold', value: summary.totalSoldCartons, progress: Curves.easeOut.transform((_numbers.value - .32).clamp(0, 1)), icon: Icons.point_of_sale_rounded),
+                    const SizedBox(height: 12),
+                    Opacity(
+                      opacity: _success.value,
+                      child: Transform.scale(
+                        scale: .94 + .06 * _success.value,
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: scheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(22),
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                backgroundColor: scheme.primary,
+                                foregroundColor: scheme.onPrimary,
+                                child: const Icon(Icons.check_rounded),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('Car trip confirmed', style: TextStyle(fontWeight: FontWeight.w900)),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${summary.finalTotalSoldValue.units.toStringAsFixed(2)} EGP selling total',
+                                      style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                      if (_completed) ...[
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: () => Navigator.of(context).pop(true),
-                          icon: const Icon(Icons.receipt_long_rounded),
-                          label: const Text('View invoice details'),
-                          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
+                    ),
+                    if (_completed) ...[
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        icon: const Icon(Icons.receipt_long_rounded),
+                        label: const Text('View invoice details'),
+                        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                      ),
                     ],
-                  ),
+                    const SizedBox(height: 12),
+                  ],
                 ),
               ),
             ),
