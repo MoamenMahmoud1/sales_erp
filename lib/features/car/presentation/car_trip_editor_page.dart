@@ -4,7 +4,7 @@ import '../../../core/repositories/app_services.dart';
 import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/dialogs.dart';
 import '../../products/domain/product.dart';
-import '../../products/presentation/products_page.dart';
+import '../../products/presentation/product_form_page.dart';
 import '../application/usecases/confirm_car_trip.dart';
 import '../application/usecases/create_and_confirm_car_trip.dart';
 import '../application/usecases/create_car_trip.dart';
@@ -12,13 +12,14 @@ import '../application/usecases/revise_car_trip.dart';
 import '../application/usecases/update_car_trip_draft.dart';
 import '../domain/entities/car_load_item.dart';
 import '../domain/entities/car_trip.dart';
-import '../domain/entities/car_trip_status.dart';
 import '../domain/entities/money.dart';
 import '../domain/entities/sales_car.dart';
 import '../domain/entities/warehouse.dart';
 import '../domain/services/car_calculator.dart';
 import '../presentation/animations/car_closing_animation.dart';
 import 'widgets/car_metric_card.dart';
+
+enum _CreateProductAction { create }
 
 class CarTripEditorPage extends StatefulWidget {
   final int? tripId;
@@ -123,11 +124,6 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         _error = '$error';
       });
     }
-  }
-
-  Future<void> _reloadProducts() async {
-    _productsList = await _products.getProducts();
-    if (mounted) setState(() {});
   }
 
   List<CarLoadItem> get _items => [
@@ -264,12 +260,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     final available = _productsList
         .where((product) => !_loaded.containsKey(product.id))
         .toList(growable: false);
-    if (available.isEmpty) {
-      _showError('All available products are already on this Car invoice.');
-      return;
-    }
 
-    final chosen = await showModalBottomSheet<Product>(
+    final chosen = await showModalBottomSheet<Object?>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
@@ -292,20 +284,40 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             ListTile(
               leading: const Icon(Icons.inventory_2_outlined),
               title: const Text('Create a new product'),
-              onTap: () async {
-                Navigator.of(context).pop();
-                await Navigator.of(this.context).push(
-                  MaterialPageRoute(builder: (_) => const ProductsPage()),
-                );
-                await _reloadProducts();
-              },
+              onTap: () =>
+                  Navigator.of(context).pop(_CreateProductAction.create),
             ),
           ],
         ),
       ),
     );
 
-    if (chosen == null || !mounted) return;
+    if (!mounted || chosen == null) return;
+
+    if (chosen == _CreateProductAction.create) {
+      final created = await Navigator.of(context).push<Product>(
+        MaterialPageRoute(
+          builder: (_) => ProductFormPage(repository: _products),
+        ),
+      );
+
+      if (!mounted || created == null) return;
+
+      _productsList = [..._productsList, created]
+        ..sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+      setState(() {
+        _loaded[created.id] = 1;
+        _returned[created.id] = 0;
+        _discounts[created.id] = 0;
+        _unitPrices[created.id] = CarMoney.fromUnits(created.price);
+        _productNames[created.id] = created.name;
+      });
+      return;
+    }
+
+    if (chosen is! Product) return;
     setState(() {
       _loaded[chosen.id] = 1;
       _returned[chosen.id] = 0;

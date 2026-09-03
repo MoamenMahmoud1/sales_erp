@@ -301,11 +301,22 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
           Row(
             children: [
               _flowMetric('Loaded', summary.totalLoadedCartons, Icons.outbox_rounded, scheme.primary),
-              const Icon(Icons.arrow_forward_rounded, size: 18),
+              const Icon(Icons.remove_rounded, size: 18),
               _flowMetric('Returned', summary.totalReturnedCartons, Icons.assignment_return_rounded, scheme.error),
-              const Icon(Icons.arrow_forward_rounded, size: 18),
+              const Icon(Icons.drag_handle_rounded, size: 18),
               _flowMetric('Sold', summary.totalSoldCartons, Icons.point_of_sale_rounded, scheme.primary),
             ],
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.center,
+            child: Text(
+              '${summary.totalLoadedCartons} loaded − ${summary.totalReturnedCartons} returned = ${summary.totalSoldCartons} sold',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
           ),
         ],
       ),
@@ -344,62 +355,99 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 12),
-          for (final line in summary.items)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          line.item.productName,
-                          style: const TextStyle(fontWeight: FontWeight.w800),
+          if (summary.items.isEmpty)
+            const Text('No products on this trip.')
+          else
+            for (final line in summary.items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            line.item.productName,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
                         ),
-                      ),
-                      Text(
-                        _money(line.netValue.minorUnits),
-                        style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w900),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${line.item.loadedCartons} loaded · ${line.item.returnedCartons} returned · ${line.soldCartons} sold',
+                        Text(
+                          _money(line.netValue.minorUnits),
+                          style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w900),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${line.item.loadedCartons} loaded − ${line.item.returnedCartons} returned = ${line.soldCartons} sold',
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        Text(
+                          '${line.item.discountPercent.toStringAsFixed(2)}% off',
                           style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                         ),
-                      ),
-                      Text(
-                        '${line.item.discountPercent.toStringAsFixed(2)}% off',
-                        style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '${_money(line.item.unitPrice.minorUnits)} / carton',
-                        style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                      ),
-                      Flexible(
-                        child: Text(
-                          'Gross ${_money(line.grossValue.minorUnits)} · Discount ${_money(line.discountAmount.minorUnits)}',
-                          textAlign: TextAlign.end,
-                          overflow: TextOverflow.ellipsis,
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${_money(line.item.unitPrice.minorUnits)} / carton',
                           style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                         ),
+                        Flexible(
+                          child: Text(
+                            'Sold ${_money(line.grossValue.minorUnits)} · Discount ${_money(line.discountAmount.minorUnits)}',
+                            textAlign: TextAlign.end,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        'Returned value: ${_money((line.item.unitPrice * line.item.returnedCartons).minorUnits)}',
+                        style: TextStyle(fontSize: 11, color: scheme.error, fontWeight: FontWeight.w700),
                       ),
-                    ],
-                  ),
-                  if (line != summary.items.last) const Divider(height: 18),
-                ],
+                    ),
+                    if (line != summary.items.last) const Divider(height: 18),
+                  ],
+                ),
               ),
+          const Divider(height: 8),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Products total',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+              Text(
+                '${summary.totalLoadedCartons} − ${summary.totalReturnedCartons} = ${summary.totalSoldCartons} cartons',
+                style: TextStyle(
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              'Actual sold value: ${_money(summary.finalTotalSoldValue.minorUnits)}',
+              style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w900),
             ),
+          ),
         ],
       ),
     );

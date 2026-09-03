@@ -36,3 +36,10 @@ jobs:
 
       - name: Build car debug APK
         run: flutter build apk --debug --flavor car -t lib/main_car.dart
+
+      - name: Upload car debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: car-debug-apk
+          path: build/app/outputs/flutter-apk/app-car-debug.apk
+          if-no-files-found: error
