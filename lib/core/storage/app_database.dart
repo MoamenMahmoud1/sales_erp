@@ -10,7 +10,7 @@ class AppDatabase {
   AppDatabase._();
 
   static const databaseName = 'sales_erp.db';
-  static const version = 14;
+  static const version = 15;
 
   static Database? _database;
   static Future<Database>? _opening;
@@ -81,5 +81,6 @@ class AppDatabase {
       await existing.close();
     }
     await deleteDatabase(path);
+    await database;
   }
 }
