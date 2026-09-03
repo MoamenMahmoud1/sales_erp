@@ -57,6 +57,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   final Map<int, int> _returned = {};
   final Map<int, double> _discounts = {};
   final Map<int, CarMoney> _unitPrices = {};
+  final Map<int, CarMoney> _purchasePrices = {};
   final Map<int, String> _productNames = {};
 
   bool _loading = true;
@@ -107,7 +108,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
           _loaded[item.productId] = item.loadedCartons;
           _returned[item.productId] = item.returnedCartons;
           _discounts[item.productId] = item.discountPercent;
-          _unitPrices[item.productId] = item.unitPrice;
+          _unitPrices[item.productId] = item.sellingPrice;
+          _purchasePrices[item.productId] = item.purchasePrice;
           _productNames[item.productId] = item.productName;
         }
       } else {
@@ -135,7 +137,9 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     return CarLoadItem(
       productId: id,
       productName: _productNames[id] ?? product.name,
-      unitPrice: _unitPrices[id] ?? CarMoney.fromUnits(product.price),
+      unitPrice: _unitPrices[id] ?? CarMoney.fromUnits(product.sellingPrice),
+      purchasePrice:
+          _purchasePrices[id] ?? CarMoney.fromUnits(product.purchasePrice),
       loadedCartons: _loaded[id] ?? 0,
       returnedCartons: _returned[id] ?? 0,
       discountPercent: _discounts[id] ?? 0,
@@ -143,14 +147,20 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   }
 
   CarTrip _buildTrip({required bool closed}) {
+    final car = _selectedCar;
+    final warehouse = _selectedWarehouse;
+    if (car == null || warehouse == null) {
+      throw StateError('Select a Car and Warehouse before calculating the invoice.');
+    }
+
     final now = DateTime.now().toUtc();
     return CarTrip(
       id: _original?.id ?? 0,
       displayNumber: _displayNumber ?? _original?.displayNumber ?? '',
-      salesCarId: _selectedCar!.id,
-      salesCarName: _selectedCar!.name,
-      warehouseId: _selectedWarehouse!.id,
-      warehouseName: _selectedWarehouse!.name,
+      salesCarId: car.id,
+      salesCarName: car.name,
+      warehouseId: warehouse.id,
+      warehouseName: warehouse.name,
       openedAt: _original?.openedAt ?? now,
       closedAt: closed ? (_original?.closedAt ?? now) : _original?.closedAt,
       dueDate: _dueDate?.toUtc(),
@@ -276,7 +286,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
               ListTile(
                 title: Text(product.name),
                 subtitle: Text(
-                  '${product.price.toStringAsFixed(2)} EGP / carton',
+                  'Sell ${product.sellingPrice.toStringAsFixed(2)} EGP · Buy ${product.purchasePrice.toStringAsFixed(2)} EGP / carton',
                 ),
                 trailing: const Icon(Icons.add_rounded),
                 onTap: () => Navigator.of(context).pop(product),
@@ -297,7 +307,10 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     if (chosen == _CreateProductAction.create) {
       final created = await Navigator.of(context).push<Product>(
         MaterialPageRoute(
-          builder: (_) => ProductFormPage(repository: _products),
+          builder: (_) => ProductFormPage(
+            repository: _products,
+            carMode: true,
+          ),
         ),
       );
 
@@ -311,7 +324,9 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         _loaded[created.id] = 1;
         _returned[created.id] = 0;
         _discounts[created.id] = 0;
-        _unitPrices[created.id] = CarMoney.fromUnits(created.price);
+        _unitPrices[created.id] = CarMoney.fromUnits(created.sellingPrice);
+        _purchasePrices[created.id] =
+            CarMoney.fromUnits(created.purchasePrice);
         _productNames[created.id] = created.name;
       });
       return;
@@ -322,7 +337,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       _loaded[chosen.id] = 1;
       _returned[chosen.id] = 0;
       _discounts[chosen.id] = 0;
-      _unitPrices[chosen.id] = CarMoney.fromUnits(chosen.price);
+      _unitPrices[chosen.id] = CarMoney.fromUnits(chosen.sellingPrice);
+      _purchasePrices[chosen.id] = CarMoney.fromUnits(chosen.purchasePrice);
       _productNames[chosen.id] = chosen.name;
     });
   }
@@ -630,7 +646,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        '${line.item.unitPrice.units.toStringAsFixed(2)} EGP / carton',
+                        'Sell ${line.item.sellingPrice.units.toStringAsFixed(2)} EGP · Buy ${line.item.purchasePrice.units.toStringAsFixed(2)} EGP / carton',
                         style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
                       ),
                     ],
@@ -645,6 +661,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                             _returned.remove(id);
                             _discounts.remove(id);
                             _unitPrices.remove(id);
+                            _purchasePrices.remove(id);
                             _productNames.remove(id);
                           }),
                   icon: Icon(Icons.close_rounded, color: scheme.error),
@@ -674,6 +691,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             ),
             const SizedBox(height: 10),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: TextFormField(
@@ -702,6 +720,20 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                       Text(
                         _money(line.netValue),
                         style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Discount: ${_money(line.discountAmount)}',
+                        textAlign: TextAlign.end,
+                        softWrap: true,
+                        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Cost: ${_money(line.purchaseCost)} · Profit: ${_money(line.profitBeforeGlobalDiscount)}',
+                        textAlign: TextAlign.end,
+                        softWrap: true,
+                        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11),
                       ),
                     ],
                   ),
@@ -787,6 +819,18 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
 
   Widget _buildSummary() {
     if (_selectedProductIds.isEmpty) return const SizedBox.shrink();
+    final car = _selectedCar;
+    final warehouse = _selectedWarehouse;
+    if (car == null || warehouse == null) {
+      return const Card(
+        child: ListTile(
+          leading: Icon(Icons.info_outline_rounded),
+          title: Text('Select Car and Warehouse'),
+          subtitle: Text('Select both to preview invoice calculations.'),
+        ),
+      );
+    }
+
     final scheme = Theme.of(context).colorScheme;
     final summary = _calculator.summary(_buildTrip(closed: false));
 
@@ -818,6 +862,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                 _summaryRow('Product discounts', summary.productDiscountTotal),
                 _summaryRow('After product discounts', summary.subtotalAfterProducts),
                 _summaryRow('Global discount', summary.globalDiscountAmount),
+                _summaryRow('Buying cost', summary.totalPurchaseCost),
+                _summaryRow('Profit', summary.profit),
                 const Divider(height: 22),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -840,7 +886,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label),
+          Flexible(child: Text(label)),
+          const SizedBox(width: 12),
           Text(_money(amount), style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
       ),
