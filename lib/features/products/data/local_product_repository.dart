@@ -18,26 +18,28 @@ class LocalProductRepository implements ProductRepository {
       orderBy: 'name COLLATE NOCASE ASC',
     );
 
-    return rows
-        .map(Product.fromMap)
-        .toList(growable: false);
+    return rows.map(Product.fromMap).toList(growable: false);
   }
 
   @override
   Future<int> addProduct({
     required String name,
     required double price,
+    double? purchasePrice,
+    double? sellingPrice,
   }) async {
     final normalizedName = name.trim();
+    final normalizedSellingPrice = sellingPrice ?? price;
+    final normalizedPurchasePrice = purchasePrice ?? normalizedSellingPrice;
 
     if (normalizedName.isEmpty) {
       throw ArgumentError('Product name is required.');
     }
-
-    if (price <= 0) {
-      throw ArgumentError(
-        'Product price must be greater than zero.',
-      );
+    if (normalizedSellingPrice <= 0) {
+      throw ArgumentError('Product selling price must be greater than zero.');
+    }
+    if (normalizedPurchasePrice <= 0) {
+      throw ArgumentError('Product purchase price must be greater than zero.');
     }
 
     final database = await _database;
@@ -47,7 +49,9 @@ class LocalProductRepository implements ProductRepository {
       'products',
       {
         'name': normalizedName,
-        'price': price,
+        // Legacy column retained as the selling price for existing consumers.
+        'price': normalizedSellingPrice,
+        'purchase_price': normalizedPurchasePrice,
         'created_at': now,
         'updated_at': now,
       },
@@ -59,17 +63,21 @@ class LocalProductRepository implements ProductRepository {
     required int id,
     required String name,
     required double price,
+    double? purchasePrice,
+    double? sellingPrice,
   }) async {
     final normalizedName = name.trim();
+    final normalizedSellingPrice = sellingPrice ?? price;
+    final normalizedPurchasePrice = purchasePrice ?? normalizedSellingPrice;
 
     if (normalizedName.isEmpty) {
       throw ArgumentError('Product name is required.');
     }
-
-    if (price <= 0) {
-      throw ArgumentError(
-        'Product price must be greater than zero.',
-      );
+    if (normalizedSellingPrice <= 0) {
+      throw ArgumentError('Product selling price must be greater than zero.');
+    }
+    if (normalizedPurchasePrice <= 0) {
+      throw ArgumentError('Product purchase price must be greater than zero.');
     }
 
     final database = await _database;
@@ -78,18 +86,17 @@ class LocalProductRepository implements ProductRepository {
       'products',
       {
         'name': normalizedName,
-        'price': price,
-        'updated_at':
-            DateTime.now().toUtc().toIso8601String(),
+        // Keep the legacy column synchronized with the selling price.
+        'price': normalizedSellingPrice,
+        'purchase_price': normalizedPurchasePrice,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
       },
       where: 'id = ?',
       whereArgs: [id],
     );
 
     if (updatedRows == 0) {
-      throw StateError(
-        'Product with id $id was not found.',
-      );
+      throw StateError('Product with id $id was not found.');
     }
   }
 
