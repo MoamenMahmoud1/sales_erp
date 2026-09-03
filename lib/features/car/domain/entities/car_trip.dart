@@ -1,6 +1,7 @@
 import 'car_load_item.dart';
 import 'car_payment.dart';
 import 'car_trip_status.dart';
+import 'money.dart';
 
 export 'car_payment.dart' show CarPayment;
 export 'car_trip_status.dart' show CarTripStatus;
@@ -8,9 +9,6 @@ export 'car_trip_status.dart' show CarTripStatus;
 /// One daily load → sell → return cycle for a sales car.
 class CarTrip {
   final int id;
-
-  /// Empty while composing a new trip; the repository assigns the stable
-  /// human-readable number when the first save occurs.
   final String displayNumber;
 
   final int salesCarId;
@@ -25,6 +23,7 @@ class CarTrip {
   final CarTripStatus status;
   final List<CarLoadItem> items;
   final double globalDiscountPercent;
+  final CarMoney globalDiscountEgp;
   final CarPayment payment;
 
   const CarTrip({
@@ -40,6 +39,7 @@ class CarTrip {
     this.status = CarTripStatus.open,
     this.items = const [],
     this.globalDiscountPercent = 0,
+    this.globalDiscountEgp = CarMoney.zero,
     this.payment = const CarPayment(),
   });
 
@@ -58,6 +58,7 @@ class CarTrip {
     CarTripStatus? status,
     List<CarLoadItem>? items,
     double? globalDiscountPercent,
+    CarMoney? globalDiscountEgp,
     CarPayment? payment,
   }) {
     return CarTrip(
@@ -73,6 +74,7 @@ class CarTrip {
       status: status ?? this.status,
       items: items ?? this.items,
       globalDiscountPercent: globalDiscountPercent ?? this.globalDiscountPercent,
+      globalDiscountEgp: globalDiscountEgp ?? this.globalDiscountEgp,
       payment: payment ?? this.payment,
     );
   }
