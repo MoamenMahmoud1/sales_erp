@@ -1,6 +1,5 @@
 import '../entities/car_revision.dart';
 import '../entities/car_trip.dart';
-import '../entities/car_trip_deletion_result.dart';
 import '../entities/car_trip_filter.dart';
 import '../entities/car_trip_summary_view.dart';
 
@@ -16,5 +15,4 @@ abstract interface class CarTripRepository {
   Future<List<CarTripSummaryView>> getTripSummaries({CarTripFilter? filter});
   Future<List<CarRevision>> getRevisionsForTrip(int tripId);
   Future<CarRevision?> getRevision(int revisionId);
-  Future<CarTripDeletionResult> deleteTrip(int tripId);
 }
