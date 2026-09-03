@@ -2,7 +2,7 @@ import '../../app/config/data_mode.dart';
 import '../../features/car/data/local_car_catalog_repository.dart';
 import '../../features/car/data/local_car_payment_repository.dart';
 import '../../features/car/data/local_car_report_repository.dart';
-import '../../features/car/data/local_car_trip_command_repository.dart';
+import '../../features/car/data/local_car_trip_command_repository_v2.dart';
 import '../../features/car/domain/repositories/car_catalog_repository.dart';
 import '../../features/car/domain/repositories/car_payment_repository.dart';
 import '../../features/car/domain/repositories/car_report_repository.dart';
@@ -13,11 +13,6 @@ import '../../features/products/data/local_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
 import 'car_trip_event_bus.dart';
 
-/// Central composition root for application services and repositories.
-///
-/// Runtime is currently offline-first. Repository interfaces are deliberately
-/// stable so remote data sources can be introduced later without changing UI
-/// or domain code.
 class AppServices {
   AppServices._();
 
@@ -29,12 +24,10 @@ class AppServices {
   final CustomerRepository customerRepository = LocalCustomerRepository();
   final ProductRepository productRepository = LocalProductRepository();
 
-  final CarCatalogRepository carCatalogRepository =
-      LocalCarCatalogRepository();
+  final CarCatalogRepository carCatalogRepository = LocalCarCatalogRepository();
   final CarTripCommandRepository carTripRepository =
-      LocalCarTripCommandRepository();
-  final CarPaymentRepository carPaymentRepository =
-      LocalCarPaymentRepository();
+      LocalCarTripCommandRepositoryV2();
+  final CarPaymentRepository carPaymentRepository = LocalCarPaymentRepository();
   final CarReportRepository carReportRepository = LocalCarReportRepository();
 
   bool _ready = false;
@@ -48,6 +41,5 @@ class AppServices {
   }
 
   bool get offlineAllowed => dataMode.offlineAllowed;
-
   DataMode get mode => dataMode.mode;
 }
