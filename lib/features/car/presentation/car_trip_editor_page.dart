@@ -127,11 +127,6 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     }
   }
 
-  Future<void> _reloadProducts() async {
-    _productsList = await _products.getProducts();
-    if (mounted) setState(() {});
-  }
-
   List<CarLoadItem> get _items => [
         for (final id in _selectedProductIds) _itemFor(id),
       ];
