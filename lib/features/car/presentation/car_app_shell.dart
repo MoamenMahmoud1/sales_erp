@@ -54,7 +54,7 @@ class _CarAppShellState extends State<CarAppShell> {
     AppNavItem(
       icon: Icons.analytics_outlined,
       selectedIcon: Icons.analytics_rounded,
-      label: 'Reports',
+      label: 'Overview',
     ),
   ];
 
