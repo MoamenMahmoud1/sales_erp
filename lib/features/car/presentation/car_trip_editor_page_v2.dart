@@ -38,8 +38,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   final _calculator = const CarCalculator();
 
   late final CreateCarTrip _create = CreateCarTrip(_trips);
-  late final CreateAndConfirmCarTrip _createAndConfirm =
-      CreateAndConfirmCarTrip(_trips);
+  late final CreateAndConfirmCarTrip _createAndConfirm = CreateAndConfirmCarTrip(_trips);
   late final UpdateCarTripDraft _update = UpdateCarTripDraft(_trips);
   late final ConfirmCarTrip _confirm = ConfirmCarTrip(_trips);
   late final ReviseCarTrip _revise = ReviseCarTrip(_trips);
@@ -100,14 +99,12 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         if (trip == null) throw StateError('Car invoice not found.');
         _original = trip;
         _selectedCar = _cars.where((c) => c.id == trip.salesCarId).firstOrNull;
-        _selectedWarehouse =
-            _warehouses.where((w) => w.id == trip.warehouseId).firstOrNull;
+        _selectedWarehouse = _warehouses.where((w) => w.id == trip.warehouseId).firstOrNull;
         _dueDate = trip.dueDate?.toLocal();
         _displayNumber = trip.displayNumber;
         _globalDiscountPercent = trip.globalDiscountPercent;
         _globalDiscountEgp = trip.globalDiscountEgp.units;
-        _globalDiscountController.text =
-            _formatInput(_globalDiscountPercent);
+        _globalDiscountController.text = _formatInput(_globalDiscountPercent);
         _globalDiscountEgpController.text = _formatInput(_globalDiscountEgp);
         for (final item in trip.items) {
           _loaded[item.productId] = item.loadedCartons;
@@ -137,9 +134,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       ? value.toStringAsFixed(0)
       : value.toStringAsFixed(2);
 
-  List<CarLoadItem> get _items => [
-        for (final id in _selectedProductIds) _itemFor(id),
-      ];
+  List<CarLoadItem> get _items => [for (final id in _selectedProductIds) _itemFor(id)];
 
   CarLoadItem _itemFor(int id) {
     final product = _productsList.firstWhere((p) => p.id == id);
@@ -147,20 +142,17 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       productId: id,
       productName: _productNames[id] ?? product.name,
       unitPrice: _unitPrices[id] ?? CarMoney.fromUnits(product.sellingPrice),
-      purchasePrice:
-          _purchasePrices[id] ?? CarMoney.fromUnits(product.purchasePrice),
+      purchasePrice: _purchasePrices[id] ?? CarMoney.fromUnits(product.purchasePrice),
       loadedCartons: _loaded[id] ?? 0,
       returnedCartons: _returned[id] ?? 0,
       discountPercent: _discounts[id] ?? 0,
     );
   }
 
-  CarTrip _buildTrip({required bool closed}) {
+  CarTrip? _buildTripOrNull({bool closed = false}) {
     final car = _selectedCar;
     final warehouse = _selectedWarehouse;
-    if (car == null || warehouse == null) {
-      throw StateError('Select a Car and Warehouse before calculating the invoice.');
-    }
+    if (car == null || warehouse == null) return null;
     final now = DateTime.now().toUtc();
     return CarTrip(
       id: _original?.id ?? 0,
@@ -204,16 +196,14 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     if (_saving || !_validateHeader()) return;
     setState(() => _saving = true);
     try {
-      final saved = _editing
-          ? await _update(_buildTrip(closed: false))
-          : await _create(_buildTrip(closed: false));
+      final trip = _buildTripOrNull();
+      if (trip == null) throw StateError('Select a Car and Warehouse.');
+      final saved = _editing ? await _update(trip) : await _create(trip);
       _original = saved;
       _displayNumber = saved.displayNumber;
       if (!mounted) return;
       AppServices.instance.carTripEvents.publish(saved);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Draft ${saved.displayNumber} saved.')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Draft ${saved.displayNumber} saved.')));
       if (!_editing) Navigator.of(context).pop(true);
     } catch (error) {
       if (mounted) _showError('$error');
@@ -224,11 +214,9 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
 
   Future<void> _confirmAndClose() async {
     if (_saving || !_validateHeader()) return;
-    CarTrip preview;
-    try {
-      preview = _buildTrip(closed: true);
-    } catch (error) {
-      _showError('$error');
+    final preview = _buildTripOrNull(closed: true);
+    if (preview == null) {
+      _showError('Select a Car and Warehouse before confirming.');
       return;
     }
     final issues = _calculator.validate(preview);
@@ -236,7 +224,6 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       _showError(issues.first.message);
       return;
     }
-
     final confirmed = await showConfirmDialog(
       context: context,
       title: 'Confirm Car invoice?',
@@ -248,17 +235,14 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     setState(() => _saving = true);
     try {
       final persisted = !_editing
-          ? await _createAndConfirm(
-              _buildTrip(closed: false),
-              triggeredBy: 'invoice_close',
-            )
+          ? await _createAndConfirm(_buildTripOrNull()!, triggeredBy: 'invoice_close')
           : _original!.isClosed
               ? await _revise(preview, triggeredBy: 'invoice_edit')
               : await _confirm(preview, triggeredBy: 'invoice_close');
-
       final summary = _calculator.summary(persisted);
       AppServices.instance.carTripEvents.publish(persisted);
       if (!mounted) return;
+
       final result = await Navigator.of(context).push<bool>(
         PageRouteBuilder(
           opaque: true,
@@ -274,9 +258,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       if (!mounted) return;
       if (result == true) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => CarTripDetailsPage(tripId: persisted.id),
-          ),
+          MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: persisted.id)),
         );
       } else {
         Navigator.of(context).pop(true);
@@ -289,9 +271,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   }
 
   Future<void> _addProduct() async {
-    final available = _productsList
-        .where((product) => !_loaded.containsKey(product.id))
-        .toList(growable: false);
+    final available = _productsList.where((p) => !_loaded.containsKey(p.id)).toList(growable: false);
     final chosen = await showModalBottomSheet<Object?>(
       context: context,
       showDragHandle: true,
@@ -315,8 +295,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             ListTile(
               leading: const Icon(Icons.inventory_2_outlined),
               title: const Text('Create a new product'),
-              onTap: () =>
-                  Navigator.of(context).pop(_CreateProductAction.create),
+              onTap: () => Navigator.of(context).pop(_CreateProductAction.create),
             ),
           ],
         ),
@@ -326,16 +305,10 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
 
     if (chosen == _CreateProductAction.create) {
       final created = await Navigator.of(context).push<Product>(
-        MaterialPageRoute(
-          builder: (_) => ProductFormPage(
-            repository: _products,
-            carMode: true,
-          ),
-        ),
+        MaterialPageRoute(builder: (_) => ProductFormPage(repository: _products, carMode: true)),
       );
       if (!mounted || created == null) return;
-      _productsList = [..._productsList, created]
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      _productsList = [..._productsList, created]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       setState(() {
         _loaded[created.id] = 1;
         _returned[created.id] = 0;
@@ -362,17 +335,10 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   Future<void> _createCar() async {
     final controller = TextEditingController();
     try {
-      final name = await _textDialog(
-        title: 'New Car',
-        label: 'Car name',
-        controller: controller,
-      );
+      final name = await _textDialog(title: 'New Car', label: 'Car name', controller: controller);
       if (name == null || name.trim().isEmpty) return;
-      final car = await _catalog.createCar(
-        SalesCar(name: name.trim(), createdAt: DateTime.now().toUtc()),
-      );
-      _cars = [..._cars, car]
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      final car = await _catalog.createCar(SalesCar(name: name.trim(), createdAt: DateTime.now().toUtc()));
+      _cars = [..._cars, car]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       if (mounted) setState(() => _selectedCar = car);
     } finally {
       controller.dispose();
@@ -382,28 +348,17 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   Future<void> _createWarehouse() async {
     final controller = TextEditingController();
     try {
-      final name = await _textDialog(
-        title: 'New Warehouse',
-        label: 'Warehouse name',
-        controller: controller,
-      );
+      final name = await _textDialog(title: 'New Warehouse', label: 'Warehouse name', controller: controller);
       if (name == null || name.trim().isEmpty) return;
-      final warehouse = await _catalog.createWarehouse(
-        Warehouse(name: name.trim(), createdAt: DateTime.now().toUtc()),
-      );
-      _warehouses = [..._warehouses, warehouse]
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      final warehouse = await _catalog.createWarehouse(Warehouse(name: name.trim(), createdAt: DateTime.now().toUtc()));
+      _warehouses = [..._warehouses, warehouse]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       if (mounted) setState(() => _selectedWarehouse = warehouse);
     } finally {
       controller.dispose();
     }
   }
 
-  Future<String?> _textDialog({
-    required String title,
-    required String label,
-    required TextEditingController controller,
-  }) {
+  Future<String?> _textDialog({required String title, required String label, required TextEditingController controller}) {
     return showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -412,20 +367,11 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
           controller: controller,
           autofocus: true,
           textCapitalization: TextCapitalization.words,
-          decoration: InputDecoration(
-            labelText: label,
-            border: const OutlineInputBorder(),
-          ),
+          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('Create'),
-          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(controller.text.trim()), child: const Text('Create')),
         ],
       ),
     );
@@ -456,9 +402,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_editing ? 'Edit Car Invoice' : 'New Car Invoice'),
-      ),
+      appBar: AppBar(title: Text(_editing ? 'Edit Car Invoice' : 'New Car Invoice')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 140),
         children: [
@@ -466,29 +410,17 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
           const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(
-                child: Text('Products', style: Theme.of(context).textTheme.titleLarge),
-              ),
-              TextButton.icon(
-                onPressed: _saving ? null : _addProduct,
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Add product'),
-              ),
+              Expanded(child: Text('Products', style: Theme.of(context).textTheme.titleLarge)),
+              TextButton.icon(onPressed: _saving ? null : _addProduct, icon: const Icon(Icons.add_rounded), label: const Text('Add product')),
             ],
           ),
           if (_selectedProductIds.isEmpty)
-            const Card(
-              child: ListTile(
-                leading: Icon(Icons.inventory_2_outlined),
-                title: Text('No products yet'),
-                subtitle: Text('Add cartons loaded on the Car.'),
-              ),
-            )
+            const Card(child: ListTile(leading: Icon(Icons.inventory_2_outlined), title: Text('No products yet'), subtitle: Text('Add cartons loaded on the Car.')))
           else
             for (final id in _selectedProductIds) _productCard(id),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           _buildDiscountSection(),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           _buildSummary(),
         ],
       ),
@@ -496,25 +428,9 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
         child: Row(
           children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _saving ? null : _saveDraft,
-                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                child: const Text('Save draft'),
-              ),
-            ),
+            Expanded(child: OutlinedButton(onPressed: _saving ? null : _saveDraft, style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)), child: const Text('Save draft'))),
             const SizedBox(width: 10),
-            Expanded(
-              flex: 2,
-              child: FilledButton.icon(
-                onPressed: _saving ? null : _confirmAndClose,
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                icon: _saving
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.check_circle_outline_rounded),
-                label: Text(_saving ? 'Processing...' : 'Confirm & close'),
-              ),
-            ),
+            Expanded(flex: 2, child: FilledButton.icon(onPressed: _saving ? null : _confirmAndClose, style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)), icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.check_circle_outline_rounded), label: Text(_saving ? 'Processing...' : 'Confirm & close'))),
           ],
         ),
       ),
@@ -530,39 +446,15 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
           children: [
             Row(
               children: [
-                Expanded(
-                  child: _dropdown<SalesCar>(
-                    label: 'Car',
-                    value: _selectedCar,
-                    items: _cars,
-                    labelOf: (car) => car.name,
-                    onChanged: (value) => setState(() => _selectedCar = value),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Create Car',
-                  onPressed: _saving ? null : _createCar,
-                  icon: const Icon(Icons.add_circle_outline_rounded),
-                ),
+                Expanded(child: _dropdown<SalesCar>(label: 'Car', value: _selectedCar, items: _cars, labelOf: (car) => car.name, onChanged: (value) => setState(() => _selectedCar = value))),
+                IconButton(tooltip: 'Create Car', onPressed: _saving ? null : _createCar, icon: const Icon(Icons.add_circle_outline_rounded)),
               ],
             ),
             const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(
-                  child: _dropdown<Warehouse>(
-                    label: 'Warehouse',
-                    value: _selectedWarehouse,
-                    items: _warehouses,
-                    labelOf: (warehouse) => warehouse.name,
-                    onChanged: (value) => setState(() => _selectedWarehouse = value),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Create Warehouse',
-                  onPressed: _saving ? null : _createWarehouse,
-                  icon: const Icon(Icons.add_circle_outline_rounded),
-                ),
+                Expanded(child: _dropdown<Warehouse>(label: 'Warehouse', value: _selectedWarehouse, items: _warehouses, labelOf: (warehouse) => warehouse.name, onChanged: (value) => setState(() => _selectedWarehouse = value))),
+                IconButton(tooltip: 'Create Warehouse', onPressed: _saving ? null : _createWarehouse, icon: const Icon(Icons.add_circle_outline_rounded)),
               ],
             ),
             const SizedBox(height: 12),
@@ -570,17 +462,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
               borderRadius: AppRadius.lgAll,
               onTap: _saving ? null : _pickDueDate,
               child: InputDecorator(
-                decoration: InputDecoration(
-                  labelText: 'Payment due date',
-                  prefixIcon: const Icon(Icons.event_outlined),
-                  border: OutlineInputBorder(borderRadius: AppRadius.lgAll),
-                ),
-                child: Text(
-                  _dueDate == null ? 'Not specified' : _formatDate(_dueDate!),
-                  style: TextStyle(
-                    color: _dueDate == null ? scheme.onSurfaceVariant : scheme.onSurface,
-                  ),
-                ),
+                decoration: InputDecoration(labelText: 'Payment due date', prefixIcon: const Icon(Icons.event_outlined), border: OutlineInputBorder(borderRadius: AppRadius.lgAll)),
+                child: Text(_dueDate == null ? 'Not specified' : _formatDate(_dueDate!), style: TextStyle(color: _dueDate == null ? scheme.onSurfaceVariant : scheme.onSurface)),
               ),
             ),
           ],
@@ -589,39 +472,19 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     );
   }
 
-  Widget _dropdown<T>({
-    required String label,
-    required T? value,
-    required List<T> items,
-    required String Function(T) labelOf,
-    required ValueChanged<T?> onChanged,
-  }) {
+  Widget _dropdown<T>({required String label, required T? value, required List<T> items, required String Function(T) labelOf, required ValueChanged<T?> onChanged}) {
     return DropdownButtonFormField<T>(
       initialValue: value,
       isExpanded: true,
-      decoration: InputDecoration(
-        labelText: label,
-        border: OutlineInputBorder(borderRadius: AppRadius.lgAll),
-      ),
-      items: [
-        for (final item in items)
-          DropdownMenuItem<T>(
-            value: item,
-            child: Text(labelOf(item), overflow: TextOverflow.ellipsis),
-          ),
-      ],
+      decoration: InputDecoration(labelText: label, border: OutlineInputBorder(borderRadius: AppRadius.lgAll)),
+      items: [for (final item in items) DropdownMenuItem<T>(value: item, child: Text(labelOf(item), overflow: TextOverflow.ellipsis))],
       onChanged: onChanged,
     );
   }
 
   Future<void> _pickDueDate() async {
     final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 5),
-      initialDate: _dueDate ?? now,
-    );
+    final picked = await showDatePicker(context: context, firstDate: DateTime(now.year - 1), lastDate: DateTime(now.year + 5), initialDate: _dueDate ?? now);
     if (picked != null && mounted) setState(() => _dueDate = picked);
   }
 
@@ -630,12 +493,11 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     final line = _calculator.itemLine(_itemFor(id));
     final loaded = _loaded[id] ?? 0;
     final returned = _returned[id] ?? 0;
-    final sold = loaded - returned;
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(12),
         child: Column(
           children: [
             Row(
@@ -645,70 +507,33 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(_productNames[id] ?? product.name, style: const TextStyle(fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 3),
-                      Text(
-                        'Sell ${line.item.sellingPrice.units.toStringAsFixed(2)} · Buy ${line.item.purchasePrice.units.toStringAsFixed(2)} EGP/carton',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
-                      ),
+                      const SizedBox(height: 2),
+                      Text('Sell ${line.item.sellingPrice.units.toStringAsFixed(2)} · Buy ${line.item.purchasePrice.units.toStringAsFixed(2)} EGP/carton', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     ],
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Remove product',
-                  onPressed: _saving
-                      ? null
-                      : () => setState(() {
-                            _loaded.remove(id);
-                            _returned.remove(id);
-                            _discounts.remove(id);
-                            _unitPrices.remove(id);
-                            _purchasePrices.remove(id);
-                            _productNames.remove(id);
-                          }),
-                  icon: Icon(Icons.close_rounded, color: Theme.of(context).colorScheme.error),
-                ),
+                IconButton(tooltip: 'Remove product', onPressed: _saving ? null : () => setState(() { _loaded.remove(id); _returned.remove(id); _discounts.remove(id); _unitPrices.remove(id); _purchasePrices.remove(id); _productNames.remove(id); }), icon: Icon(Icons.close_rounded, color: Theme.of(context).colorScheme.error)),
               ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _StableNumberField(
-                    label: 'Loaded',
-                    value: loaded.toDouble(),
-                    integer: true,
-                    onChanged: (value) => setState(() => _loaded[id] = value.round()),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _StableNumberField(
-                    label: 'Returned',
-                    value: returned.toDouble(),
-                    integer: true,
-                    max: loaded.toDouble(),
-                    onChanged: (value) => setState(() => _returned[id] = value.round()),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _StableNumberField(
-              label: 'Product discount %',
-              suffix: '%',
-              value: _discounts[id] ?? 0,
-              onChanged: (value) => setState(() => _discounts[id] = value.clamp(0, 100)),
             ),
             const SizedBox(height: 8),
             Row(
               children: [
-                Expanded(child: Text('$sold sold', style: const TextStyle(fontWeight: FontWeight.w900))),
+                Expanded(child: _StableNumberField(label: 'Loaded', value: loaded.toDouble(), integer: true, onChanged: (value) => setState(() => _loaded[id] = value.round()))),
+                const SizedBox(width: 8),
+                Expanded(child: _StableNumberField(label: 'Returned', value: returned.toDouble(), integer: true, max: loaded.toDouble(), onChanged: (value) => setState(() => _returned[id] = value.round()))),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _StableNumberField(label: 'Product discount', suffix: '%', value: _discounts[id] ?? 0, onChanged: (value) => setState(() => _discounts[id] = value.clamp(0.0, 100.0).toDouble())),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(child: Text('${line.soldCartons} sold', style: const TextStyle(fontWeight: FontWeight.w800))),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text('Sell ${_money(line.grossValue)}', style: const TextStyle(fontWeight: FontWeight.w800)),
-                    Text('Discount ${_money(line.discountAmount)}', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                    Text('Profit ${_money(line.profitBeforeGlobalDiscount)}', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    Text('Disc ${_money(line.discountAmount)} · Cost ${_money(line.purchaseCost)} · Profit ${_money(line.profitBeforeGlobalDiscount)}', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   ],
                 ),
               ],
@@ -719,66 +544,46 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     );
   }
 
-  Widget _buildDiscountSection() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _StableTextField(
-                controller: _globalDiscountController,
-                label: 'Global discount %',
-                suffix: '%',
-                onChanged: (raw) {
+  Widget _buildDiscountSection() => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _StableTextField(controller: _globalDiscountController, label: 'Global discount %', suffix: '%', onChanged: (raw) {
                   final parsed = double.tryParse(raw);
                   if (parsed == null) return;
-                  setState(() => _globalDiscountPercent = parsed.clamp(0, 100).toDouble());
-                },
+                  setState(() => _globalDiscountPercent = parsed.clamp(0.0, 100.0).toDouble());
+                }),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StableTextField(
-                controller: _globalDiscountEgpController,
-                label: 'Global discount EGP',
-                suffix: 'EGP',
-                onChanged: (raw) {
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StableTextField(controller: _globalDiscountEgpController, label: 'Global discount EGP', suffix: 'EGP', onChanged: (raw) {
                   final parsed = double.tryParse(raw);
                   if (parsed == null) return;
                   setState(() => _globalDiscountEgp = parsed < 0 ? 0 : parsed);
-                },
+                }),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSummary() {
-    if (_selectedProductIds.isEmpty) return const SizedBox.shrink();
-    final car = _selectedCar;
-    final warehouse = _selectedWarehouse;
-    if (car == null || warehouse == null) {
-      return const Card(
-        child: ListTile(
-          leading: Icon(Icons.info_outline_rounded),
-          title: Text('Select Car and Warehouse'),
-          subtitle: Text('Select both to preview invoice calculations.'),
+            ],
+          ),
         ),
       );
-    }
 
-    final summary = _calculator.summary(_buildTrip(closed: false));
+  Widget _buildSummary() {
+    final trip = _buildTripOrNull();
+    if (_selectedProductIds.isEmpty) return const SizedBox.shrink();
+    if (trip == null) {
+      return const Card(child: ListTile(leading: Icon(Icons.info_outline_rounded), title: Text('Select Car and Warehouse'), subtitle: Text('Select both to preview the calculations.')));
+    }
+    final summary = _calculator.summary(trip);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Text('Calculation summary', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 10),
+            Align(alignment: Alignment.centerLeft, child: Text('Calculation summary', style: Theme.of(context).textTheme.titleLarge)),
+            const SizedBox(height: 8),
             GridView.count(
               crossAxisCount: 2,
               shrinkWrap: true,
@@ -793,13 +598,13 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                 CarMetricCard(label: 'Selling total', value: _money(summary.finalTotalSoldValue), icon: Icons.receipt_long_outlined),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             _summaryRow('Product discount EGP', summary.productDiscountTotal),
             _summaryRow('Buying after product discounts', summary.subtotalAfterProducts),
             _summaryRow('Global discount %', summary.globalDiscountPercentAmount),
             _summaryRow('Global discount EGP', summary.globalDiscountFixedAmount),
             _summaryRow('Final buying cost', summary.totalPurchaseCost),
-            const Divider(height: 22),
+            const Divider(height: 18),
             _summaryRow('Profit', summary.profit, strong: true),
             _summaryRow('Selling total (unchanged)', summary.finalTotalSoldValue, strong: true),
           ],
@@ -808,23 +613,20 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     );
   }
 
-  Widget _summaryRow(String label, CarMoney amount, {bool strong = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          Expanded(child: Text(label, softWrap: true, style: TextStyle(fontWeight: strong ? FontWeight.w800 : FontWeight.w500))),
-          const SizedBox(width: 12),
-          Text(_money(amount), style: TextStyle(fontWeight: strong ? FontWeight.w900 : FontWeight.w700)),
-        ],
-      ),
-    );
-  }
+  Widget _summaryRow(String label, CarMoney amount, {bool strong = false}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          children: [
+            Expanded(child: Text(label, softWrap: true, style: TextStyle(fontWeight: strong ? FontWeight.w800 : FontWeight.w500))),
+            const SizedBox(width: 12),
+            Text(_money(amount), style: TextStyle(fontWeight: strong ? FontWeight.w900 : FontWeight.w700)),
+          ],
+        ),
+      );
 
   String _money(CarMoney value) => 'EGP ${value.units.toStringAsFixed(2)}';
 
-  String _formatDate(DateTime date) =>
-      '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  String _formatDate(DateTime date) => '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
 }
 
 class _StableTextField extends StatelessWidget {
@@ -833,23 +635,14 @@ class _StableTextField extends StatelessWidget {
   final String? suffix;
   final ValueChanged<String> onChanged;
 
-  const _StableTextField({
-    required this.controller,
-    required this.label,
-    required this.onChanged,
-    this.suffix,
-  });
+  const _StableTextField({required this.controller, required this.label, required this.onChanged, this.suffix});
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        labelText: label,
-        suffixText: suffix,
-        border: const OutlineInputBorder(),
-      ),
+      decoration: InputDecoration(labelText: label, suffixText: suffix, border: const OutlineInputBorder()),
       onChanged: onChanged,
     );
   }
@@ -863,33 +656,23 @@ class _StableNumberField extends StatefulWidget {
   final bool integer;
   final ValueChanged<double> onChanged;
 
-  const _StableNumberField({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-    this.suffix,
-    this.max,
-    this.integer = false,
-  });
+  const _StableNumberField({required this.label, required this.value, required this.onChanged, this.suffix, this.max, this.integer = false});
 
   @override
   State<_StableNumberField> createState() => _StableNumberFieldState();
 }
 
 class _StableNumberFieldState extends State<_StableNumberField> {
-  late final TextEditingController _controller = TextEditingController(
-    text: _format(widget.value),
-  );
+  late final TextEditingController _controller = TextEditingController(text: _format(widget.value));
 
   @override
   void didUpdateWidget(covariant _StableNumberField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.value != widget.value &&
-        _parse(_controller.text) != widget.value) {
-      final selection = _controller.selection;
+    if (oldWidget.value != widget.value && _parse(_controller.text) != widget.value) {
+      final oldOffset = _controller.selection.baseOffset;
       _controller.text = _format(widget.value);
       _controller.selection = TextSelection.collapsed(
-        offset: selection.baseOffset.clamp(0, _controller.text.length),
+        offset: oldOffset.clamp(0, _controller.text.length).toInt(),
       );
     }
   }
@@ -902,25 +685,19 @@ class _StableNumberFieldState extends State<_StableNumberField> {
 
   double? _parse(String raw) => double.tryParse(raw.trim());
 
-  String _format(double value) => widget.integer
-      ? value.round().toString()
-      : value.toStringAsFixed(2);
+  String _format(double value) => widget.integer ? value.round().toString() : value.toStringAsFixed(2);
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: _controller,
       keyboardType: TextInputType.numberWithOptions(decimal: !widget.integer),
-      decoration: InputDecoration(
-        labelText: widget.label,
-        suffixText: widget.suffix,
-        border: const OutlineInputBorder(),
-      ),
+      decoration: InputDecoration(labelText: widget.label, suffixText: widget.suffix, border: const OutlineInputBorder()),
       onChanged: (raw) {
         final parsed = _parse(raw);
         if (parsed == null) return;
-        var next = parsed < 0 ? 0 : parsed;
-        if (widget.max != null) next = next.clamp(0, widget.max!);
+        double next = parsed < 0 ? 0.0 : parsed;
+        if (widget.max != null) next = next.clamp(0.0, widget.max!).toDouble();
         if (widget.integer) next = next.roundToDouble();
         widget.onChanged(next);
       },
