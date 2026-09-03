@@ -65,7 +65,11 @@ class _AppShellState extends State<AppShell> {
   Future<void> _openCarApp() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => CarAppShell(themeController: widget.themeController),
+        builder: (_) => CarAppShell(
+          themeController: widget.themeController,
+          onLock: widget.onLock,
+          onReset: _resetDeviceData,
+        ),
       ),
     );
     if (mounted) setState(() {});
