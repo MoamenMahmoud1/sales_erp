@@ -5,7 +5,8 @@ import 'car_trip_status.dart';
 ///
 /// [paymentStatus] is derived (overdue depends on the current time), so the
 /// repository evaluates it using the domain evaluator rather than a stored,
-/// time-dependent flag.
+/// time-dependent flag. Payment-status filters are always scoped to finalized
+/// (closed) trips because drafts cannot have real payment state.
 class CarTripFilter {
   final CarTripStatus? status;
   final CarPaymentStatus? paymentStatus;
@@ -20,14 +21,15 @@ class CarTripFilter {
   final String? query;
 
   const CarTripFilter({
-    this.status,
+    CarTripStatus? status,
     this.paymentStatus,
     this.carId,
     this.warehouseId,
     this.from,
     this.to,
     this.query,
-  });
+  }) : status = status ??
+            (paymentStatus != null ? CarTripStatus.closed : null);
 
   bool get isEmpty =>
       status == null &&
