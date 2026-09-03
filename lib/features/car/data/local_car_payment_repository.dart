@@ -20,7 +20,7 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
   final Future<Database> Function() _database;
 
   @override
-  Future<void> persistPayment({
+  Future<int> persistPayment({
     required CarPaymentTransaction transaction,
     required List<CarPaymentAllocation> allocations,
     required List<CarTrip> updatedTrips,
@@ -71,8 +71,10 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
     }
 
     final db = await _database();
+    var createdTransactionId = 0;
+
     await db.transaction((txn) async {
-      final transactionId = await txn.insert('car_payment_transactions', {
+      createdTransactionId = await txn.insert('car_payment_transactions', {
         'cash_amount_minor': cash,
         'transfer_amount_minor': transfer,
         'reference': transaction.reference?.trim().isEmpty == true
@@ -133,7 +135,7 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
         }
 
         await txn.insert('car_payment_allocations', {
-          'payment_transaction_id': transactionId,
+          'payment_transaction_id': createdTransactionId,
           'trip_id': allocation.tripId,
           'cash_amount_minor': allocation.cashAmount.minorUnits,
           'transfer_amount_minor': allocation.transferAmount.minorUnits,
@@ -167,6 +169,8 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
         }
       }
     });
+
+    return createdTransactionId;
   }
 
   @override
@@ -188,6 +192,16 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
           ),
         )
         .toList(growable: false);
+  }
+
+  @override
+  Future<List<CarPaymentAllocation>> getAllocations() async {
+    final db = await _database();
+    final rows = await db.query(
+      'car_payment_allocations',
+      orderBy: 'id ASC',
+    );
+    return rows.map(_allocationFromRow).toList(growable: false);
   }
 
   @override
@@ -216,6 +230,104 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
       orderBy: 'id ASC',
     );
     return rows.map(_allocationFromRow).toList(growable: false);
+  }
+
+  @override
+  Future<List<int>> deleteTransaction(int transactionId) async {
+    if (transactionId <= 0) {
+      throw ArgumentError('Invalid payment transaction ID.');
+    }
+
+    final db = await _database();
+    final affectedTripIds = <int>[];
+
+    await db.transaction((txn) async {
+      final transactionRows = await txn.query(
+        'car_payment_transactions',
+        columns: ['id'],
+        where: 'id = ?',
+        whereArgs: [transactionId],
+        limit: 1,
+      );
+      if (transactionRows.isEmpty) {
+        throw StateError('Payment transaction was not found.');
+      }
+
+      final allocations = await txn.query(
+        'car_payment_allocations',
+        columns: [
+          'trip_id',
+          'cash_amount_minor',
+          'transfer_amount_minor',
+        ],
+        where: 'payment_transaction_id = ?',
+        whereArgs: [transactionId],
+        orderBy: 'id ASC',
+      );
+      if (allocations.isEmpty) {
+        throw StateError('Payment transaction has no allocations.');
+      }
+
+      for (final allocation in allocations) {
+        final tripId = (allocation['trip_id'] as num).toInt();
+        final cash = (allocation['cash_amount_minor'] as num).toInt();
+        final transfer = (allocation['transfer_amount_minor'] as num).toInt();
+
+        final tripRows = await txn.query(
+          'car_trips',
+          columns: ['id', 'paid_cash_minor', 'paid_transfer_minor'],
+          where: 'id = ?',
+          whereArgs: [tripId],
+          limit: 1,
+        );
+        if (tripRows.isEmpty) {
+          throw StateError('Car trip $tripId was not found.');
+        }
+
+        final row = tripRows.single;
+        final paidCash = (row['paid_cash_minor'] as num).toInt();
+        final paidTransfer = (row['paid_transfer_minor'] as num).toInt();
+        if (paidCash < cash || paidTransfer < transfer) {
+          throw StateError(
+            'Payment ${transactionId} cannot be deleted because the trip balance changed.',
+          );
+        }
+
+        final updated = await txn.update(
+          'car_trips',
+          {
+            'paid_cash_minor': paidCash - cash,
+            'paid_transfer_minor': paidTransfer - transfer,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          },
+          where: '''
+            id = ?
+            AND paid_cash_minor = ?
+            AND paid_transfer_minor = ?
+          ''',
+          whereArgs: [tripId, paidCash, paidTransfer],
+        );
+        if (updated != 1) {
+          throw StateError(
+            'Car trip $tripId changed while deleting payment $transactionId.',
+          );
+        }
+        affectedTripIds.add(tripId);
+      }
+
+      await txn.delete(
+        'car_payment_allocations',
+        where: 'payment_transaction_id = ?',
+        whereArgs: [transactionId],
+      );
+      await txn.delete(
+        'car_payment_transactions',
+        where: 'id = ?',
+        whereArgs: [transactionId],
+      );
+    });
+
+    return List.unmodifiable(affectedTripIds);
   }
 
   CarPaymentAllocation _allocationFromRow(Map<String, Object?> row) =>
