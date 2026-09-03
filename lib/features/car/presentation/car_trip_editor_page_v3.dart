@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/repositories/app_services.dart';
+import '../../../core/ui/dialogs.dart';
 import '../../products/domain/product.dart';
 import '../../products/presentation/product_form_page.dart';
 import '../application/usecases/confirm_car_trip.dart';
@@ -103,8 +104,9 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         _original = trip;
         _selectedCar =
             _cars.where((car) => car.id == trip.salesCarId).firstOrNull;
-        _selectedWarehouse =
-            _warehouses.where((warehouse) => warehouse.id == trip.warehouseId).firstOrNull;
+        _selectedWarehouse = _warehouses
+            .where((warehouse) => warehouse.id == trip.warehouseId)
+            .firstOrNull;
         _dueDate = trip.dueDate?.toLocal();
         _displayNumber = trip.displayNumber;
         _globalDiscountPercent = trip.globalDiscountPercent;
@@ -777,7 +779,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
                 children: [
                   Expanded(
                     child: Text(
-                      '$line.soldCartons sold',
+                      '${line.soldCartons} sold',
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
@@ -887,13 +889,20 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             ),
             const SizedBox(height: 10),
             _summaryRow('Product discounts', summary.productDiscountTotal),
-            _summaryRow('Buying after product discounts', summary.subtotalAfterProducts),
+            _summaryRow(
+              'Buying after product discounts',
+              summary.subtotalAfterProducts,
+            ),
             _summaryRow('Global % discount', summary.globalDiscountPercentAmount),
             _summaryRow('Global EGP discount', summary.globalDiscountFixedAmount),
             _summaryRow('Final buying cost', summary.totalPurchaseCost),
             const Divider(height: 18),
             _summaryRow('Profit', summary.profit, strong: true),
-            _summaryRow('Selling total', summary.finalTotalSoldValue, strong: true),
+            _summaryRow(
+              'Selling total',
+              summary.finalTotalSoldValue,
+              strong: true,
+            ),
           ],
         ),
       ),
