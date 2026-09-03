@@ -7,12 +7,14 @@ import '../ui/app_card.dart';
 import '../ui/section_header.dart';
 import '../ui/status_badge.dart';
 
-/// More page: appearance, data mode, security, and the independent Car app.
+/// Global app settings shared by every application flavor.
 class SettingsPage extends StatelessWidget {
   final AppThemeController themeController;
   final VoidCallback? onLock;
   final VoidCallback? onReset;
   final VoidCallback? onOpenCarApp;
+  final bool showOperations;
+  final String resetSubtitle;
 
   const SettingsPage({
     super.key,
@@ -20,6 +22,8 @@ class SettingsPage extends StatelessWidget {
     this.onLock,
     this.onReset,
     this.onOpenCarApp,
+    this.showOperations = true,
+    this.resetSubtitle = 'Clear local database and re-seed demo data',
   });
 
   @override
@@ -30,17 +34,19 @@ class SettingsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          const SectionHeader(title: 'Operations'),
-          const SizedBox(height: AppSpacing.md),
-          AppCard(
-            child: _ActionRow(
-              icon: Icons.local_shipping_rounded,
-              title: 'Car Sales',
-              subtitle: 'Daily loads, returns, sold cartons, payments and reports',
-              onTap: onOpenCarApp,
+          if (showOperations) ...[
+            const SectionHeader(title: 'Operations'),
+            const SizedBox(height: AppSpacing.md),
+            AppCard(
+              child: _ActionRow(
+                icon: Icons.local_shipping_rounded,
+                title: 'Car Sales',
+                subtitle: 'Daily loads, returns, sold cartons, payments and reports',
+                onTap: onOpenCarApp,
+              ),
             ),
-          ),
-          const SizedBox(height: AppSpacing.xl),
+            const SizedBox(height: AppSpacing.xl),
+          ],
           const SectionHeader(title: 'Appearance'),
           const SizedBox(height: AppSpacing.md),
           Row(
@@ -116,7 +122,7 @@ class SettingsPage extends StatelessWidget {
                 _ActionRow(
                   icon: Icons.restart_alt_rounded,
                   title: 'Reset device data',
-                  subtitle: 'Clear local database and re-seed demo data',
+                  subtitle: resetSubtitle,
                   onTap: onReset,
                 ),
               ],
