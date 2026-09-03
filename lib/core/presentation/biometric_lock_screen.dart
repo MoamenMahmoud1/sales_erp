@@ -8,14 +8,9 @@ import '../security/biometric_auth.dart';
 
 /// Full-screen local authentication gate.
 ///
-/// Available authentication methods are shown explicitly:
-/// - Face when the platform reports it as enrolled.
-/// - Fingerprint when the platform reports it as enrolled.
-/// - Generic biometric for platforms that report only a classification.
-/// - Device PIN/password/passcode when device credentials are supported.
-///
-/// The app never receives or stores the device credential. For biometric
-/// authentication, the final sensor selection remains controlled by the OS.
+/// Sales ERP owns the lock-screen UI/UX. The native biometric prompt is only
+/// requested after the user explicitly chooses a method and taps Unlock.
+/// The actual biometric/device credential verification remains OS-owned.
 class BiometricLockScreen extends StatefulWidget {
   final BiometricAuth auth;
   final VoidCallback onUnlocked;
@@ -32,7 +27,7 @@ class BiometricLockScreen extends StatefulWidget {
 
 enum _AuthMethod { face, fingerprint, biometric, deviceCredential }
 
-enum _AuthPhase { authenticating, failed, success }
+enum _AuthPhase { ready, authenticating, failed, success }
 
 class _BiometricLockScreenState extends State<BiometricLockScreen>
     with SingleTickerProviderStateMixin {
@@ -40,14 +35,15 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
 
   Set<BiometricType> _available = const {};
   _AuthMethod _method = _AuthMethod.deviceCredential;
-  _AuthPhase _phase = _AuthPhase.authenticating;
+  _AuthPhase _phase = _AuthPhase.ready;
   bool _attemptInFlight = false;
-  bool _autoAttemptStarted = false;
   bool _deviceCredentialAvailable = false;
 
   List<_AuthMethod> get _methods {
     final methods = <_AuthMethod>[];
-    if (_available.contains(BiometricType.face)) methods.add(_AuthMethod.face);
+    if (_available.contains(BiometricType.face)) {
+      methods.add(_AuthMethod.face);
+    }
     if (_available.contains(BiometricType.fingerprint)) {
       methods.add(_AuthMethod.fingerprint);
     }
@@ -56,7 +52,9 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
         !methods.contains(_AuthMethod.fingerprint)) {
       methods.add(_AuthMethod.biometric);
     }
-    if (_deviceCredentialAvailable) methods.add(_AuthMethod.deviceCredential);
+    if (_deviceCredentialAvailable) {
+      methods.add(_AuthMethod.deviceCredential);
+    }
     return methods;
   }
 
@@ -65,7 +63,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     super.initState();
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 650),
+      duration: const Duration(milliseconds: 500),
       lowerBound: 0.0,
       upperBound: 1.0,
       value: 0.0,
@@ -80,30 +78,40 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
 
     _available = available;
     _deviceCredentialAvailable = credentialAvailable;
+
     final methods = _methods;
-    final preferred =
-        methods.isEmpty ? _AuthMethod.deviceCredential : methods.first;
+    final preferred = methods.isEmpty
+        ? _AuthMethod.deviceCredential
+        : methods.first;
 
     setState(() {
       _method = preferred;
-      _phase = _AuthPhase.authenticating;
+      _phase = _AuthPhase.ready;
     });
+  }
 
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || _autoAttemptStarted || methods.isEmpty) return;
-    _autoAttemptStarted = true;
-    await _attempt(preferred);
+  void _selectMethod(_AuthMethod method) {
+    if (_attemptInFlight || _phase == _AuthPhase.success) return;
+
+    setState(() {
+      _method = method;
+      _phase = _AuthPhase.ready;
+      _animationController
+        ..stop()
+        ..value = 0.0;
+    });
   }
 
   Future<void> _attempt(_AuthMethod method) async {
     if (!mounted || _attemptInFlight) return;
+
     _attemptInFlight = true;
     setState(() {
       _method = method;
       _phase = _AuthPhase.authenticating;
       _animationController
         ..stop()
-        ..value = 0;
+        ..value = 0.0;
     });
 
     final result = switch (method) {
@@ -127,12 +135,14 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
 
     if (result == BiometricResult.success) {
       setState(() => _phase = _AuthPhase.success);
-      await _animationController.forward();
+      await _animationController.forward(from: 0.0);
+      if (!mounted) return;
       HapticFeedback.heavyImpact();
-      if (mounted) widget.onUnlocked();
+      widget.onUnlocked();
     } else {
       setState(() => _phase = _AuthPhase.failed);
-      await _animationController.forward();
+      await _animationController.forward(from: 0.0);
+      if (!mounted) return;
       HapticFeedback.mediumImpact();
     }
 
@@ -148,28 +158,28 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
   String get _title {
     switch (_method) {
       case _AuthMethod.face:
-        return 'Face authentication';
+        return 'Unlock with Face';
       case _AuthMethod.fingerprint:
-        return 'Fingerprint authentication';
+        return 'Unlock with Fingerprint';
       case _AuthMethod.biometric:
-        return 'Biometric authentication';
+        return 'Unlock with Biometrics';
       case _AuthMethod.deviceCredential:
-        return 'Phone PIN or password';
+        return 'Unlock with Phone PIN';
     }
   }
 
   String get _subtitle {
     switch (_phase) {
+      case _AuthPhase.ready:
+        return 'Choose a security method, then tap Unlock.';
       case _AuthPhase.authenticating:
-        return 'Authenticate once to unlock Sales ERP on this app session.';
+        return 'Waiting for your phone to verify you.';
       case _AuthPhase.failed:
-        return 'Authentication was not accepted. Choose a method or try again.';
+        return 'Verification was not accepted. Try again or choose another method.';
       case _AuthPhase.success:
-        return 'Authentication successful. Welcome back.';
+        return 'Verified. Opening Sales ERP.';
     }
   }
-
-  IconData get _methodIcon => _methodIconFor(_method);
 
   String _methodLabel(_AuthMethod method) {
     switch (method) {
@@ -180,7 +190,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
       case _AuthMethod.biometric:
         return 'Biometric';
       case _AuthMethod.deviceCredential:
-        return 'Phone PIN / password';
+        return 'Phone PIN';
     }
   }
 
@@ -222,23 +232,12 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
           dy = -math.sin(progress * math.pi * 5) * (1 - progress) * 7;
       }
     } else if (success) {
-      switch (_method) {
-        case _AuthMethod.face:
-          scale = 1.0 + 0.10 * progress;
-          rotation = 0.04 * math.sin(progress * math.pi);
-        case _AuthMethod.fingerprint:
-          scale = 1.0 + 0.14 * math.sin(progress * math.pi / 2);
-        case _AuthMethod.biometric:
-          scale = 1.0 + 0.08 * progress;
-          rotation = -0.025 * progress;
-        case _AuthMethod.deviceCredential:
-          dy = -10 * progress;
-          scale = 1.0 + 0.05 * progress;
-      }
+      scale = 1.0 + 0.08 * progress;
+      rotation = 0.025 * math.sin(progress * math.pi);
     }
 
     final color = failed ? scheme.error : scheme.primary;
-    final icon = success ? Icons.verified_rounded : _methodIcon;
+    final icon = success ? Icons.verified_rounded : _methodIconFor(_method);
 
     return Transform.translate(
       offset: Offset(dx, dy),
@@ -269,13 +268,16 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
               ],
             ),
             child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
+              duration: const Duration(milliseconds: 180),
               transitionBuilder: (child, animation) => ScaleTransition(
                 scale: CurvedAnimation(
                   parent: animation,
-                  curve: Curves.easeOutBack,
+                  curve: Curves.easeOutCubic,
                 ),
-                child: FadeTransition(opacity: animation, child: child),
+                child: FadeTransition(
+                  opacity: animation,
+                  child: child,
+                ),
               ),
               child: Icon(
                 icon,
@@ -290,9 +292,8 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     );
   }
 
-  Widget _methodSelector() {
+  Widget _methodSelector(ColorScheme scheme, ThemeData theme) {
     final methods = _methods;
-    final scheme = Theme.of(context).colorScheme;
     if (methods.length <= 1 || _phase == _AuthPhase.success) {
       return const SizedBox.shrink();
     }
@@ -321,14 +322,15 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                   : scheme.outlineVariant,
               width: _method == method ? 1.5 : 1,
             ),
-            labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+            labelStyle: theme.textTheme.labelLarge?.copyWith(
               color: _method == method
                   ? scheme.onPrimaryContainer
                   : scheme.onSurface,
-              fontWeight: _method == method ? FontWeight.w700 : FontWeight.w600,
+              fontWeight:
+                  _method == method ? FontWeight.w700 : FontWeight.w600,
             ),
             showCheckmark: false,
-            onSelected: _attemptInFlight ? null : (_) => _attempt(method),
+            onSelected: _attemptInFlight ? null : (_) => _selectMethod(method),
           ),
       ],
     );
@@ -339,6 +341,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isSuccess = _phase == _AuthPhase.success;
+    final hasMethod = _methods.isNotEmpty;
 
     return Scaffold(
       body: DecoratedBox(
@@ -395,26 +398,23 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                       ),
                     ),
                     const SizedBox(height: 20),
-                    _methodSelector(),
+                    _methodSelector(scheme, theme),
                     const SizedBox(height: 20),
                     if (!isSuccess)
                       FilledButton.icon(
-                        onPressed: _attemptInFlight
+                        onPressed: _attemptInFlight || !hasMethod
                             ? null
                             : () => _attempt(_method),
-                        icon: Icon(_methodIcon),
+                        icon: Icon(_methodIconFor(_method)),
                         label: Text(
-                          _phase == _AuthPhase.failed
-                              ? 'Try again with ${_methodLabel(_method)}'
-                              : 'Use ${_methodLabel(_method)}',
+                          _phase == _AuthPhase.failed ? 'Try again' : 'Unlock',
                         ),
                         style: FilledButton.styleFrom(
                           backgroundColor: scheme.primary,
                           foregroundColor: scheme.onPrimary,
                           disabledBackgroundColor:
-                              scheme.primary.withValues(alpha: 0.55),
-                          disabledForegroundColor:
-                              scheme.onPrimary.withValues(alpha: 0.85),
+                              scheme.surfaceContainerHighest,
+                          disabledForegroundColor: scheme.onSurfaceVariant,
                           elevation: 2,
                           minimumSize: const Size.fromHeight(54),
                           shape: RoundedRectangleBorder(
@@ -422,6 +422,16 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
                           ),
                         ),
                       ),
+                    if (!hasMethod) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'No supported device authentication method is available.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.error,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 18),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
