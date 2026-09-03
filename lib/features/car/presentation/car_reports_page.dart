@@ -5,6 +5,8 @@ import '../../../core/ui/app_card.dart';
 import '../../../core/ui/empty_state.dart';
 import '../domain/entities/car_totals.dart';
 
+/// Overall Car dashboard/report view. Unlike the Today dashboard, this view
+/// intentionally includes all recorded Car activity unless a date range is set.
 class CarReportsPage extends StatefulWidget {
   const CarReportsPage({super.key});
 
@@ -85,7 +87,7 @@ class _CarReportsPageState extends State<CarReportsPage> {
     if (_error != null || totals == null) {
       return Center(child: EmptyState(
         icon: Icons.error_outline_rounded,
-        title: 'Unable to load Car report',
+        title: 'Unable to load Car overview',
         message: _error ?? 'No report data available.',
         actionLabel: 'Retry',
         onAction: _load,
@@ -97,9 +99,9 @@ class _CarReportsPageState extends State<CarReportsPage> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
         children: [
-          const Text('Car reports', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+          const Text('Overall Car dashboard', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
-          Text('Operational and financial summary for finalized Car activity.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          Text('All recorded Car activity unless you choose a date range.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
           const SizedBox(height: 16),
           _dateFilter(),
           const SizedBox(height: 16),
@@ -156,7 +158,7 @@ class _CarReportsPageState extends State<CarReportsPage> {
 
   Widget _financial(CarTotals totals) => AppCard(
         child: Column(children: [
-          const Align(alignment: Alignment.centerLeft, child: Text('Financial report', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900))),
+          const Align(alignment: Alignment.centerLeft, child: Text('Financial overview', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900))),
           const SizedBox(height: 10),
           _row('Gross sold value', totals.grossSubtotal.minorUnits),
           _row('Product discounts', totals.productDiscountTotal.minorUnits),
