@@ -45,10 +45,32 @@ class AppDatabase {
       onUpgrade: (db, oldVersion, _) => runAppMigrations(db, oldVersion),
     );
 
+    // Version 16 adds product categories. Keep this tiny compatibility step
+    // here so databases upgraded from any previous schema get the new column
+    // even though older installations may have skipped intermediate versions.
+    await _ensureProductCategoryColumn(database);
     await ensureCarReturnedValueColumns(database);
     _database = database;
     await _cleanupExpiredInvoiceChanges(database);
     return database;
+  }
+
+  static Future<void> _ensureProductCategoryColumn(Database db) async {
+    final rows = await db.rawQuery('PRAGMA table_info(products)');
+    final columns = {for (final row in rows) row['name'] as String};
+    if (columns.contains('category')) return;
+
+    await db.transaction((txn) async {
+      await txn.execute(
+        "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'General'",
+      );
+      await txn.execute(
+        "UPDATE products SET category = 'General' WHERE TRIM(COALESCE(category, '')) = ''",
+      );
+      await txn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)',
+      );
+    });
   }
 
   static Future<void> _cleanupExpiredInvoiceChanges(Database db) async {
