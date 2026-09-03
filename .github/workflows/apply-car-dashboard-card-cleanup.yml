@@ -1,0 +1,220 @@
+name: Apply Car Dashboard Card Cleanup
+
+on:
+  push:
+    branches:
+      - fix/car-dashboard-card-cleanup
+
+jobs:
+  cleanup:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update canonical dashboard card
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          dashboard = Path('lib/features/car/presentation/car_daily_dashboard_page.dart')
+          text = dashboard.read_text()
+
+          if "import '../../../core/theme/app_tokens.dart';" not in text:
+              text = text.replace(
+                  "import '../../../core/ui/status_badge.dart';\n",
+                  "import '../../../core/ui/status_badge.dart';\nimport '../../../core/theme/app_tokens.dart';\n",
+                  1,
+              )
+
+          start = text.index("  Widget _tripCard(CarTripSummaryView trip) {")
+          end = text.index("  Widget _dataPill(", start)
+
+          new_card = r'''  Widget _tripCard(CarTripSummaryView trip) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDraft = trip.status == CarTripStatus.open;
+    final payment = _paymentStatus(trip);
+    final confirming = _confirmingTripId == trip.id;
+    final borderColor = isDraft ? scheme.tertiary : scheme.primary;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.all(1),
+        decoration: BoxDecoration(
+          borderRadius: AppRadius.xlAll,
+          border: Border.all(color: borderColor.withValues(alpha: .28)),
+        ),
+        child: AppCard(
+          borderRadius: AppRadius.xlAll,
+          padding: const EdgeInsets.all(14),
+          onTap: confirming
+              ? null
+              : () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: trip.id)),
+                  ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: isDraft ? scheme.tertiaryContainer : scheme.primaryContainer,
+                      borderRadius: AppRadius.mdAll,
+                    ),
+                    child: Icon(
+                      isDraft ? Icons.edit_note_rounded : Icons.local_shipping_rounded,
+                      color: isDraft ? scheme.onTertiaryContainer : scheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          trip.displayNumber,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${trip.salesCarName} · ${trip.warehouseName}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      StatusBadge(
+                        type: isDraft ? StatusType.warning : StatusType.success,
+                        label: isDraft ? 'Draft' : 'Confirmed',
+                      ),
+                      if (!isDraft) ...[
+                        const SizedBox(height: 5),
+                        StatusBadge(type: payment.type, label: payment.label),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _dataPill('Loaded', '${trip.totalLoadedCartons}', scheme.surfaceContainerHighest),
+                  _dataPill('Returned', '${trip.totalReturnedCartons}', scheme.surfaceContainerHighest),
+                  _dataPill('Sold', '${trip.totalSoldCartons}', scheme.surfaceContainerHighest),
+                ],
+              ),
+              if (!isDraft) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _financePill(
+                      'Selling',
+                      _money(trip.finalValue.minorUnits),
+                      scheme.primaryContainer,
+                      scheme.primary,
+                    ),
+                    _financePill(
+                      'Buying',
+                      _money(trip.purchaseValue.minorUnits),
+                      scheme.secondaryContainer,
+                      scheme.secondary,
+                    ),
+                    _financePill(
+                      'Profit',
+                      _money(trip.profitValue.minorUnits),
+                      scheme.tertiaryContainer,
+                      scheme.onTertiaryContainer,
+                    ),
+                  ],
+                ),
+              ],
+              if (isDraft) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.tonalIcon(
+                    onPressed: _confirming ? null : () => _confirmDraft(trip),
+                    icon: confirming
+                        ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.check_circle_outline_rounded, size: 18),
+                    label: Text(confirming ? 'Confirming...' : 'Confirm Draft'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _financePill(String label, String value, Color background, Color foreground) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: AppRadius.mdAll,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: foreground.withValues(alpha: .78),
+            ),
+          ),
+          const SizedBox(height: 1),
+          Text(
+            value,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: foreground),
+          ),
+        ],
+      ),
+    );
+  }
+
+'''
+          text = text[:start] + new_card + text[end:]
+          dashboard.write_text(text)
+
+          summary_file = Path('lib/features/car/domain/entities/car_trip_summary_view.dart')
+          summary = summary_file.read_text()
+          marker = "  CarMoney get remaining {\n"
+          getter = "  CarMoney get purchaseValue => subtotalAfterProducts - globalDiscountAmount;\n\n  CarMoney get profitValue => finalValue - purchaseValue;\n\n"
+          if "CarMoney get purchaseValue" not in summary:
+              summary = summary.replace(marker, getter + marker, 1)
+          summary_file.write_text(summary)
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/features/car/presentation/car_daily_dashboard_page.dart lib/features/car/domain/entities/car_trip_summary_view.dart
+          git commit -m "feat(car): restore themed trip card finance details [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME}
