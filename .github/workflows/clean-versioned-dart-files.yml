@@ -25,11 +25,13 @@ jobs:
 
           declare -A latest_num
           declare -A latest_path
+          declare -A bases
 
           while IFS= read -r -d '' path; do
             if [[ "$path" =~ ^(.+)_v([0-9]+)\.dart$ ]]; then
               base="${BASH_REMATCH[1]}.dart"
               num="${BASH_REMATCH[2]}"
+              bases["$base"]=1
               if [[ -z "${latest_num[$base]+x}" || "$num" -gt "${latest_num[$base]}" ]]; then
                 latest_num["$base"]="$num"
                 latest_path["$base"]="$path"
@@ -39,29 +41,29 @@ jobs:
 
           for base in "${!latest_path[@]}"; do
             latest="${latest_path[$base]}"
+            stem="${base%.dart}"
             mkdir -p "$(dirname "$base")"
 
-            # The highest-numbered implementation becomes the canonical file.
-            if [[ "$latest" != "$base" ]]; then
-              cp "$latest" "$base"
-            fi
+            # Promote the highest-numbered implementation to the canonical file.
+            cp "$latest" "$base"
 
-            # Remove all version-suffixed siblings for this base.
-            find "$(dirname "$base")" -maxdepth 1 -type f \
-              -regextype posix-extended -regex '.*/[^/]+_v[0-9]+\.dart' \
-              -delete
+            # Remove only versioned siblings for this exact basename.
+            for candidate in "${stem}"_v*.dart; do
+              [[ -e "$candidate" ]] || continue
+              rm -f "$candidate"
+            done
           done
 
-          # Remove version suffixes from Dart imports and identifiers.
+          # Canonicalize imports and Dart identifiers such as PageV5 -> Page.
           find lib test -type f -name '*.dart' -print0 2>/dev/null | \
             xargs -0 -r perl -pi -e 's/_v[0-9]+\.dart/.dart/g; s/\b([A-Za-z_][A-Za-z0-9_]*)V[0-9]+\b/$1/g'
 
           # Keep the public app version on the 0.123 baseline.
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p = Path("pubspec.yaml")
           text = p.read_text()
-          import re
           text, count = re.subn(r'(?m)^version:\s*\S+\s*$', 'version: 0.123.0+123', text, count=1)
           if count != 1:
               raise SystemExit('version field not found')
@@ -70,7 +72,6 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git rm -f .github/workflows/clean-versioned-dart-files.yml 2>/dev/null || true
           git add -A
 
