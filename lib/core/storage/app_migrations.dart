@@ -15,6 +15,7 @@ Future<void> runAppMigrations(Database db, int oldVersion) async {
   if (oldVersion < 11) await _migrateToVersion11(db);
   if (oldVersion < 12) await _migrateToVersion12(db);
   if (oldVersion < 13) await _migrateToVersion13(db);
+  if (oldVersion < 14) await _migrateToVersion14(db);
 }
 
 Future<void> _migrateToVersion2(Database db) async {
@@ -325,6 +326,47 @@ Future<void> _migrateToVersion13(Database db) async {
           'unit_price': item['unit_price'],
         });
       }
+    }
+  });
+}
+
+Future<void> _migrateToVersion14(Database db) async {
+  await db.transaction((txn) async {
+    final productColumns = await txn.rawQuery('PRAGMA table_info(products)');
+    final products = {for (final row in productColumns) row['name'] as String};
+
+    if (!products.contains('purchase_price')) {
+      await txn.execute(
+        'ALTER TABLE products ADD COLUMN purchase_price REAL NOT NULL DEFAULT 0',
+      );
+      await txn.execute(
+        'UPDATE products SET purchase_price = price',
+      );
+    }
+
+    final tripItemColumns = await txn.rawQuery('PRAGMA table_info(car_trip_items)');
+    final tripItems = {for (final row in tripItemColumns) row['name'] as String};
+    if (!tripItems.contains('purchase_price_minor')) {
+      await txn.execute(
+        'ALTER TABLE car_trip_items ADD COLUMN purchase_price_minor INTEGER NOT NULL DEFAULT 0',
+      );
+      await txn.execute(
+        'UPDATE car_trip_items SET purchase_price_minor = unit_price_minor',
+      );
+    }
+
+    final revisionItemColumns =
+        await txn.rawQuery('PRAGMA table_info(car_revision_items)');
+    final revisionItems = {
+      for (final row in revisionItemColumns) row['name'] as String,
+    };
+    if (!revisionItems.contains('purchase_price_minor')) {
+      await txn.execute(
+        'ALTER TABLE car_revision_items ADD COLUMN purchase_price_minor INTEGER NOT NULL DEFAULT 0',
+      );
+      await txn.execute(
+        'UPDATE car_revision_items SET purchase_price_minor = unit_price_minor',
+      );
     }
   });
 }
