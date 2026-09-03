@@ -50,6 +50,12 @@ class CarTripSummaryView {
 
   CarMoney get paidTotal => paidCash + paidTransfer;
 
+  /// Final buying cost after product-level and global buying discounts.
+  CarMoney get purchaseValue => subtotalAfterProducts - globalDiscountAmount;
+
+  /// Selling revenue minus the final buying cost.
+  CarMoney get profitValue => finalValue - purchaseValue;
+
   CarMoney get remaining {
     final value = finalValue - paidTotal;
     return value.isNegative ? CarMoney.zero : value;
