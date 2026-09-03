@@ -292,6 +292,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
 
   Widget _methodSelector() {
     final methods = _methods;
+    final scheme = Theme.of(context).colorScheme;
     if (methods.length <= 1 || _phase == _AuthPhase.success) {
       return const SizedBox.shrink();
     }
