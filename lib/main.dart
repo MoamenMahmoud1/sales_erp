@@ -1,3 +1,5 @@
+import 'package:flutter/widgets.dart';
+
 import 'app/app.dart';
 import 'core/data/demo_data_seeder.dart';
 import 'core/presentation/app_shell.dart';
