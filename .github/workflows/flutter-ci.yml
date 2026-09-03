@@ -30,3 +30,9 @@ jobs:
 
       - name: Test
         run: flutter test
+
+      - name: Build full debug APK
+        run: flutter build apk --debug --flavor full -t lib/main.dart
+
+      - name: Build car debug APK
+        run: flutter build apk --debug --flavor car -t lib/main_car.dart
