@@ -36,18 +36,22 @@ class AppCard extends StatelessWidget {
     final gradientCard =
         gradient != null ||
         (filled && color == scheme.secondaryContainer && radius == AppRadius.xlAll);
+
+    final bool isLight = scheme.brightness == Brightness.light;
+    final Color buyingStart = isLight
+        ? Color.lerp(colors.info, colors.infoContainer, .48)!
+        : colors.infoContainer;
+    final Color buyingEnd = isLight
+        ? Color.lerp(colors.info, colors.infoContainer, .66)!
+        : Color.lerp(colors.infoContainer, colors.info, .42)!;
+
     final cardGradient = gradient ??
         (gradientCard
-            ? const LinearGradient(
+            ? LinearGradient(
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
-                stops: [0.0, 0.30, 0.68, 1.0],
-                colors: [
-                  Color(0xFF1976D2),
-                  Color(0xFF64B5F6),
-                  Color(0xFFDCEEFF),
-                  Color(0xFFF7FBFF),
-                ],
+                stops: const [0.0, 0.55, 1.0],
+                colors: [buyingStart, Color.lerp(buyingStart, buyingEnd, .55)!, buyingEnd],
               )
             : null);
 
@@ -63,7 +67,7 @@ class AppCard extends StatelessWidget {
         border: filled
             ? Border.all(
                 color: gradientCard
-                    ? const Color(0xFF1976D2).withValues(alpha: .16)
+                    ? colors.info.withValues(alpha: .30)
                     : colors.divider,
                 width: 1,
               )
@@ -71,7 +75,7 @@ class AppCard extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: gradientCard
-                ? const Color(0xFF1976D2).withValues(alpha: .10)
+                ? colors.info.withValues(alpha: .14)
                 : colors.scrim.withValues(alpha: 0.04),
             blurRadius: gradientCard ? 18 : 16,
             offset: const Offset(0, 6),
