@@ -1,12 +1,9 @@
 import 'car_load_item.dart';
 import 'car_payment.dart';
 import 'car_trip_status.dart';
+import 'money.dart';
 
 /// Immutable snapshot of a car trip at a point in time.
-///
-/// Every field required to reconstruct the historical transaction is frozen
-/// here. Future edits to the current car, warehouse, products, prices or
-/// discounts must never change an existing revision.
 class CarRevision {
   final int id;
   final int tripId;
@@ -26,6 +23,8 @@ class CarRevision {
   final DateTime? dueDate;
   final List<CarLoadItem> items;
   final double globalDiscountPercent;
+  final CarMoney globalDiscountEgp;
+  final CarMoney globalDiscountAmount;
   final CarPayment payment;
 
   const CarRevision({
@@ -45,6 +44,8 @@ class CarRevision {
     this.dueDate,
     this.items = const [],
     this.globalDiscountPercent = 0,
+    this.globalDiscountEgp = CarMoney.zero,
+    this.globalDiscountAmount = CarMoney.zero,
     this.payment = const CarPayment(),
   });
 }
