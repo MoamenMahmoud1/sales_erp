@@ -23,7 +23,7 @@ class _ProductsPageState
   final _repository =
       LocalProductRepository();
 
-    ProductRepository get _dataSource =>
+  ProductRepository get _dataSource =>
       widget.repository ?? _repository;
 
   final _searchController =
@@ -111,16 +111,16 @@ class _ProductsPageState
     Product? product,
   }) async {
     final saved =
-        await Navigator.of(context).push<bool>(
+        await Navigator.of(context).push<Product>(
       MaterialPageRoute(
         builder: (_) => ProductFormPage(
-            product: product,
-            repository: _dataSource,
+          product: product,
+          repository: _dataSource,
         ),
       ),
     );
 
-    if (saved == true && mounted) {
+    if (saved != null && mounted) {
       await _loadProducts();
     }
   }
@@ -447,4 +447,3 @@ class _ProductsPageState
     );
   }
 }
-
