@@ -5,13 +5,8 @@ from products.models import CartonPricing, Product
 
 
 class ProductSerializer(serializers.ModelSerializer):
-    sold_quantity = serializers.IntegerField(
-        read_only=True,
-    )
-
-    total_stock = serializers.IntegerField(
-        read_only=True,
-    )
+    sold_quantity = serializers.IntegerField(read_only=True)
+    total_stock = serializers.IntegerField(read_only=True)
 
     stock_quantity = serializers.IntegerField(
         read_only=True,
@@ -24,10 +19,10 @@ class ProductSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-
         fields = (
             "id",
             "name",
+            "category",
             "purchase_price",
             "selling_price",
             "total_stock",
@@ -36,7 +31,6 @@ class ProductSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-
         read_only_fields = (
             "id",
             "created_at",
@@ -58,9 +52,7 @@ class ProductSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         for attribute, value in validated_data.items():
             setattr(instance, attribute, value)
-
         instance.save()
-
         return instance
 
     async def aupdate(self, instance, validated_data):
@@ -73,7 +65,6 @@ class ProductSerializer(serializers.ModelSerializer):
 class CartonPricingSerializer(serializers.ModelSerializer):
     class Meta:
         model = CartonPricing
-
         fields = (
             "id",
             "name",
@@ -82,7 +73,6 @@ class CartonPricingSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-
         read_only_fields = (
             "id",
             "created_at",
@@ -101,13 +91,11 @@ class CartonPricingSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         for attribute, value in validated_data.items():
             setattr(instance, attribute, value)
-
         instance.save()
-
         return instance
 
     async def aupdate(self, instance, validated_data):
         return await sync_to_async(
             self.update,
             thread_sensitive=True,
-        )(instance, validated_data)
+        )(validated_data)
