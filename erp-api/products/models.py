@@ -15,6 +15,12 @@ class Product(models.Model):
         max_length=200,
     )
 
+    category = models.CharField(
+        max_length=100,
+        default="General",
+        db_index=True,
+    )
+
     purchase_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -40,12 +46,16 @@ class Product(models.Model):
     )
 
     class Meta:
-        ordering = ("name",)
+        ordering = ("category", "name")
 
         indexes = [
             models.Index(
                 fields=("name",),
                 name="products_product_name_idx",
+            ),
+            models.Index(
+                fields=("category", "name"),
+                name="products_product_category_name_idx",
             ),
         ]
 
@@ -66,11 +76,7 @@ class Product(models.Model):
 
     @property
     def total_stock(self):
-        """Aggregated current stock across every StockLocation.
-
-        ``inventory.StockBalance`` is the SINGLE authoritative current-stock
-        state — this is computed by aggregating balances, never a stored field.
-        """
+        """Aggregated current stock across every StockLocation."""
         annotated = getattr(self, "_total_stock", None)
         if annotated is not None:
             return annotated
@@ -80,22 +86,12 @@ class Product(models.Model):
 
     @property
     def stock_quantity(self):
-        """DEPRECATED derived alias of ``total_stock``.
-
-        Retained only so existing API consumers keep receiving a ``stock_quantity``
-        key. It is NOT authoritative — it is computed from StockBalance and must
-        never be written directly.
-        """
+        """Deprecated derived alias of ``total_stock``."""
         return self.total_stock
 
     @property
     def sold_quantity(self):
-        """Quantity sold on confirmed/paid invoices only.
-
-        Draft and cancelled invoices are NOT sales and do not count. Prefer the
-        queryset annotation ``_sold_quantity`` for list/detail endpoints to avoid
-        per-row queries.
-        """
+        """Quantity sold on confirmed/paid invoices only."""
         if hasattr(self, "_sold_quantity"):
             return self._sold_quantity or 0
 
@@ -111,12 +107,7 @@ class Product(models.Model):
 
 
 class CartonPricing(models.Model):
-    """
-    Pricing model for selling a product in carton/pack units.
-
-    This is not a discount coupon.
-    Discount coupons belong to the coupons app.
-    """
+    """Pricing model for selling a product in carton/pack units."""
 
     name = models.CharField(
         max_length=200,
@@ -146,10 +137,8 @@ class CartonPricing(models.Model):
 
     class Meta:
         ordering = ("name",)
-
         verbose_name = "Carton pricing"
         verbose_name_plural = "Carton pricings"
-
         constraints = [
             models.CheckConstraint(
                 condition=Q(
