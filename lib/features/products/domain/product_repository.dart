@@ -8,6 +8,7 @@ abstract interface class ProductRepository {
     required double price,
     double? purchasePrice,
     double? sellingPrice,
+    String category = 'General',
   });
 
   Future<void> updateProduct({
@@ -16,6 +17,7 @@ abstract interface class ProductRepository {
     required double price,
     double? purchasePrice,
     double? sellingPrice,
+    String category = 'General',
   });
 
   Future<void> deleteProduct(int id);
