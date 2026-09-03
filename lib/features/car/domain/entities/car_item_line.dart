@@ -2,9 +2,6 @@ import 'car_load_item.dart';
 import 'money.dart';
 
 /// Fully computed line for one product inside a car trip summary.
-///
-/// A widget only ever reads these pre-computed values; none of the sold /
-/// discount / margin math is performed in presentation code.
 class CarItemLine {
   final CarLoadItem item;
   final int soldCartons;
@@ -30,7 +27,7 @@ class CarItemLine {
     required this.grossValue,
     required this.discountAmount,
     required this.netValue,
-    required this.purchaseCost,
-    required this.profitBeforeGlobalDiscount,
+    this.purchaseCost = CarMoney.zero,
+    this.profitBeforeGlobalDiscount = CarMoney.zero,
   });
 }
