@@ -8,7 +8,7 @@ import '../../../core/ui/dialogs.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../products/presentation/products_page.dart';
-import 'car_daily_dashboard_page.dart';
+import 'car_daily_dashboard_page_v2.dart';
 import 'car_payments_page.dart';
 import 'car_reports_page.dart';
 import 'car_trips_page_v2.dart';
@@ -63,7 +63,7 @@ class _CarAppShellState extends State<CarAppShell> {
     super.initState();
     _index = 0;
     _pages = [
-      CarDailyDashboardPage(onNavigate: _goTo),
+      CarDailyDashboardPageV2(onNavigate: _goTo),
       const CarTripsPageV2(),
       const CarPaymentsPage(),
       const ProductsPage(),
@@ -81,10 +81,8 @@ class _CarAppShellState extends State<CarAppShell> {
 
   void _onTripDeleted(int _) {
     if (!mounted) return;
-    // Deletion is intentionally rare. Recreate the Car pages so Trips,
-    // Payments, and all dashboard/report projections re-read SQLite together
-    // from the same committed state. Creation/payment updates remain reactive
-    // and do not use this path.
+    // Trip deletion is intentionally a consistency boundary. Recreate all Car
+    // projections from SQLite after the atomic delete/rollback is committed.
     setState(() => _contentEpoch++);
   }
 
