@@ -30,24 +30,50 @@ class AppCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
+    final scheme = Theme.of(context).colorScheme;
     final radius = borderRadius ?? AppRadius.lgAll;
     final surface = color ?? (filled ? colors.surface : Colors.transparent);
+    final gradientCard =
+        gradient != null ||
+        (filled && color == scheme.secondaryContainer && radius == AppRadius.xlAll);
+    final cardGradient = gradient ??
+        (gradientCard
+            ? const LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                stops: [0.0, 0.30, 0.68, 1.0],
+                colors: [
+                  Color(0xFF1976D2),
+                  Color(0xFF64B5F6),
+                  Color(0xFFDCEEFF),
+                  Color(0xFFF7FBFF),
+                ],
+              )
+            : null);
+
     final card = AnimatedContainer(
       duration: AppDurations.normal,
       curve: Curves.easeOut,
       margin: margin,
       padding: padding,
       decoration: BoxDecoration(
-        color: gradient == null ? surface : null,
-        gradient: gradient,
+        color: cardGradient == null ? surface : null,
+        gradient: cardGradient,
         borderRadius: radius,
         border: filled
-            ? Border.all(color: colors.divider, width: 1)
+            ? Border.all(
+                color: gradientCard
+                    ? const Color(0xFF1976D2).withValues(alpha: .16)
+                    : colors.divider,
+                width: 1,
+              )
             : null,
         boxShadow: [
           BoxShadow(
-            color: colors.scrim.withValues(alpha: 0.04),
-            blurRadius: 16,
+            color: gradientCard
+                ? const Color(0xFF1976D2).withValues(alpha: .10)
+                : colors.scrim.withValues(alpha: 0.04),
+            blurRadius: gradientCard ? 18 : 16,
             offset: const Offset(0, 6),
           ),
         ],
