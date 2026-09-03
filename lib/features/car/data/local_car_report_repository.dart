@@ -14,8 +14,10 @@ class LocalCarReportRepository implements CarReportRepository {
   @override
   Future<CarTotals> getTotals({DateTime? from, DateTime? to}) async {
     final db = await _database();
-    final where = <String>[];
-    final args = <Object?>[];
+    // Reports represent finalized sales. Open drafts must never change the
+    // financial totals until their confirmation creates the new closed state.
+    final where = <String>['status = ?'];
+    final args = <Object?>['closed'];
 
     if (from != null) {
       where.add('opened_at >= ?');
@@ -26,7 +28,7 @@ class LocalCarReportRepository implements CarReportRepository {
       args.add(to.toUtc().add(const Duration(days: 1)).toIso8601String());
     }
 
-    final clause = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
+    final clause = 'WHERE ${where.join(' AND ')}';
     final row = (await db.rawQuery('''
       SELECT
         COALESCE(SUM(total_loaded_cartons), 0) AS loaded,
@@ -51,8 +53,8 @@ class LocalCarReportRepository implements CarReportRepository {
       $clause
     ''', args)).first;
 
-    // Payment state counts depend on the current time and due date, so they
-    // are evaluated from compact summary rows rather than loading trip items.
+    // Payment state counts also use finalized invoices only. Open drafts are
+    // deliberately invisible to report totals until confirmation.
     final paymentRows = await db.query(
       'car_trips',
       columns: [
@@ -61,7 +63,7 @@ class LocalCarReportRepository implements CarReportRepository {
         'paid_transfer_minor',
         'due_date',
       ],
-      where: clause.isEmpty ? null : clause.substring(6),
+      where: where.join(' AND '),
       whereArgs: args,
     );
 
