@@ -27,13 +27,11 @@ android {
     productFlavors {
         create("full") {
             dimension = "app"
-            resValue("string", "app_name", "Sales ERP")
         }
 
         create("car") {
             dimension = "app"
             applicationIdSuffix = ".car"
-            resValue("string", "app_name", "Sales ERP Car")
         }
     }
 
