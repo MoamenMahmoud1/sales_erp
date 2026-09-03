@@ -16,6 +16,12 @@ class CarTripFilter {
   final DateTime? from;
   final DateTime? to;
 
+  /// Inclusive range on the trip confirmation/closing date/time.
+  /// Useful for operational views such as "confirmed today" where openedAt
+  /// must not decide which day a finalized trip belongs to.
+  final DateTime? confirmedFrom;
+  final DateTime? confirmedTo;
+
   /// Matches display number or car name (case-insensitive substring).
   final String? query;
 
@@ -26,6 +32,8 @@ class CarTripFilter {
     this.warehouseId,
     this.from,
     this.to,
+    this.confirmedFrom,
+    this.confirmedTo,
     this.query,
   });
 
@@ -36,5 +44,7 @@ class CarTripFilter {
       warehouseId == null &&
       from == null &&
       to == null &&
+      confirmedFrom == null &&
+      confirmedTo == null &&
       (query == null || query!.trim().isEmpty);
 }
