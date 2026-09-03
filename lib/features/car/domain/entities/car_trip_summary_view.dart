@@ -22,6 +22,8 @@ class CarTripSummaryView {
   final CarMoney productDiscountTotal;
   final CarMoney subtotalAfterProducts;
   final CarMoney globalDiscountAmount;
+
+  /// Final customer-facing selling total for the summarized trip.
   final CarMoney finalValue;
   final CarMoney paidCash;
   final CarMoney paidTransfer;
