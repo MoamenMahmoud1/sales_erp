@@ -7,6 +7,7 @@ import '../../../core/ui/app_card.dart';
 import '../../../core/ui/day_summary_section.dart';
 import '../../../core/ui/empty_state.dart';
 import '../../../core/ui/status_badge.dart';
+import '../application/usecases/confirm_car_trip.dart';
 import '../domain/entities/car_payment_status.dart';
 import '../domain/entities/car_trip.dart';
 import '../domain/entities/car_trip_filter.dart';
@@ -29,6 +30,7 @@ class _CarTripsPageV4State extends State<CarTripsPageV4> {
   final _searchController = TextEditingController();
   final _calculator = const CarCalculator();
   final _evaluator = const CarPaymentEvaluator();
+  late final ConfirmCarTrip _confirm = ConfirmCarTrip(_repository);
 
   late final StreamSubscription<CarTrip> _tripChanges;
   late final StreamSubscription<int> _tripDeletions;
@@ -38,6 +40,7 @@ class _CarTripsPageV4State extends State<CarTripsPageV4> {
   bool _loading = true;
   String? _error;
   int? _deletingTripId;
+  int? _confirmingTripId;
 
   @override
   void initState() {
@@ -63,9 +66,9 @@ class _CarTripsPageV4State extends State<CarTripsPageV4> {
     switch (_filter) {
       case _TripFilter.all:
         return CarTripFilter(query: query);
-      case _TripFilter.open:
+      case _TripFilter.drafts:
         return CarTripFilter(status: CarTripStatus.open, query: query);
-      case _TripFilter.closed:
+      case _TripFilter.confirmed:
         return CarTripFilter(status: CarTripStatus.closed, query: query);
       case _TripFilter.paid:
         return CarTripFilter(paymentStatus: CarPaymentStatus.paid, query: query);
@@ -150,9 +153,9 @@ class _CarTripsPageV4State extends State<CarTripsPageV4> {
     switch (_filter) {
       case _TripFilter.all:
         return true;
-      case _TripFilter.open:
+      case _TripFilter.drafts:
         return trip.status == CarTripStatus.open;
-      case _TripFilter.closed:
+      case _TripFilter.confirmed:
         return trip.status == CarTripStatus.closed;
       case _TripFilter.paid:
         return status == CarPaymentStatus.paid;
@@ -165,8 +168,44 @@ class _CarTripsPageV4State extends State<CarTripsPageV4> {
     }
   }
 
+  Future<void> _confirmDraft(CarTripSummaryView summary) async {
+    if (_confirmingTripId != null || summary.status != CarTripStatus.open) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm draft?'),
+        content: Text(
+          'Confirm ${summary.displayNumber} for ${summary.salesCarName}? This will finalize the Car trip and it will no longer be a draft.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirm')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _confirmingTripId = summary.id);
+    try {
+      final draft = await _repository.getTripById(summary.id);
+      if (draft == null) throw StateError('Draft was not found.');
+      final persisted = await _confirm(draft, triggeredBy: 'draft_confirm');
+      AppServices.instance.carTripEvents.publish(persisted);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${persisted.displayNumber} confirmed successfully.')),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _confirmingTripId = null);
+    }
+  }
+
   Future<void> _deleteTrip(CarTripSummaryView trip) async {
-    if (_deletingTripId != null) return;
+    if (_deletingTripId != null || _confirmingTripId != null) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -322,14 +361,18 @@ class _CarTripsPageV4State extends State<CarTripsPageV4> {
     final returned = trips.fold<int>(0, (sum, trip) => sum + trip.totalReturnedCartons);
     final sold = trips.fold<int>(0, (sum, trip) => sum + trip.totalSoldCartons);
     final value = trips.fold<int>(0, (sum, trip) => sum + trip.finalValue.minorUnits);
-    return '${trips.length} trip${trips.length == 1 ? '' : 's'} · $loaded loaded · $returned returned · $sold sold · ${_money(value)}';
+    final drafts = trips.where((trip) => trip.status == CarTripStatus.open).length;
+    final suffix = drafts == 0 ? '' : ' · $drafts draft${drafts == 1 ? '' : 's'}';
+    return '${trips.length} trip${trips.length == 1 ? '' : 's'}$suffix · $loaded loaded · $returned returned · $sold sold · ${_money(value)}';
   }
 
   Widget _tripCard(CarTripSummaryView trip) {
     final scheme = Theme.of(context).colorScheme;
+    final isDraft = trip.status == CarTripStatus.open;
     final status = trip.paymentStatus(_evaluator, DateTime.now());
     final deleting = _deletingTripId == trip.id;
-    final badge = switch (status) {
+    final confirming = _confirmingTripId == trip.id;
+    final paymentBadge = switch (status) {
       CarPaymentStatus.paid => (StatusType.success, 'Paid'),
       CarPaymentStatus.partiallyPaid => (StatusType.warning, 'Partial'),
       CarPaymentStatus.unpaid => (StatusType.neutral, 'Unpaid'),
@@ -340,8 +383,9 @@ class _CarTripsPageV4State extends State<CarTripsPageV4> {
       padding: const EdgeInsets.only(bottom: 8),
       child: AppCard(
         padding: const EdgeInsets.all(14),
-        onTap: deleting ? null : () => Navigator.push(context, MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: trip.id))),
+        onTap: deleting || confirming ? null : () => Navigator.push(context, MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: trip.id))),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
               width: 50,
@@ -360,19 +404,41 @@ class _CarTripsPageV4State extends State<CarTripsPageV4> {
               ]),
             ),
             const SizedBox(width: 8),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(_money(trip.finalValue.minorUnits), style: const TextStyle(fontWeight: FontWeight.w900)),
-              const SizedBox(height: 4),
-              StatusBadge(type: badge.$1, label: badge.$2),
-              IconButton(
-                tooltip: 'Delete trip',
-                visualDensity: VisualDensity.compact,
-                onPressed: deleting ? null : () => _deleteTrip(trip),
-                icon: deleting
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.delete_outline_rounded),
-              ),
-            ]),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(_money(trip.finalValue.minorUnits), style: const TextStyle(fontWeight: FontWeight.w900)),
+                const SizedBox(height: 4),
+                StatusBadge(
+                  type: isDraft ? StatusType.warning : paymentBadge.$1,
+                  label: isDraft ? 'Draft' : paymentBadge.$2,
+                ),
+                if (isDraft) ...[
+                  const SizedBox(height: 2),
+                  TextButton.icon(
+                    onPressed: confirming || _confirmingTripId != null || _deletingTripId != null
+                        ? null
+                        : () => _confirmDraft(trip),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 7),
+                    ),
+                    icon: confirming
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.check_circle_outline_rounded, size: 17),
+                    label: Text(confirming ? 'Confirming' : 'Confirm'),
+                  ),
+                ],
+                IconButton(
+                  tooltip: 'Delete trip',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: deleting || confirming ? null : () => _deleteTrip(trip),
+                  icon: deleting
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.delete_outline_rounded),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -382,8 +448,8 @@ class _CarTripsPageV4State extends State<CarTripsPageV4> {
 
 enum _TripFilter {
   all('All'),
-  open('Open'),
-  closed('Closed'),
+  drafts('Drafts'),
+  confirmed('Confirmed'),
   paid('Paid'),
   partial('Partial'),
   unpaid('Unpaid'),
