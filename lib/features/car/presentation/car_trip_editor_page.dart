@@ -12,7 +12,6 @@ import '../application/usecases/revise_car_trip.dart';
 import '../application/usecases/update_car_trip_draft.dart';
 import '../domain/entities/car_load_item.dart';
 import '../domain/entities/car_trip.dart';
-import '../domain/entities/car_trip_status.dart';
 import '../domain/entities/money.dart';
 import '../domain/entities/sales_car.dart';
 import '../domain/entities/warehouse.dart';
