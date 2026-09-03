@@ -22,6 +22,8 @@ class CarTripSummaryView {
   final CarMoney productDiscountTotal;
   final CarMoney subtotalAfterProducts;
   final CarMoney globalDiscountAmount;
+
+  /// Final customer-facing selling total for the summarized trip.
   final CarMoney finalValue;
   final CarMoney paidCash;
   final CarMoney paidTransfer;
@@ -49,6 +51,12 @@ class CarTripSummaryView {
   });
 
   CarMoney get paidTotal => paidCash + paidTransfer;
+
+  /// Final buying cost after product-level and global buying discounts.
+  CarMoney get purchaseValue => subtotalAfterProducts - globalDiscountAmount;
+
+  /// Selling revenue minus the final buying cost.
+  CarMoney get profitValue => finalValue - purchaseValue;
 
   CarMoney get remaining {
     final value = finalValue - paidTotal;

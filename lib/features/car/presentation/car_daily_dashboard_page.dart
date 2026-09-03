@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/repositories/app_services.dart';
+import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/app_card.dart';
 import '../../../core/ui/dialogs.dart';
 import '../../../core/ui/empty_state.dart';
@@ -23,10 +24,10 @@ class CarDailyDashboardPage extends StatefulWidget {
   const CarDailyDashboardPage({super.key, this.onNavigate});
 
   @override
-  State<CarDailyDashboardPage> createState() => _CarDailyDashboardPageV2State();
+  State<CarDailyDashboardPage> createState() => _CarDailyDashboardPageState();
 }
 
-class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPage>
+class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
     with WidgetsBindingObserver {
   final _repository = AppServices.instance.carTripRepository;
   final _calculator = const CarCalculator();
@@ -206,8 +207,6 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPage>
       }
     }
 
-    // Keep the calculation referenced so analyzer does not treat the validation
-    // preview as an accidental unused branch when the domain rules evolve.
     calculated;
   }
 
@@ -373,7 +372,7 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPage>
             ),
             _summaryCard(
               width: width,
-              label: 'Sold value',
+              label: 'Selling',
               value: _money(_confirmedSoldValue),
               helper: 'Confirmed only',
               icon: Icons.point_of_sale_rounded,
@@ -432,101 +431,169 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPage>
     final isDraft = trip.status == CarTripStatus.open;
     final payment = _paymentStatus(trip);
     final confirming = _confirmingTripId == trip.id;
+    final borderColor = isDraft ? scheme.tertiary : scheme.primary;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: AppCard(
-        padding: const EdgeInsets.all(14),
-        onTap: confirming
-            ? null
-            : () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: trip.id)),
-                ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: isDraft ? scheme.tertiaryContainer : scheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(14),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.all(1),
+        decoration: BoxDecoration(
+          borderRadius: AppRadius.xlAll,
+          border: Border.all(color: borderColor.withValues(alpha: .28)),
+        ),
+        child: AppCard(
+          borderRadius: AppRadius.xlAll,
+          padding: const EdgeInsets.all(14),
+          onTap: confirming
+              ? null
+              : () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: trip.id)),
                   ),
-                  child: Icon(
-                    isDraft ? Icons.edit_note_rounded : Icons.local_shipping_rounded,
-                    color: isDraft ? scheme.onTertiaryContainer : scheme.primary,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        trip.displayNumber,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${trip.salesCarName} · ${trip.warehouseName}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    StatusBadge(
-                      type: isDraft ? StatusType.warning : StatusType.success,
-                      label: isDraft ? 'Draft' : 'Confirmed',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: isDraft ? scheme.tertiaryContainer : scheme.primaryContainer,
+                      borderRadius: AppRadius.mdAll,
                     ),
-                    if (!isDraft) ...[
-                      const SizedBox(height: 5),
-                      StatusBadge(type: payment.type, label: payment.label),
+                    child: Icon(
+                      isDraft ? Icons.edit_note_rounded : Icons.local_shipping_rounded,
+                      color: isDraft ? scheme.onTertiaryContainer : scheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          trip.displayNumber,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${trip.salesCarName} · ${trip.warehouseName}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      StatusBadge(
+                        type: isDraft ? StatusType.warning : StatusType.success,
+                        label: isDraft ? 'Draft' : 'Confirmed',
+                      ),
+                      if (!isDraft) ...[
+                        const SizedBox(height: 5),
+                        StatusBadge(type: payment.type, label: payment.label),
+                      ],
                     ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _dataPill('Loaded', '${trip.totalLoadedCartons}', scheme.surfaceContainerHighest),
+                  _dataPill('Returned', '${trip.totalReturnedCartons}', scheme.surfaceContainerHighest),
+                  _dataPill('Sold', '${trip.totalSoldCartons}', scheme.surfaceContainerHighest),
+                ],
+              ),
+              if (!isDraft) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _financePill(
+                      'Selling',
+                      _money(trip.finalValue.minorUnits),
+                      scheme.primaryContainer,
+                      scheme.primary,
+                    ),
+                    _financePill(
+                      'Buying',
+                      _money(trip.purchaseValue.minorUnits),
+                      scheme.secondaryContainer,
+                      scheme.secondary,
+                    ),
+                    _financePill(
+                      'Profit',
+                      _money(trip.profitValue.minorUnits),
+                      scheme.tertiaryContainer,
+                      scheme.onTertiaryContainer,
+                    ),
                   ],
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _dataPill('Loaded', '${trip.totalLoadedCartons}', scheme.surfaceContainerHighest),
-                _dataPill('Returned', '${trip.totalReturnedCartons}', scheme.surfaceContainerHighest),
-                _dataPill('Sold', '${trip.totalSoldCartons}', scheme.surfaceContainerHighest),
-                _dataPill(
-                  isDraft ? 'Draft value' : 'Sold value',
-                  _money(trip.finalValue.minorUnits),
-                  isDraft ? scheme.tertiaryContainer : scheme.primaryContainer,
+              if (isDraft) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.tonalIcon(
+                    onPressed: _confirming ? null : () => _confirmDraft(trip),
+                    icon: confirming
+                        ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.check_circle_outline_rounded, size: 18),
+                    label: Text(confirming ? 'Confirming...' : 'Confirm Draft'),
+                  ),
                 ),
               ],
-            ),
-            if (isDraft) ...[
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.tonalIcon(
-                  onPressed: _confirming ? null : () => _confirmDraft(trip),
-                  icon: confirming
-                      ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.check_circle_outline_rounded, size: 18),
-                  label: Text(confirming ? 'Confirming...' : 'Confirm Draft'),
-                ),
-              ),
             ],
-          ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _financePill(
+    String label,
+    String value,
+    Color background,
+    Color foreground,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: AppRadius.mdAll,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: foreground.withValues(alpha: .78),
+            ),
+          ),
+          const SizedBox(height: 1),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              color: foreground,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -537,14 +604,20 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPage>
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(11),
+        borderRadius: AppRadius.smAll,
       ),
       child: RichText(
         text: TextSpan(
           style: TextStyle(color: scheme.onSurface, fontSize: 11),
           children: [
-            TextSpan(text: '$label  ', style: TextStyle(color: scheme.onSurfaceVariant)),
-            TextSpan(text: value, style: const TextStyle(fontWeight: FontWeight.w900)),
+            TextSpan(
+              text: '$label  ',
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+            TextSpan(
+              text: value,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
           ],
         ),
       ),
