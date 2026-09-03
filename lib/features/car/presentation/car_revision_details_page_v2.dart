@@ -38,8 +38,7 @@ class CarRevisionDetailsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final trip = _tripSnapshot();
-    final summary = _calculator.summary(trip);
+    final summary = _calculator.summary(_tripSnapshot());
 
     return Scaffold(
       appBar: AppBar(title: Text('${revision.displayNumber} · Revision ${revision.revisionNumber}')),
@@ -74,7 +73,7 @@ class CarRevisionDetailsPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    'Sell ${_money(line.item.sellingPrice)} · Buy ${_money(line.item.purchasePrice)} · Disc EGP ${_money(line.discountAmount)} · Cost ${_money(line.purchaseCost)} · Profit ${_money(line.profitBeforeGlobalDiscount)}',
+                    'Sell ${_money(line.item.sellingPrice)} · Buy ${_money(line.item.purchasePrice)} · Discount ${_money(line.discountAmount)} · Cost ${_money(line.purchaseCost)} · Profit ${_money(line.profitBeforeGlobalDiscount)}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 8),
@@ -88,9 +87,9 @@ class CarRevisionDetailsPage extends StatelessWidget {
               children: [
                 _amount('Selling total', summary.finalTotalSoldValue),
                 _amount('Buying cost', summary.totalPurchaseCost),
-                _amount('Product discount EGP', summary.productDiscountTotal),
-                _amount('Global discount %', summary.globalDiscountPercentAmount),
-                _amount('Global discount EGP', summary.globalDiscountFixedAmount),
+                _amount('Product discount', summary.productDiscountTotal),
+                _amount('Global % discount', summary.globalDiscountPercentAmount),
+                _amount('Global EGP discount', summary.globalDiscountFixedAmount),
                 const Divider(height: 18),
                 _amount('Profit', summary.profit, strong: true),
               ],
@@ -101,17 +100,13 @@ class CarRevisionDetailsPage extends StatelessWidget {
     );
   }
 
-  Widget _amount(String label, CarMoney amount, {bool strong = false}) =>
-      Padding(
+  Widget _amount(String label, CarMoney amount, {bool strong = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
         child: Row(
           children: [
             Expanded(child: Text(label, softWrap: true)),
             const SizedBox(width: 12),
-            Text(
-              _money(amount),
-              style: TextStyle(fontWeight: strong ? FontWeight.w900 : FontWeight.w700),
-            ),
+            Text(_money(amount), style: TextStyle(fontWeight: strong ? FontWeight.w900 : FontWeight.w700)),
           ],
         ),
       );
