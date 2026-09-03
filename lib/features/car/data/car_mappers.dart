@@ -50,7 +50,6 @@ class CarMappers {
         'trip_id': tripId,
         'product_id': item.productId,
         'product_name': item.productName,
-        // unit_price_minor remains the legacy selling-price snapshot.
         'unit_price_minor': item.sellingPrice.minorUnits,
         'purchase_price_minor': item.purchasePrice.minorUnits,
         'loaded_cartons': item.loadedCartons,
@@ -116,6 +115,7 @@ class CarMappers {
         items: items,
         globalDiscountPercent:
             (row['global_discount_percent'] as num?)?.toDouble() ?? 0,
+        globalDiscountEgp: _fixedGlobalDiscount(row, items),
         payment: CarPayment(
           cashAmount: CarMoney((row['paid_cash_minor'] as num?)?.toInt() ?? 0),
           transferAmount:
@@ -184,31 +184,36 @@ class CarMappers {
   CarRevision revisionFromRow(
     Map<String, Object?> row,
     List<CarLoadItem> items,
-  ) =>
-      CarRevision(
-        id: row['id'] as int,
-        tripId: row['trip_id'] as int,
-        displayNumber: row['display_number'] as String,
-        revisionNumber: row['revision_number'] as int,
-        createdAt: DateTime.parse(row['created_at'] as String),
-        triggeredBy: row['triggered_by'] as String?,
-        salesCarId: row['sales_car_id'] as int,
-        salesCarName: row['sales_car_name'] as String,
-        warehouseId: row['warehouse_id'] as int,
-        warehouseName: row['warehouse_name'] as String,
-        status: CarTripStatus.fromValue(row['status'] as String?),
-        openedAt: DateTime.parse(row['opened_at'] as String),
-        closedAt: _nullableDate(row['closed_at']),
-        dueDate: _nullableDate(row['due_date']),
-        items: items,
-        globalDiscountPercent:
-            (row['global_discount_percent'] as num?)?.toDouble() ?? 0,
-        payment: CarPayment(
-          cashAmount: CarMoney((row['paid_cash_minor'] as num?)?.toInt() ?? 0),
-          transferAmount:
-              CarMoney((row['paid_transfer_minor'] as num?)?.toInt() ?? 0),
-        ),
-      );
+  ) {
+    final fixedGlobalDiscount = _fixedGlobalDiscount(row, items);
+    return CarRevision(
+      id: row['id'] as int,
+      tripId: row['trip_id'] as int,
+      displayNumber: row['display_number'] as String,
+      revisionNumber: row['revision_number'] as int,
+      createdAt: DateTime.parse(row['created_at'] as String),
+      triggeredBy: row['triggered_by'] as String?,
+      salesCarId: row['sales_car_id'] as int,
+      salesCarName: row['sales_car_name'] as String,
+      warehouseId: row['warehouse_id'] as int,
+      warehouseName: row['warehouse_name'] as String,
+      status: CarTripStatus.fromValue(row['status'] as String?),
+      openedAt: DateTime.parse(row['opened_at'] as String),
+      closedAt: _nullableDate(row['closed_at']),
+      dueDate: _nullableDate(row['due_date']),
+      items: items,
+      globalDiscountPercent:
+          (row['global_discount_percent'] as num?)?.toDouble() ?? 0,
+      globalDiscountEgp: fixedGlobalDiscount,
+      globalDiscountAmount:
+          CarMoney((row['global_discount_amount_minor'] as num?)?.toInt() ?? 0),
+      payment: CarPayment(
+        cashAmount: CarMoney((row['paid_cash_minor'] as num?)?.toInt() ?? 0),
+        transferAmount:
+            CarMoney((row['paid_transfer_minor'] as num?)?.toInt() ?? 0),
+      ),
+    );
+  }
 
   Map<String, Object?> revisionItemToRow(CarLoadItem item, int revisionId) => {
         'revision_id': revisionId,
@@ -269,8 +274,29 @@ class CarMappers {
         status: revision.status,
         items: revision.items,
         globalDiscountPercent: revision.globalDiscountPercent,
+        globalDiscountEgp: revision.globalDiscountEgp,
         payment: revision.payment,
       );
+
+  CarMoney _fixedGlobalDiscount(
+    Map<String, Object?> row,
+    List<CarLoadItem> items,
+  ) {
+    final storedTotal =
+        CarMoney((row['global_discount_amount_minor'] as num?)?.toInt() ?? 0);
+    final purchaseAfterProducts = items.fold<CarMoney>(
+      CarMoney.zero,
+      (sum, item) {
+        final gross = item.purchasePrice * (item.loadedCartons - item.returnedCartons);
+        return sum + gross - gross.percentOf(item.discountPercent);
+      },
+    );
+    final percent = purchaseAfterProducts.percentOf(
+      (row['global_discount_percent'] as num?)?.toDouble() ?? 0,
+    );
+    final fixed = storedTotal - percent;
+    return fixed.isNegative ? CarMoney.zero : fixed;
+  }
 
   DateTime? _nullableDate(Object? value) =>
       value == null ? null : DateTime.parse(value as String);
