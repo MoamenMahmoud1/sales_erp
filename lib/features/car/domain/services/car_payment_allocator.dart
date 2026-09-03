@@ -5,17 +5,27 @@ import '../entities/money.dart';
 import 'car_calculator.dart';
 
 class CarPaymentAllocationPlan {
+  final int transactionId;
   final List<CarPaymentAllocation> allocations;
   final List<CarTrip> updatedTrips;
   final CarMoney unallocated;
 
   const CarPaymentAllocationPlan({
+    this.transactionId = 0,
     required this.allocations,
     required this.updatedTrips,
     required this.unallocated,
   });
 
   bool get isFullyAllocated => unallocated == CarMoney.zero;
+
+  CarPaymentAllocationPlan withTransactionId(int id) =>
+      CarPaymentAllocationPlan(
+        transactionId: id,
+        allocations: allocations,
+        updatedTrips: updatedTrips,
+        unallocated: unallocated,
+      );
 }
 
 /// Allocates one real payment to finalized outstanding invoices from exactly
@@ -35,7 +45,9 @@ class CarPaymentAllocator {
       throw ArgumentError('Payment amount must be greater than zero.');
     }
     if ((salesCarId == null) != (warehouseId == null)) {
-      throw ArgumentError('A payment scope must include both Car and Warehouse.');
+      throw ArgumentError(
+        'A payment scope must include both Car and Warehouse.',
+      );
     }
 
     var cashRemaining = transaction.cashAmount;
@@ -60,7 +72,8 @@ class CarPaymentAllocator {
         .where(
           (trip) =>
               salesCarId == null ||
-              (trip.salesCarId == salesCarId && trip.warehouseId == warehouseId),
+              (trip.salesCarId == salesCarId &&
+                  trip.warehouseId == warehouseId),
         )
         .toList()
       ..sort((a, b) {
