@@ -6,6 +6,7 @@ import '../../../core/ui/empty_state.dart';
 import '../../../core/ui/status_badge.dart';
 import '../domain/entities/car_payment_status.dart';
 import '../domain/entities/car_trip.dart';
+import '../domain/entities/money.dart';
 import '../domain/services/car_calculator.dart';
 import '../domain/services/car_payment_evaluator.dart';
 import 'car_revision_details_page.dart';
@@ -67,17 +68,14 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
     if (mounted) await _load();
   }
 
-  String _money(CarMoneyValue value) => 'EGP ${(value.minor / 100).toStringAsFixed(2)}';
+  String _money(CarMoney value) => 'EGP ${value.units.toStringAsFixed(2)}';
 
   String _formatDate(DateTime value) {
     final local = value.toLocal();
     return '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year}';
   }
 
-  String _tripTitle(DateTime value) {
-    final local = value.toLocal();
-    return 'Car invoice · ${_formatDate(local)}';
-  }
+  String _tripTitle(DateTime value) => 'Car invoice · ${_formatDate(value)}';
 
   StatusType _statusType(CarPaymentStatus status) => switch (status) {
         CarPaymentStatus.paid => StatusType.success,
@@ -141,10 +139,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                       color: Theme.of(context).colorScheme.primaryContainer,
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: Icon(
-                      Icons.local_shipping_rounded,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
+                    child: Icon(Icons.local_shipping_rounded, color: Theme.of(context).colorScheme.primary),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -271,9 +266,16 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      'Sell ${_money(line.item.sellingPrice)} · Buy ${_money(line.item.purchasePrice)} · Discount EGP ${_money(line.discountAmount)} · Cost ${_money(line.purchaseCost)} · Profit ${_money(line.profitBeforeGlobalDiscount)}',
-                      style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 2,
+                      children: [
+                        Text('Sell ${_money(line.item.sellingPrice)}', style: const TextStyle(fontSize: 11)),
+                        Text('Buy ${_money(line.item.purchasePrice)}', style: const TextStyle(fontSize: 11)),
+                        Text('Disc EGP ${_money(line.discountAmount)}', style: const TextStyle(fontSize: 11)),
+                        Text('Cost ${_money(line.purchaseCost)}', style: const TextStyle(fontSize: 11)),
+                        Text('Profit ${_money(line.profitBeforeGlobalDiscount)}', style: const TextStyle(fontSize: 11)),
+                      ],
                     ),
                   ],
                 ),
@@ -329,13 +331,4 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
           ],
         ),
       );
-}
-
-class CarMoneyValue {
-  final int minor;
-  const CarMoneyValue(this.minor);
-}
-
-extension _CarMoneyDisplay on Object {
-  CarMoneyValue get _moneyValue => CarMoneyValue(0);
 }
