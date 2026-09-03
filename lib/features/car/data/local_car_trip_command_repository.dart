@@ -1,22 +1,163 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/storage/app_database.dart';
+import '../domain/entities/car_load_item.dart';
 import '../domain/entities/car_trip.dart';
+import '../domain/entities/car_trip_deletion_result.dart';
+import '../domain/repositories/car_trip_command_repository.dart';
 import '../domain/services/car_calculator.dart';
 import 'car_mappers.dart';
-import 'local_car_trip_command_repository.dart';
+import 'local_car_trip_repository.dart';
 
-/// Keeps newly-created revision summary fields synchronized with the current
-/// buying-side discount semantics and provides isolated edit drafts for
-/// already-confirmed invoices.
-class LocalCarTripCommandRepository extends LocalCarTripCommandRepository {
+/// Local write-side repository for Car trips.
+///
+/// Keeps deletion semantics, revision summary synchronization, and isolated
+/// edit drafts in one canonical repository. Confirmed invoices are never
+/// overwritten by Save as Draft; edits are promoted only on confirmation.
+class LocalCarTripCommandRepository extends LocalCarTripRepository
+    implements CarTripCommandRepository {
   LocalCarTripCommandRepository({Future<Database> Function()? database})
       : _database = database ?? (() => AppDatabase.database),
         super(database: database);
 
   final Future<Database> Function() _database;
+  static const _mappers = CarMappers();
   static const _calculator = CarCalculator();
   static const _draftPrefix = 'DRAFT|';
+
+  @override
+  Future<CarTripDeletionResult> deleteTrip(int tripId) async {
+    if (tripId <= 0) throw ArgumentError('Invalid Car trip ID.');
+
+    final db = await _database();
+    return db.transaction((txn) async {
+      final tripRows = await txn.query(
+        'car_trips',
+        columns: ['id'],
+        where: 'id = ?',
+        whereArgs: [tripId],
+        limit: 1,
+      );
+      if (tripRows.isEmpty) throw StateError('Car trip $tripId was not found.');
+
+      final transactionRows = await txn.rawQuery('''
+        SELECT DISTINCT payment_transaction_id
+        FROM car_payment_allocations
+        WHERE trip_id = ?
+        ORDER BY payment_transaction_id ASC
+      ''', [tripId]);
+
+      final deletedTransactionIds = <int>[];
+      final recalculatedTripIds = <int>{};
+
+      for (final transactionRow in transactionRows) {
+        final transactionId =
+            (transactionRow['payment_transaction_id'] as num).toInt();
+        deletedTransactionIds.add(transactionId);
+
+        final allocations = await txn.query(
+          'car_payment_allocations',
+          columns: ['trip_id', 'cash_amount_minor', 'transfer_amount_minor'],
+          where: 'payment_transaction_id = ?',
+          whereArgs: [transactionId],
+          orderBy: 'id ASC',
+        );
+
+        for (final allocation in allocations) {
+          final affectedTripId = (allocation['trip_id'] as num).toInt();
+          if (affectedTripId == tripId) continue;
+
+          final cash = (allocation['cash_amount_minor'] as num).toInt();
+          final transfer =
+              (allocation['transfer_amount_minor'] as num).toInt();
+          final affectedRows = await txn.query(
+            'car_trips',
+            columns: ['paid_cash_minor', 'paid_transfer_minor'],
+            where: 'id = ?',
+            whereArgs: [affectedTripId],
+            limit: 1,
+          );
+          if (affectedRows.isEmpty) {
+            throw StateError(
+              'Car trip $affectedTripId referenced by payment $transactionId was not found.',
+            );
+          }
+
+          final currentCash =
+              (affectedRows.single['paid_cash_minor'] as num).toInt();
+          final currentTransfer =
+              (affectedRows.single['paid_transfer_minor'] as num).toInt();
+          if (currentCash < cash || currentTransfer < transfer) {
+            throw StateError(
+              'Cannot delete trip $tripId because payment $transactionId is no longer consistent.',
+            );
+          }
+
+          final changed = await txn.update(
+            'car_trips',
+            {
+              'paid_cash_minor': currentCash - cash,
+              'paid_transfer_minor': currentTransfer - transfer,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            },
+            where: 'id = ? AND paid_cash_minor = ? AND paid_transfer_minor = ?',
+            whereArgs: [affectedTripId, currentCash, currentTransfer],
+          );
+          if (changed != 1) {
+            throw StateError(
+              'Car trip $affectedTripId changed while deleting trip $tripId.',
+            );
+          }
+          recalculatedTripIds.add(affectedTripId);
+        }
+
+        await txn.delete(
+          'car_payment_transactions',
+          where: 'id = ?',
+          whereArgs: [transactionId],
+        );
+      }
+
+      final deleted = await txn.delete(
+        'car_trips',
+        where: 'id = ?',
+        whereArgs: [tripId],
+      );
+      if (deleted != 1) {
+        throw StateError('Car trip $tripId could not be deleted.');
+      }
+
+      final recalculatedTrips = <CarTrip>[];
+      for (final affectedTripId in recalculatedTripIds) {
+        final row = await txn.query(
+          'car_trips',
+          where: 'id = ?',
+          whereArgs: [affectedTripId],
+          limit: 1,
+        );
+        if (row.isEmpty) continue;
+
+        final itemRows = await txn.query(
+          'car_trip_items',
+          where: 'trip_id = ?',
+          whereArgs: [affectedTripId],
+          orderBy: 'id ASC',
+        );
+        final items = <CarLoadItem>[
+          for (final itemRow in itemRows) _mappers.itemFromRow(itemRow),
+        ];
+        recalculatedTrips.add(
+          _mappers.tripFromRow(row.single, items),
+        );
+      }
+
+      return CarTripDeletionResult(
+        deletedTripId: tripId,
+        deletedPaymentTransactionIds: List.unmodifiable(deletedTransactionIds),
+        recalculatedTrips: List.unmodifiable(recalculatedTrips),
+      );
+    });
+  }
 
   @override
   Future<CarTrip> updateDraft(CarTrip trip) async {
@@ -35,7 +176,6 @@ class LocalCarTripCommandRepository extends LocalCarTripCommandRepository {
     final status = rows.single['status'] as String?;
     final displayNumber = rows.single['display_number'] as String? ?? '';
 
-    // Never overwrite a confirmed invoice when its editor uses Save as draft.
     if (status == 'closed' && !displayNumber.startsWith(_draftPrefix)) {
       return _saveRevisionDraft(trip, sourceDisplayNumber: displayNumber);
     }
@@ -67,7 +207,7 @@ class LocalCarTripCommandRepository extends LocalCarTripCommandRepository {
 
       if (existing.isNotEmpty) {
         final draftId = (existing.single['id'] as num).toInt();
-        final row = CarMappers().tripToRow(
+        final row = _mappers.tripToRow(
           draft.copyWith(id: draftId),
           summary,
           updatedAt: DateTime.now().toUtc(),
@@ -84,21 +224,21 @@ class LocalCarTripCommandRepository extends LocalCarTripCommandRepository {
           whereArgs: [draftId],
         );
         for (final item in draft.items) {
-          await txn.insert('car_trip_items', CarMappers().itemToRow(item, draftId));
+          await txn.insert('car_trip_items', _mappers.itemToRow(item, draftId));
         }
         return draft.copyWith(id: draftId);
       }
 
       final id = await txn.insert(
         'car_trips',
-        CarMappers().tripToRow(
+        _mappers.tripToRow(
           draft,
           summary,
           updatedAt: DateTime.now().toUtc(),
         ),
       );
       for (final item in draft.items) {
-        await txn.insert('car_trip_items', CarMappers().itemToRow(item, id));
+        await txn.insert('car_trip_items', _mappers.itemToRow(item, id));
       }
       return draft.copyWith(id: id);
     });
