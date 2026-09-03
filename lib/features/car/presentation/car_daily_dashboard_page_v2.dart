@@ -9,30 +9,28 @@ import '../../../core/ui/status_badge.dart';
 import '../domain/entities/car_payment_status.dart';
 import '../domain/entities/car_trip.dart';
 import '../domain/entities/car_trip_filter.dart';
-import '../domain/entities/car_trip_status.dart';
 import '../domain/entities/car_trip_summary_view.dart';
 import '../domain/services/car_calculator.dart';
 import '../domain/services/car_payment_evaluator.dart';
 import 'car_trip_details_page.dart';
 import 'car_trip_editor_page.dart';
 
-/// Today contains finalized trips only. A trip enters Today using the moment
-/// it was confirmed (closedAt), never the moment a draft was saved.
+/// Today is a finalized-sales view. Drafts are excluded until confirmation,
+/// and the confirmation timestamp determines the day shown.
 class CarDailyDashboardPageV2 extends StatefulWidget {
   final ValueChanged<int>? onNavigate;
 
   const CarDailyDashboardPageV2({super.key, this.onNavigate});
 
   @override
-  State<CarDailyDashboardPageV2> createState() =>
-      _CarDailyDashboardPageV2State();
+  State<CarDailyDashboardPageV2> createState() => _CarDailyDashboardPageV2State();
 }
 
 class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
     with WidgetsBindingObserver {
   final _repository = AppServices.instance.carTripRepository;
   final _calculator = const CarCalculator();
-  final _paymentEvaluator = const CarPaymentEvaluator();
+  final _evaluator = const CarPaymentEvaluator();
 
   late final StreamSubscription<CarTrip> _tripChanges;
   late final StreamSubscription<int> _tripDeletions;
@@ -84,8 +82,8 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
         filter: const CarTripFilter(status: CarTripStatus.closed),
       );
       final today = confirmed.where((trip) {
-        final confirmedAt = trip.closedAt?.toLocal();
-        return confirmedAt != null && _sameDay(confirmedAt, _day);
+        final at = trip.closedAt?.toLocal();
+        return at != null && _sameDay(at, _day);
       }).toList(growable: false);
       if (!mounted) return;
       setState(() {
@@ -101,8 +99,8 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
   void _onTripChanged(CarTrip trip) {
     if (!mounted || trip.id <= 0) return;
     final next = [..._trips]..removeWhere((item) => item.id == trip.id);
-    final confirmedAt = trip.closedAt?.toLocal();
-    if (trip.isClosed && confirmedAt != null && _sameDay(confirmedAt, _day)) {
+    final at = trip.closedAt?.toLocal();
+    if (trip.isClosed && at != null && _sameDay(at, _day)) {
       next.add(_summary(trip));
     }
     next.sort((a, b) =>
@@ -144,7 +142,7 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
   }
 
   ({StatusType type, String label}) _paymentStatus(CarTripSummaryView trip) {
-    switch (trip.paymentStatus(_paymentEvaluator, DateTime.now())) {
+    switch (trip.paymentStatus(_evaluator, DateTime.now())) {
       case CarPaymentStatus.paid:
         return (type: StatusType.success, label: 'Paid');
       case CarPaymentStatus.partiallyPaid:
@@ -156,6 +154,9 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
     }
   }
 
+  int _sum(int Function(CarTripSummaryView trip) selector) =>
+      _trips.fold(0, (sum, trip) => sum + selector(trip));
+
   String _money(int minor) => 'EGP ${(minor / 100).toStringAsFixed(2)}';
 
   String _date(DateTime value) {
@@ -163,14 +164,9 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
   }
 
-  int _sum(int Function(CarTripSummaryView trip) value) =>
-      _trips.fold(0, (sum, trip) => sum + value(trip));
-
   @override
   Widget build(BuildContext context) {
-    if (_loading && _trips.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    if (_loading && _trips.isEmpty) return const Center(child: CircularProgressIndicator());
     if (_error != null && _trips.isEmpty) {
       return Center(
         child: EmptyState(
@@ -196,9 +192,7 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
           Row(children: [
             const Expanded(child: Text('Car dashboard', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900))),
             FilledButton.icon(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const CarTripEditorPage()),
-              ),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CarTripEditorPage())),
               icon: const Icon(Icons.add_rounded),
               label: const Text('New trip'),
             ),
@@ -239,11 +233,7 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
           ]),
           const SizedBox(height: 6),
           if (_trips.isEmpty)
-            const EmptyState(
-              icon: Icons.verified_outlined,
-              title: 'No confirmed trips today',
-              message: 'Drafts stay out of Today until they are confirmed.',
-            )
+            const EmptyState(icon: Icons.verified_outlined, title: 'No confirmed trips today', message: 'Drafts stay out of Today until they are confirmed.')
           else
             for (final trip in _trips) _tripCard(trip),
         ],
@@ -270,14 +260,11 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
   Widget _tripCard(CarTripSummaryView trip) {
     final scheme = Theme.of(context).colorScheme;
     final payment = _paymentStatus(trip);
-    final confirmedAt = trip.closedAt!;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: AppCard(
         padding: const EdgeInsets.all(14),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: trip.id)),
-        ),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: trip.id))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Container(width: 44, height: 44, decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(14)), child: Icon(Icons.verified_rounded, color: scheme.primary)),
@@ -292,7 +279,7 @@ class _CarDailyDashboardPageV2State extends State<CarDailyDashboardPageV2>
           ]),
           const SizedBox(height: 11),
           Wrap(spacing: 7, runSpacing: 7, children: [
-            _pill('Confirmed', _date(confirmedAt), scheme.primaryContainer),
+            _pill('Confirmed', _date(trip.closedAt!), scheme.primaryContainer),
             _pill('Loaded', '${trip.totalLoadedCartons}', scheme.surfaceContainerHighest),
             _pill('Returned', '${trip.totalReturnedCartons}', scheme.surfaceContainerHighest),
             _pill('Sold', '${trip.totalSoldCartons}', scheme.surfaceContainerHighest),
