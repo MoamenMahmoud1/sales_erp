@@ -5,8 +5,11 @@ import '../domain/product.dart';
 import '../domain/product_repository.dart';
 
 class LocalProductRepository implements ProductRepository {
-  Future<Database> get _database async {
-    return AppDatabase.database;
+  Future<Database> get _database async => AppDatabase.database;
+
+  String _normalizeCategory(String category) {
+    final normalized = category.trim();
+    return normalized.isEmpty ? 'General' : normalized;
   }
 
   @override
@@ -27,8 +30,10 @@ class LocalProductRepository implements ProductRepository {
     required double price,
     double? purchasePrice,
     double? sellingPrice,
+    String category = 'General',
   }) async {
     final normalizedName = name.trim();
+    final normalizedCategory = _normalizeCategory(category);
     final normalizedSellingPrice = sellingPrice ?? price;
     final normalizedPurchasePrice = purchasePrice ?? normalizedSellingPrice;
 
@@ -49,6 +54,7 @@ class LocalProductRepository implements ProductRepository {
       'products',
       {
         'name': normalizedName,
+        'category': normalizedCategory,
         // Legacy column retained as the selling price for existing consumers.
         'price': normalizedSellingPrice,
         'purchase_price': normalizedPurchasePrice,
@@ -65,8 +71,10 @@ class LocalProductRepository implements ProductRepository {
     required double price,
     double? purchasePrice,
     double? sellingPrice,
+    String category = 'General',
   }) async {
     final normalizedName = name.trim();
+    final normalizedCategory = _normalizeCategory(category);
     final normalizedSellingPrice = sellingPrice ?? price;
     final normalizedPurchasePrice = purchasePrice ?? normalizedSellingPrice;
 
@@ -86,6 +94,7 @@ class LocalProductRepository implements ProductRepository {
       'products',
       {
         'name': normalizedName,
+        'category': normalizedCategory,
         // Keep the legacy column synchronized with the selling price.
         'price': normalizedSellingPrice,
         'purchase_price': normalizedPurchasePrice,
