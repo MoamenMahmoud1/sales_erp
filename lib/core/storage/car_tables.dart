@@ -186,7 +186,7 @@ Future<void> _createPaymentTransactions(DatabaseExecutor db) async {
 }
 
 Future<void> _createPaymentAllocations(DatabaseExecutor db) async {
-  if (!await _exists(db, 'car_payment_allocations')) return;
+  if (await _exists(db, 'car_payment_allocations')) return;
   await db.execute('''
     CREATE TABLE car_payment_allocations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
