@@ -13,6 +13,7 @@ class AppCard extends StatelessWidget {
   final BorderRadius? borderRadius;
   final bool filled;
   final EdgeInsets? margin;
+  final Gradient? gradient;
 
   const AppCard({
     super.key,
@@ -23,6 +24,7 @@ class AppCard extends StatelessWidget {
     this.borderRadius,
     this.filled = true,
     this.margin,
+    this.gradient,
   });
 
   @override
@@ -30,44 +32,22 @@ class AppCard extends StatelessWidget {
     final colors = AppColors.of(context);
     final radius = borderRadius ?? AppRadius.lgAll;
     final surface = color ?? (filled ? colors.surface : Colors.transparent);
-    final gradientCard =
-        filled && color == colors.secondaryContainer && radius == AppRadius.xlAll;
-
     final card = AnimatedContainer(
       duration: AppDurations.normal,
       curve: Curves.easeOut,
       margin: margin,
       padding: padding,
       decoration: BoxDecoration(
-        color: gradientCard ? null : surface,
-        gradient: gradientCard
-            ? const LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                stops: [0.0, 0.30, 0.68, 1.0],
-                colors: [
-                  Color(0xFF1976D2),
-                  Color(0xFF64B5F6),
-                  Color(0xFFDCEEFF),
-                  Color(0xFFF7FBFF),
-                ],
-              )
-            : null,
+        color: gradient == null ? surface : null,
+        gradient: gradient,
         borderRadius: radius,
         border: filled
-            ? Border.all(
-                color: gradientCard
-                    ? const Color(0xFF1976D2).withValues(alpha: .16)
-                    : colors.divider,
-                width: 1,
-              )
+            ? Border.all(color: colors.divider, width: 1)
             : null,
         boxShadow: [
           BoxShadow(
-            color: gradientCard
-                ? const Color(0xFF1976D2).withValues(alpha: .10)
-                : colors.scrim.withValues(alpha: 0.04),
-            blurRadius: gradientCard ? 18 : 16,
+            color: colors.scrim.withValues(alpha: 0.04),
+            blurRadius: 16,
             offset: const Offset(0, 6),
           ),
         ],
