@@ -24,6 +24,7 @@ void main() {
       warehouseId: warehouseId,
       warehouseName: 'Warehouse $warehouseId',
       openedAt: DateTime(2026, 1, day),
+      status: CarTripStatus.closed,
       items: [
         CarLoadItem(
           productId: id,
