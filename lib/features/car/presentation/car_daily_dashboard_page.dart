@@ -52,8 +52,10 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tripChanges = AppServices.instance.carTripEvents.stream.listen(_onTripChanged);
-    _tripDeletions = AppServices.instance.carTripEvents.deletionStream.listen(_onTripDeleted);
+    _tripChanges =
+        AppServices.instance.carTripEvents.stream.listen(_onTripChanged);
+    _tripDeletions = AppServices.instance.carTripEvents.deletionStream
+        .listen(_onTripDeleted);
     _load();
   }
 
@@ -75,6 +77,9 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
     }
   }
 
+  bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
   Future<void> _load() async {
     if (mounted) {
       setState(() {
@@ -82,13 +87,34 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
         _error = null;
       });
     }
+
     try {
-      final trips = await _repository.getTripSummaries(
-        filter: CarTripFilter(from: _day, to: _day),
-      );
+      final results = await Future.wait([
+        _repository.getTripSummaries(
+          filter: const CarTripFilter(status: CarTripStatus.open),
+        ),
+        _repository.getTripSummaries(
+          filter: const CarTripFilter(status: CarTripStatus.closed),
+        ),
+      ]);
+
+      final draftTrips = results[0]
+          .where((trip) => _sameDay(trip.openedAt.toLocal(), _day))
+          .toList(growable: false);
+      final confirmedTrips = results[1]
+          .where((trip) {
+            final confirmedAt = trip.closedAt?.toLocal();
+            return confirmedAt != null && _sameDay(confirmedAt, _day);
+          })
+          .toList(growable: false);
+
+      final combined = <CarTripSummaryView>[...draftTrips, ...confirmedTrips]
+        ..sort((a, b) =>
+            (b.closedAt ?? b.openedAt).compareTo(a.closedAt ?? a.openedAt));
+
       if (!mounted) return;
       setState(() {
-        _trips = List.unmodifiable(trips);
+        _trips = List.unmodifiable(combined);
         _loading = false;
       });
     } catch (error) {
@@ -100,14 +126,19 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
     }
   }
 
-  bool _sameDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
-
   void _onTripChanged(CarTrip trip) {
     if (!mounted || trip.id <= 0) return;
+
     final next = [..._trips]..removeWhere((item) => item.id == trip.id);
-    if (_sameDay(trip.openedAt.toLocal(), _day)) next.add(_summary(trip));
-    next.sort((a, b) => b.openedAt.compareTo(a.openedAt));
+    final localOpened = trip.openedAt.toLocal();
+    final localConfirmed = trip.closedAt?.toLocal();
+    final belongsToDay = trip.isClosed
+        ? localConfirmed != null && _sameDay(localConfirmed, _day)
+        : _sameDay(localOpened, _day);
+
+    if (belongsToDay) next.add(_summary(trip));
+    next.sort((a, b) =>
+        (b.closedAt ?? b.openedAt).compareTo(a.closedAt ?? a.openedAt));
     setState(() => _trips = List.unmodifiable(next));
   }
 
@@ -144,17 +175,28 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
     );
   }
 
-  List<CarTripSummaryView> get _drafts =>
-      _trips.where((trip) => trip.status == CarTripStatus.open).toList(growable: false);
+  List<CarTripSummaryView> get _drafts => _trips
+      .where((trip) => trip.status == CarTripStatus.open)
+      .toList(growable: false);
 
-  List<CarTripSummaryView> get _confirmed =>
-      _trips.where((trip) => trip.status == CarTripStatus.closed).toList(growable: false);
+  List<CarTripSummaryView> get _confirmed => _trips
+      .where((trip) => trip.status == CarTripStatus.closed)
+      .toList(growable: false);
 
-  int get _confirmedSoldValue =>
+  int get _confirmedSellingValue =>
       _confirmed.fold(0, (sum, trip) => sum + trip.finalValue.minorUnits);
+
+  int get _confirmedBuyingValue =>
+      _confirmed.fold(0, (sum, trip) => sum + trip.purchaseValue.minorUnits);
+
+  int get _confirmedProfitValue =>
+      _confirmed.fold(0, (sum, trip) => sum + trip.profitValue.minorUnits);
 
   int get _outstandingValue =>
       _confirmed.fold(0, (sum, trip) => sum + trip.remaining.minorUnits);
+
+  int get _confirmedSoldCartons =>
+      _confirmed.fold(0, (sum, trip) => sum + trip.totalSoldCartons);
 
   Future<void> _confirmDraft(CarTripSummaryView summary) async {
     if (_confirming || summary.status != CarTripStatus.open) return;
@@ -162,7 +204,6 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
     final trip = await _repository.getTripById(summary.id);
     if (!mounted || trip == null || trip.isClosed) return;
 
-    final calculated = _calculator.summary(trip);
     final issues = _calculator.validate(trip);
     if (issues.isNotEmpty) {
       _showError(issues.first.message);
@@ -172,7 +213,8 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
     final confirmed = await showConfirmDialog(
       context: context,
       title: 'Confirm this Draft?',
-      message: 'This will finalize ${trip.displayNumber} and lock it as a confirmed Car trip.',
+      message:
+          'This will finalize ${trip.displayNumber} and lock it as a confirmed Car trip.',
       confirmLabel: 'Confirm',
     );
     if (!confirmed || !mounted) return;
@@ -195,7 +237,6 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${finalized.displayNumber} confirmed successfully.')),
       );
-      _load();
     } catch (error) {
       if (mounted) _showError('$error');
     } finally {
@@ -206,8 +247,6 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
         });
       }
     }
-
-    calculated;
   }
 
   void _showError(String message) {
@@ -223,8 +262,7 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
   }
 
   ({StatusType type, String label}) _paymentStatus(CarTripSummaryView trip) {
-    final status = trip.paymentStatus(_evaluator, DateTime.now());
-    switch (status) {
+    switch (trip.paymentStatus(_evaluator, DateTime.now())) {
       case CarPaymentStatus.paid:
         return (type: StatusType.success, label: 'Paid');
       case CarPaymentStatus.partiallyPaid:
@@ -255,6 +293,7 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
 
     final drafts = _drafts;
     final confirmed = _confirmed;
+    final scheme = Theme.of(context).colorScheme;
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -279,16 +318,20 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
             ],
           ),
           const SizedBox(height: 4),
-          Text('Today · ${_date(_day)}',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          Text(
+            'Confirmed today · ${_date(_day)}',
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
           const SizedBox(height: 16),
+          _todayBuyingCard(),
+          const SizedBox(height: 12),
           _summaryGrid(),
           const SizedBox(height: 20),
           if (drafts.isNotEmpty) ...[
             _sectionHeader(
               'Draft trips',
               '${drafts.length} waiting for confirmation',
-              accent: Theme.of(context).colorScheme.tertiary,
+              accent: scheme.tertiary,
             ),
             const SizedBox(height: 10),
             for (final trip in drafts) _tripCard(trip),
@@ -303,7 +346,8 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
             const EmptyState(
               icon: Icons.verified_outlined,
               title: 'No confirmed trips today',
-              message: 'Confirmed trips will appear here after a Draft is finalized.',
+              message:
+                  'Drafts stay out of the daily financial totals until they are confirmed.',
             )
           else
             for (final trip in confirmed) _tripCard(trip),
@@ -314,6 +358,122 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
             label: const Text('View all trips'),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _todayBuyingCard() {
+    final scheme = Theme.of(context).colorScheme;
+    final titleColor = scheme.onSecondaryContainer;
+    return AppCard(
+      padding: const EdgeInsets.all(17),
+      borderRadius: AppRadius.xlAll,
+      color: scheme.secondaryContainer,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 430;
+          final details = Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _topDetail('Confirmed', '${_confirmed.length}', scheme.surfaceContainerHighest, scheme.onSurface),
+              _topDetail('Sold', '${_confirmedSoldCartons}', scheme.surfaceContainerHighest, scheme.onSurface),
+              _topDetail('Selling', _money(_confirmedSellingValue), scheme.primaryContainer, scheme.primary),
+              _topDetail('Profit', _money(_confirmedProfitValue), scheme.tertiaryContainer, scheme.onTertiaryContainer),
+            ],
+          );
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _topIcon(Icons.shopping_cart_rounded, scheme.secondary, scheme.onSecondary),
+                    const SizedBox(width: 12),
+                    Expanded(child: _topBuyingText(titleColor)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                details,
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              _topIcon(Icons.shopping_cart_rounded, scheme.secondary, scheme.onSecondary),
+              const SizedBox(width: 12),
+              Expanded(child: _topBuyingText(titleColor)),
+              const SizedBox(width: 14),
+              Flexible(child: Align(alignment: Alignment.centerRight, child: details)),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _topBuyingText(Color foreground) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Buying today',
+            style: TextStyle(
+              color: foreground.withValues(alpha: .78),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 3),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _money(_confirmedBuyingValue),
+              style: TextStyle(
+                color: foreground,
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            _confirmed.isEmpty
+                ? 'No confirmed purchases today'
+                : 'Final buying cost for confirmed trips only',
+            style: TextStyle(color: foreground.withValues(alpha: .72), fontSize: 11),
+          ),
+        ],
+      );
+
+  Widget _topIcon(IconData icon, Color background, Color foreground) {
+    return Container(
+      width: 50,
+      height: 50,
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: AppRadius.mdAll,
+      ),
+      child: Icon(icon, color: foreground, size: 25),
+    );
+  }
+
+  Widget _topDetail(String label, String value, Color background, Color foreground) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: AppRadius.smAll,
+      ),
+      child: Text(
+        '$label  $value',
+        style: TextStyle(
+          color: foreground,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
@@ -373,7 +533,7 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
             _summaryCard(
               width: width,
               label: 'Selling',
-              value: _money(_confirmedSoldValue),
+              value: _money(_confirmedSellingValue),
               helper: 'Confirmed only',
               icon: Icons.point_of_sale_rounded,
             ),
@@ -413,13 +573,20 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
-              child: Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+              child: Text(
+                value,
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+              ),
             ),
             const SizedBox(height: 2),
             Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
             const SizedBox(height: 2),
-            Text(helper, maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant)),
+            Text(
+              helper,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
+            ),
           ],
         ),
       ),
@@ -447,7 +614,9 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
           onTap: confirming
               ? null
               : () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: trip.id)),
+                    MaterialPageRoute(
+                      builder: (_) => CarTripDetailsPage(tripId: trip.id),
+                    ),
                   ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -459,12 +628,18 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: isDraft ? scheme.tertiaryContainer : scheme.primaryContainer,
+                      color: isDraft
+                          ? scheme.tertiaryContainer
+                          : scheme.primaryContainer,
                       borderRadius: AppRadius.mdAll,
                     ),
                     child: Icon(
-                      isDraft ? Icons.edit_note_rounded : Icons.local_shipping_rounded,
-                      color: isDraft ? scheme.onTertiaryContainer : scheme.primary,
+                      isDraft
+                          ? Icons.edit_note_rounded
+                          : Icons.local_shipping_rounded,
+                      color: isDraft
+                          ? scheme.onTertiaryContainer
+                          : scheme.primary,
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -476,14 +651,20 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
                           trip.displayNumber,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16,
+                          ),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           '${trip.salesCarName} · ${trip.warehouseName}',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                       ],
                     ),
@@ -493,7 +674,9 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       StatusBadge(
-                        type: isDraft ? StatusType.warning : StatusType.success,
+                        type: isDraft
+                            ? StatusType.warning
+                            : StatusType.success,
                         label: isDraft ? 'Draft' : 'Confirmed',
                       ),
                       if (!isDraft) ...[
@@ -509,9 +692,21 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _dataPill('Loaded', '${trip.totalLoadedCartons}', scheme.surfaceContainerHighest),
-                  _dataPill('Returned', '${trip.totalReturnedCartons}', scheme.surfaceContainerHighest),
-                  _dataPill('Sold', '${trip.totalSoldCartons}', scheme.surfaceContainerHighest),
+                  _dataPill(
+                    'Loaded',
+                    '${trip.totalLoadedCartons}',
+                    scheme.surfaceContainerHighest,
+                  ),
+                  _dataPill(
+                    'Returned',
+                    '${trip.totalReturnedCartons}',
+                    scheme.surfaceContainerHighest,
+                  ),
+                  _dataPill(
+                    'Sold',
+                    '${trip.totalSoldCartons}',
+                    scheme.surfaceContainerHighest,
+                  ),
                 ],
               ),
               if (!isDraft) ...[
@@ -546,11 +741,22 @@ class _CarDailyDashboardPageState extends State<CarDailyDashboardPage>
                 Align(
                   alignment: Alignment.centerRight,
                   child: FilledButton.tonalIcon(
-                    onPressed: _confirming ? null : () => _confirmDraft(trip),
+                    onPressed: _confirming
+                        ? null
+                        : () => _confirmDraft(trip),
                     icon: confirming
-                        ? const SizedBox(width: 17, height: 17, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.check_circle_outline_rounded, size: 18),
-                    label: Text(confirming ? 'Confirming...' : 'Confirm Draft'),
+                        ? const SizedBox(
+                            width: 17,
+                            height: 17,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 18,
+                          ),
+                    label: Text(
+                      confirming ? 'Confirming...' : 'Confirm Draft',
+                    ),
                   ),
                 ),
               ],
