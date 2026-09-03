@@ -29,12 +29,14 @@ class ApiProductRepository implements ProductRepository {
     required double price,
     double? purchasePrice,
     double? sellingPrice,
+    String category = 'General',
   }) async {
     final normalizedSellingPrice = sellingPrice ?? price;
     final normalizedPurchasePrice = purchasePrice ?? normalizedSellingPrice;
 
     final response = await client.dio.post('/products/', data: {
       'name': name.trim(),
+      'category': category.trim().isEmpty ? 'General' : category.trim(),
       'purchase_price': normalizedPurchasePrice,
       'selling_price': normalizedSellingPrice,
     });
@@ -48,12 +50,14 @@ class ApiProductRepository implements ProductRepository {
     required double price,
     double? purchasePrice,
     double? sellingPrice,
+    String category = 'General',
   }) async {
     final normalizedSellingPrice = sellingPrice ?? price;
     final normalizedPurchasePrice = purchasePrice ?? normalizedSellingPrice;
 
     await client.dio.patch('/products/$id/', data: {
       'name': name.trim(),
+      'category': category.trim().isEmpty ? 'General' : category.trim(),
       'purchase_price': normalizedPurchasePrice,
       'selling_price': normalizedSellingPrice,
     });
