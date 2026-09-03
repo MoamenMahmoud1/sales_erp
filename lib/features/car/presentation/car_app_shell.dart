@@ -11,7 +11,7 @@ import '../../products/presentation/products_page.dart';
 import 'car_daily_dashboard_page_v2.dart';
 import 'car_payments_page.dart';
 import 'car_reports_page.dart';
-import 'car_trips_page_v2.dart';
+import 'car_trips_page_v4.dart';
 
 /// Standalone Car application shell. It shares the app's design system but
 /// keeps navigation independent from normal customer sales/invoices.
@@ -31,31 +31,11 @@ class _CarAppShellState extends State<CarAppShell> {
   int _contentEpoch = 0;
 
   static const _items = [
-    AppNavItem(
-      icon: Icons.space_dashboard_outlined,
-      selectedIcon: Icons.space_dashboard_rounded,
-      label: 'Today',
-    ),
-    AppNavItem(
-      icon: Icons.local_shipping_outlined,
-      selectedIcon: Icons.local_shipping_rounded,
-      label: 'Trips',
-    ),
-    AppNavItem(
-      icon: Icons.payments_outlined,
-      selectedIcon: Icons.payments_rounded,
-      label: 'Payments',
-    ),
-    AppNavItem(
-      icon: Icons.inventory_2_outlined,
-      selectedIcon: Icons.inventory_2_rounded,
-      label: 'Products',
-    ),
-    AppNavItem(
-      icon: Icons.analytics_outlined,
-      selectedIcon: Icons.analytics_rounded,
-      label: 'Overview',
-    ),
+    AppNavItem(icon: Icons.space_dashboard_outlined, selectedIcon: Icons.space_dashboard_rounded, label: 'Today'),
+    AppNavItem(icon: Icons.local_shipping_outlined, selectedIcon: Icons.local_shipping_rounded, label: 'Trips'),
+    AppNavItem(icon: Icons.payments_outlined, selectedIcon: Icons.payments_rounded, label: 'Payments'),
+    AppNavItem(icon: Icons.inventory_2_outlined, selectedIcon: Icons.inventory_2_rounded, label: 'Products'),
+    AppNavItem(icon: Icons.analytics_outlined, selectedIcon: Icons.analytics_rounded, label: 'Overview'),
   ];
 
   @override
@@ -64,13 +44,12 @@ class _CarAppShellState extends State<CarAppShell> {
     _index = 0;
     _pages = [
       CarDailyDashboardPageV2(onNavigate: _goTo),
-      const CarTripsPageV2(),
+      const CarTripsPageV4(),
       const CarPaymentsPage(),
       const ProductsPage(),
       const CarReportsPage(),
     ];
-    _tripDeletions =
-        AppServices.instance.carTripEvents.deletionStream.listen(_onTripDeleted);
+    _tripDeletions = AppServices.instance.carTripEvents.deletionStream.listen(_onTripDeleted);
   }
 
   @override
@@ -81,8 +60,6 @@ class _CarAppShellState extends State<CarAppShell> {
 
   void _onTripDeleted(int _) {
     if (!mounted) return;
-    // Trip deletion is intentionally a consistency boundary. Recreate all Car
-    // projections from SQLite after the atomic delete/rollback is committed.
     setState(() => _contentEpoch++);
   }
 
@@ -153,11 +130,7 @@ class _CarAppShellState extends State<CarAppShell> {
       bottomNavigationBar: !isWide && !keyboardOpen
           ? SafeArea(
               minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: AppBottomNav(
-                index: _index,
-                items: _items,
-                onChanged: _goTo,
-              ),
+              child: AppBottomNav(index: _index, items: _items, onChanged: _goTo),
             )
           : null,
     );
