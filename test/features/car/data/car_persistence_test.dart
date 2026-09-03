@@ -99,14 +99,15 @@ void main() {
     );
   });
 
-  test('persists payment transaction and allocations atomically', () async {
+  test('persists payment transaction, allocations, and safely reverses deletion', () async {
     final tripRepo = LocalCarTripRepository(database: () async => database);
     final paymentRepo = LocalCarPaymentRepository(database: () async => database);
+    final catalogRepo = LocalCarCatalogRepository(database: () async => database);
 
-    final car = await LocalCarCatalogRepository(database: () async => database).createCar(
+    final car = await catalogRepo.createCar(
       SalesCar(name: 'Route 1', createdAt: DateTime(2026, 1, 1)),
     );
-    final warehouse = await LocalCarCatalogRepository(database: () async => database).createWarehouse(
+    final warehouse = await catalogRepo.createWarehouse(
       Warehouse(name: 'Main', createdAt: DateTime(2026, 1, 1)),
     );
     await product('Juice', 50);
@@ -152,16 +153,32 @@ void main() {
     final plan = allocator.allocate(
       transaction: payment,
       trips: [closedSecond, closedFirst],
+      salesCarId: car.id,
+      warehouseId: warehouse.id,
     );
     expect(plan.isFullyAllocated, isTrue);
 
-    await paymentRepo.persistPayment(
+    final transactionId = await paymentRepo.persistPayment(
       transaction: payment,
       allocations: plan.allocations,
       updatedTrips: plan.updatedTrips,
     );
 
+    expect(transactionId, greaterThan(0));
     expect(await database.query('car_payment_transactions'), hasLength(1));
     expect(await database.query('car_payment_allocations'), hasLength(2));
+
+    final affectedTripIds = await paymentRepo.deleteTransaction(transactionId);
+    expect(
+      affectedTripIds,
+      containsAll(<int>[closedFirst.id, closedSecond.id]),
+    );
+    expect(await database.query('car_payment_transactions'), isEmpty);
+    expect(await database.query('car_payment_allocations'), isEmpty);
+
+    final restoredFirst = await tripRepo.getTripById(closedFirst.id);
+    final restoredSecond = await tripRepo.getTripById(closedSecond.id);
+    expect(restoredFirst!.payment.totalPaid, CarMoney.zero);
+    expect(restoredSecond!.payment.totalPaid, CarMoney.zero);
   });
 }
