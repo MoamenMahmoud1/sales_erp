@@ -16,6 +16,7 @@ Future<void> runAppMigrations(Database db, int oldVersion) async {
   if (oldVersion < 12) await _migrateToVersion12(db);
   if (oldVersion < 13) await _migrateToVersion13(db);
   if (oldVersion < 14) await _migrateToVersion14(db);
+  if (oldVersion < 15) await _migrateToVersion15(db);
 }
 
 Future<void> _migrateToVersion2(Database db) async {
@@ -339,9 +340,7 @@ Future<void> _migrateToVersion14(Database db) async {
       await txn.execute(
         'ALTER TABLE products ADD COLUMN purchase_price REAL NOT NULL DEFAULT 0',
       );
-      await txn.execute(
-        'UPDATE products SET purchase_price = price',
-      );
+      await txn.execute('UPDATE products SET purchase_price = price');
     }
 
     final tripItemColumns = await txn.rawQuery('PRAGMA table_info(car_trip_items)');
@@ -366,6 +365,127 @@ Future<void> _migrateToVersion14(Database db) async {
       );
       await txn.execute(
         'UPDATE car_revision_items SET purchase_price_minor = unit_price_minor',
+      );
+    }
+  });
+}
+
+Future<void> _migrateToVersion15(Database db) async {
+  await db.transaction((txn) async {
+    final tripRows = await txn.query('car_trips');
+    for (final trip in tripRows) {
+      final items = await txn.query(
+        'car_trip_items',
+        where: 'trip_id = ?',
+        whereArgs: [trip['id']],
+        orderBy: 'id ASC',
+      );
+
+      var grossSelling = 0;
+      var productDiscount = 0;
+      var purchaseAfterProducts = 0;
+      var loaded = 0;
+      var returned = 0;
+      var sold = 0;
+      var returnedValue = 0;
+
+      for (final item in items) {
+        final selling = (item['unit_price_minor'] as num).toInt();
+        final buying = (item['purchase_price_minor'] as num?)?.toInt() ?? selling;
+        final loadedCount = (item['loaded_cartons'] as num).toInt();
+        final returnedCount = (item['returned_cartons'] as num).toInt();
+        final soldCount = loadedCount - returnedCount;
+        final discountPercent = (item['discount_percent'] as num?)?.toDouble() ?? 0;
+        final purchaseGross = buying * soldCount;
+        final discount = (purchaseGross * discountPercent / 100).round();
+
+        grossSelling += selling * soldCount;
+        productDiscount += discount;
+        purchaseAfterProducts += purchaseGross - discount;
+        loaded += loadedCount;
+        returned += returnedCount;
+        sold += soldCount;
+        returnedValue += selling * returnedCount;
+      }
+
+      final globalPercent = (trip['global_discount_percent'] as num?)?.toDouble() ?? 0;
+      final globalPercentAmount =
+          (purchaseAfterProducts * globalPercent / 100).round();
+
+      await txn.update(
+        'car_trips',
+        {
+          'gross_subtotal_minor': grossSelling,
+          'product_discount_total_minor': productDiscount,
+          'subtotal_after_products_minor': purchaseAfterProducts,
+          'global_discount_amount_minor': globalPercentAmount,
+          'final_total_value_minor': grossSelling,
+          'total_loaded_cartons': loaded,
+          'total_returned_cartons': returned,
+          'total_returned_value_minor': returnedValue,
+          'total_sold_cartons': sold,
+        },
+        where: 'id = ?',
+        whereArgs: [trip['id']],
+      );
+    }
+
+    final revisionRows = await txn.query('car_revisions');
+    for (final revision in revisionRows) {
+      final items = await txn.query(
+        'car_revision_items',
+        where: 'revision_id = ?',
+        whereArgs: [revision['id']],
+        orderBy: 'id ASC',
+      );
+
+      var grossSelling = 0;
+      var productDiscount = 0;
+      var purchaseAfterProducts = 0;
+      var loaded = 0;
+      var returned = 0;
+      var sold = 0;
+      var returnedValue = 0;
+
+      for (final item in items) {
+        final selling = (item['unit_price_minor'] as num).toInt();
+        final buying = (item['purchase_price_minor'] as num?)?.toInt() ?? selling;
+        final loadedCount = (item['loaded_cartons'] as num).toInt();
+        final returnedCount = (item['returned_cartons'] as num).toInt();
+        final soldCount = loadedCount - returnedCount;
+        final discountPercent = (item['discount_percent'] as num?)?.toDouble() ?? 0;
+        final purchaseGross = buying * soldCount;
+        final discount = (purchaseGross * discountPercent / 100).round();
+
+        grossSelling += selling * soldCount;
+        productDiscount += discount;
+        purchaseAfterProducts += purchaseGross - discount;
+        loaded += loadedCount;
+        returned += returnedCount;
+        sold += soldCount;
+        returnedValue += selling * returnedCount;
+      }
+
+      final globalPercent =
+          (revision['global_discount_percent'] as num?)?.toDouble() ?? 0;
+      final globalPercentAmount =
+          (purchaseAfterProducts * globalPercent / 100).round();
+
+      await txn.update(
+        'car_revisions',
+        {
+          'gross_subtotal_minor': grossSelling,
+          'product_discount_total_minor': productDiscount,
+          'subtotal_after_products_minor': purchaseAfterProducts,
+          'global_discount_amount_minor': globalPercentAmount,
+          'final_total_value_minor': grossSelling,
+          'total_loaded_cartons': loaded,
+          'total_returned_cartons': returned,
+          'total_returned_value_minor': returnedValue,
+          'total_sold_cartons': sold,
+        },
+        where: 'id = ?',
+        whereArgs: [revision['id']],
       );
     }
   });
