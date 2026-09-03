@@ -19,12 +19,16 @@ class LocalCarReportRepository implements CarReportRepository {
     final where = <String>['status = ?'];
     final args = <Object?>['closed'];
 
+    // Financial reporting follows the confirmation/closing date. This keeps
+    // date-range reports consistent with the Today dashboard and prevents an
+    // invoice opened on one day but confirmed on another from being attributed
+    // to the wrong financial day.
     if (from != null) {
-      where.add('opened_at >= ?');
+      where.add('closed_at >= ?');
       args.add(from.toUtc().toIso8601String());
     }
     if (to != null) {
-      where.add('opened_at < ?');
+      where.add('closed_at < ?');
       args.add(to.toUtc().add(const Duration(days: 1)).toIso8601String());
     }
 
