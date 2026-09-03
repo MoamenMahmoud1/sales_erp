@@ -45,7 +45,7 @@ class _CarClosingAnimationState extends State<CarClosingAnimation>
 
   late final Animation<double> _success = CurvedAnimation(
     parent: _controller,
-    curve: const Interval(.80, 1, curve: Curves.easeOutBack),
+    curve: const Interval(.80, 1, curve: Curves.easeOutCubic),
   );
 
   @override
