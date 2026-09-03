@@ -91,9 +91,9 @@ class BiometricAuth {
 
   /// Runs one user-requested authentication attempt.
   ///
-  /// A normal user cancel must return to the app and remain available for a
-  /// manual retry. A native auth-in-progress race is the only condition that
-  /// is retried automatically, with one cleanup/retry cycle per call.
+  /// User cancellation never auto-retries. The native request is explicitly
+  /// cleaned up before the UI becomes ready for a manual retry. A stale native
+  /// auth-in-progress race gets one controlled recovery attempt.
   Future<BiometricResult> _authenticateWithRecovery({
     required String localizedReason,
     required bool biometricOnly,
@@ -103,13 +103,18 @@ class BiometricAuth {
         localizedReason: localizedReason,
         biometricOnly: biometricOnly,
       );
-      return ok ? BiometricResult.success : BiometricResult.failed;
+
+      if (ok) return BiometricResult.success;
+
+      // Android can report a user cancellation as a plain false result rather
+      // than an exception. Clean the native state in that path as well.
+      await _clearStaleAuthentication();
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      return BiometricResult.failed;
     } on LocalAuthException catch (error) {
       if (error.code == LocalAuthExceptionCode.userCanceled ||
           error.code == LocalAuthExceptionCode.systemCanceled) {
         await _clearStaleAuthentication();
-        // Allow the vendor/native dialog dismissal to fully settle before the
-        // Dart button becomes eligible for another request.
         await Future<void>.delayed(const Duration(milliseconds: 500));
         return BiometricResult.failed;
       }
@@ -123,14 +128,15 @@ class BiometricAuth {
             localizedReason: localizedReason,
             biometricOnly: biometricOnly,
           );
-          return ok ? BiometricResult.success : BiometricResult.failed;
+          if (ok) return BiometricResult.success;
         } on LocalAuthException catch (retryError) {
           if (retryError.code == LocalAuthExceptionCode.authInProgress) {
             await _clearStaleAuthentication();
-            await Future<void>.delayed(const Duration(milliseconds: 500));
           }
-          return BiometricResult.failed;
         }
+
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        return BiometricResult.failed;
       }
 
       await _clearStaleAuthentication();
@@ -148,8 +154,9 @@ class BiometricAuth {
     return _auth.authenticate(
       localizedReason: localizedReason,
       biometricOnly: biometricOnly,
-      // Keeping authentication sticky protects against vendor/activity
-      // transitions that temporarily background the Flutter surface.
+      // Protect against Android/OEM activity transitions during the native
+      // dialog. A user pressing Cancel still completes normally and does not
+      // trigger an automatic second prompt.
       persistAcrossBackgrounding: true,
       sensitiveTransaction: false,
     );
