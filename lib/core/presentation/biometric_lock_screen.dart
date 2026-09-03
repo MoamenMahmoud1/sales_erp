@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -114,19 +115,24 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
         ..value = 0.0;
     });
 
-    final result = switch (method) {
-      _AuthMethod.face => await widget.auth.authenticateBiometric(
-          method: BiometricMethod.face,
-        ),
-      _AuthMethod.fingerprint => await widget.auth.authenticateBiometric(
-          method: BiometricMethod.fingerprint,
-        ),
-      _AuthMethod.biometric => await widget.auth.authenticateBiometric(
-          method: BiometricMethod.generic,
-        ),
-      _AuthMethod.deviceCredential =>
-          await widget.auth.authenticateDeviceCredential(),
-    };
+    BiometricResult result = BiometricResult.failed;
+    try {
+      result = switch (method) {
+        _AuthMethod.face => await widget.auth.authenticateBiometric(
+            method: BiometricMethod.face,
+          ),
+        _AuthMethod.fingerprint => await widget.auth.authenticateBiometric(
+            method: BiometricMethod.fingerprint,
+          ),
+        _AuthMethod.biometric => await widget.auth.authenticateBiometric(
+            method: BiometricMethod.generic,
+          ),
+        _AuthMethod.deviceCredential =>
+            await widget.auth.authenticateDeviceCredential(),
+      };
+    } catch (_) {
+      result = BiometricResult.failed;
+    }
 
     if (!mounted) {
       _attemptInFlight = false;
@@ -136,17 +142,24 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
     if (result == BiometricResult.success) {
       setState(() => _phase = _AuthPhase.success);
       await _animationController.forward(from: 0.0);
-      if (!mounted) return;
+      if (!mounted) {
+        _attemptInFlight = false;
+        return;
+      }
+      _attemptInFlight = false;
       HapticFeedback.heavyImpact();
       widget.onUnlocked();
-    } else {
-      setState(() => _phase = _AuthPhase.failed);
-      await _animationController.forward(from: 0.0);
-      if (!mounted) return;
-      HapticFeedback.mediumImpact();
+      return;
     }
 
-    _attemptInFlight = false;
+    // The native request has finished. Do not keep the retry control blocked
+    // behind the local failure animation; the user can retry immediately.
+    setState(() {
+      _phase = _AuthPhase.failed;
+      _attemptInFlight = false;
+    });
+    unawaited(_animationController.forward(from: 0.0));
+    HapticFeedback.mediumImpact();
   }
 
   @override
@@ -225,9 +238,11 @@ class _BiometricLockScreenState extends State<BiometricLockScreen>
         case _AuthMethod.face:
           dx = math.sin(progress * math.pi * 6) * (1 - progress) * 8;
         case _AuthMethod.fingerprint:
-          scale = 1.0 + 0.06 * math.sin(progress * math.pi) * (1 - progress);
+          scale = 1.0 +
+              0.06 * math.sin(progress * math.pi) * (1 - progress);
         case _AuthMethod.biometric:
-          rotation = math.sin(progress * math.pi * 4) * 0.05 * (1 - progress);
+          rotation =
+              math.sin(progress * math.pi * 4) * 0.05 * (1 - progress);
         case _AuthMethod.deviceCredential:
           dy = -math.sin(progress * math.pi * 5) * (1 - progress) * 7;
       }
