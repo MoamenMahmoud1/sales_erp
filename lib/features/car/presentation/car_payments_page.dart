@@ -12,7 +12,7 @@ import '../domain/entities/car_payment_transaction.dart';
 import '../domain/entities/car_trip.dart';
 import '../domain/entities/money.dart';
 import '../domain/services/car_calculator.dart';
-import '../presentation/animations/payment_distribution_animation.dart';
+import 'animations/payment_distribution_animation.dart';
 
 class CarPaymentsPage extends StatefulWidget {
   final int? focusTripId;
@@ -27,7 +27,6 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
   final _tripRepository = AppServices.instance.carTripRepository;
   final _paymentRepository = AppServices.instance.carPaymentRepository;
   final _calculator = const CarCalculator();
-
   final _cashController = TextEditingController(text: '0');
   final _transferController = TextEditingController(text: '0');
   final _referenceController = TextEditingController();
@@ -57,19 +56,16 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
     final scope = _selectedScope;
     if (scope == null) return const [];
     return _outstandingTrips
-        .where(
-          (trip) =>
-              trip.salesCarId == scope.salesCarId &&
-              trip.warehouseId == scope.warehouseId,
-        )
+        .where((trip) =>
+            trip.salesCarId == scope.salesCarId &&
+            trip.warehouseId == scope.warehouseId)
         .toList(growable: false);
   }
 
   @override
   void initState() {
     super.initState();
-    _tripChanges =
-        AppServices.instance.carTripEvents.stream.listen(_onTripChanged);
+    _tripChanges = AppServices.instance.carTripEvents.stream.listen(_onTripChanged);
     _load();
   }
 
@@ -95,40 +91,33 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
         _paymentRepository.getTransactions(),
         _paymentRepository.getAllocations(),
       ]);
-
       _allTrips = results[0] as List<CarTrip>;
-      final transactions = results[1] as List<CarPaymentTransaction>;
-      final allocations = results[2] as List<CarPaymentAllocation>;
-
       _setOutstanding(preserveSelection: false, preferFocus: true);
-      _setHistory(transactions, allocations);
-
-      if (!mounted) return;
-      setState(() => _loading = false);
+      _setHistory(
+        results[1] as List<CarPaymentTransaction>,
+        results[2] as List<CarPaymentAllocation>,
+      );
+      if (mounted) setState(() => _loading = false);
     } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = '$error';
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = '$error';
+        });
+      }
     }
   }
 
-  void _setOutstanding({
-    required bool preserveSelection,
-    bool preferFocus = false,
-  }) {
+  void _setOutstanding({required bool preserveSelection, bool preferFocus = false}) {
     final previousKey = preserveSelection ? _selectedScopeKey : null;
     final outstanding = _allTrips
-        .where(
-          (trip) =>
-              trip.isClosed &&
-              trip.payment.totalPaid.minorUnits < _totalFor(trip),
-        )
+        .where((trip) =>
+            trip.isClosed &&
+            trip.payment.totalPaid.minorUnits < _totalFor(trip))
         .toList()
       ..sort((a, b) => a.openedAt.compareTo(b.openedAt));
 
-    final groups = <String, _PaymentScope>{};
+    final scopes = <String, _PaymentScope>{};
     for (final trip in outstanding) {
       final scope = _PaymentScope(
         salesCarId: trip.salesCarId,
@@ -136,7 +125,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
         warehouseId: trip.warehouseId,
         warehouseName: trip.warehouseName,
       );
-      groups[scope.key] = scope;
+      scopes[scope.key] = scope;
     }
 
     String? selection = previousKey;
@@ -148,11 +137,11 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
         }
       }
     }
-    selection ??= groups.length == 1 ? groups.keys.first : null;
-    if (selection != null && !groups.containsKey(selection)) selection = null;
+    selection ??= scopes.length == 1 ? scopes.keys.first : null;
+    if (selection != null && !scopes.containsKey(selection)) selection = null;
 
     _outstandingTrips = List.unmodifiable(outstanding);
-    _scopes = List.unmodifiable(groups.values);
+    _scopes = List.unmodifiable(scopes.values);
     _selectedScopeKey = selection;
   }
 
@@ -167,18 +156,15 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
 
     final history = <_PaymentHistoryItem>[];
     for (final transaction in transactions) {
-      final transactionAllocations = byTransaction[transaction.id] ?? const [];
-      if (transactionAllocations.isEmpty) continue;
-      history.add(
-        _PaymentHistoryItem(
-          transaction: transaction,
-          allocations: List.unmodifiable(transactionAllocations),
-        ),
-      );
+      final items = byTransaction[transaction.id] ?? const [];
+      if (items.isEmpty) continue;
+      history.add(_PaymentHistoryItem(
+        transaction: transaction,
+        allocations: List.unmodifiable(items),
+      ));
     }
-    history.sort(
-      (a, b) => b.transaction.createdAt.compareTo(a.transaction.createdAt),
-    );
+    history.sort((a, b) =>
+        b.transaction.createdAt.compareTo(a.transaction.createdAt));
     _history = List.unmodifiable(history);
   }
 
@@ -188,12 +174,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
     next.add(trip);
     next.sort((a, b) => a.openedAt.compareTo(b.openedAt));
     _allTrips = List.unmodifiable(next);
-
-    final previousKey = _selectedScopeKey;
     _setOutstanding(preserveSelection: true);
-    if (previousKey != null && _scopes.any((scope) => scope.key == previousKey)) {
-      _selectedScopeKey = previousKey;
-    }
     setState(() {});
   }
 
@@ -219,7 +200,6 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
       _showError('Enter a payment greater than zero.');
       return;
     }
-
     final trips = _selectedOutstandingTrips;
     if (trips.isEmpty) {
       _showError('There are no outstanding invoices for the selected group.');
@@ -239,31 +219,29 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
 
       final plan = await AllocateCarPayment(repository: _paymentRepository)(
         transaction: transaction,
-        trips: _allOutstandingTrips,
+        trips: _outstandingTrips,
         salesCarId: scope.salesCarId,
         warehouseId: scope.warehouseId,
       );
 
-      for (final updatedTrip in plan.updatedTrips) {
-        AppServices.instance.carTripEvents.publish(updatedTrip);
+      for (final trip in plan.updatedTrips) {
+        AppServices.instance.carTripEvents.publish(trip);
       }
 
       final visuals = <PaymentAllocationVisual>[];
       for (final allocation in plan.allocations) {
-        final updatedTrip = plan.updatedTrips.firstWhere(
-          (trip) => trip.id == allocation.tripId,
+        final trip = plan.updatedTrips.firstWhere(
+          (item) => item.id == allocation.tripId,
         );
-        final remaining =
-            (_totalFor(updatedTrip) - updatedTrip.payment.totalPaid.minorUnits)
-                .clamp(0, 1 << 62);
-        visuals.add(
-          PaymentAllocationVisual(
-            invoiceNumber: _paymentInvoiceLabel(updatedTrip),
-            amount: allocation.totalAmount.units,
-            remainingAfter: remaining / 100,
-            becomesPaid: remaining == 0,
-          ),
-        );
+        final remainingMinor =
+            _totalFor(trip) - trip.payment.totalPaid.minorUnits;
+        final remaining = remainingMinor < 0 ? 0 : remainingMinor;
+        visuals.add(PaymentAllocationVisual(
+          invoiceNumber: _paymentInvoiceLabel(trip),
+          amount: allocation.totalAmount.units,
+          remainingAfter: remaining / 100.0,
+          becomesPaid: remaining == 0,
+        ));
       }
 
       final savedTransaction = CarPaymentTransaction(
@@ -273,25 +251,20 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
         reference: transaction.reference,
         createdAt: transaction.createdAt,
       );
-      final historyItem = _PaymentHistoryItem(
+      final item = _PaymentHistoryItem(
         transaction: savedTransaction,
         allocations: plan.allocations,
       );
-
       if (!mounted) return;
-      setState(() {
-        _history = List.unmodifiable([historyItem, ..._history]);
-      });
+      setState(() => _history = List.unmodifiable([item, ..._history]));
 
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PaymentDistributionAnimation(
-            paymentAmount: transaction.totalAmount.units,
-            scopeLabel: scope.label,
-            allocations: visuals,
-          ),
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PaymentDistributionAnimation(
+          paymentAmount: transaction.totalAmount.units,
+          scopeLabel: scope.label,
+          allocations: visuals,
         ),
-      );
+      ));
 
       if (!mounted) return;
       _cashController.text = '0';
@@ -306,7 +279,6 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
 
   Future<void> _deletePayment(_PaymentHistoryItem item) async {
     if (_deletingTransactionId != null) return;
-
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -330,17 +302,11 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
 
     setState(() => _deletingTransactionId = item.transaction.id);
     try {
-      final affectedTripIds = await _paymentRepository.deleteTransaction(
-        item.transaction.id,
-      );
-
-      final affectedTrips = await Future.wait(
-        affectedTripIds.map(_tripRepository.getTripById),
-      );
-      for (final trip in affectedTrips) {
-        AppServices.instance.carTripEvents.publish(trip);
+      final ids = await _paymentRepository.deleteTransaction(item.transaction.id);
+      final trips = await Future.wait(ids.map(_tripRepository.getTripById));
+      for (final trip in trips) {
+        if (trip != null) AppServices.instance.carTripEvents.publish(trip);
       }
-
       if (!mounted) return;
       setState(() {
         _history = List.unmodifiable(
@@ -358,8 +324,9 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
   }
 
   String _paymentInvoiceLabel(CarTrip trip) {
-    final date = trip.openedAt.toLocal();
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} · ${trip.salesCarName}';
+    if (trip.displayNumber.isNotEmpty) return trip.displayNumber;
+    final d = trip.openedAt.toLocal();
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year} · ${trip.salesCarName}';
   }
 
   CarTrip? _tripById(int id) {
@@ -370,8 +337,8 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
   }
 
   String _dayKey(DateTime value) {
-    final local = value.toLocal();
-    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+    final d = value.toLocal();
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
   String _dayTitle(DateTime value) {
@@ -390,25 +357,24 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
       '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
 
   String _formatTime(DateTime value) {
-    final local = value.toLocal();
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    final d = value.toLocal();
+    return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
-  void _showError(String message) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) {
-      return Center(
-        child: EmptyState(
-          icon: Icons.error_outline_rounded,
-          title: 'Unable to load payments',
-          message: _error!,
-          actionLabel: 'Retry',
-          onAction: _load,
-        ),
+      return EmptyState(
+        icon: Icons.error_outline_rounded,
+        title: 'Unable to load payments',
+        message: _error!,
+        actionLabel: 'Retry',
+        onAction: _load,
       );
     }
 
@@ -417,22 +383,16 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
         children: [
-          const Text(
-            'Car payments',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
-          ),
+          const Text('Car payments', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
           Text(
-            'One payment stays inside one Car + Warehouse group and can be distributed only across that group’s finalized outstanding invoices.',
+            'One payment stays inside one Car + Warehouse group and can be distributed across that group’s finalized outstanding invoices.',
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 18),
           _paymentForm(),
           const SizedBox(height: 18),
-          const Text(
-            'Outstanding invoices',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-          ),
+          const Text('Outstanding invoices', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
           const SizedBox(height: 10),
           if (_selectedScope == null)
             const EmptyState(
@@ -449,10 +409,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
           else
             for (final trip in _selectedOutstandingTrips) _tripRow(trip),
           const SizedBox(height: 14),
-          const Text(
-            'Payment history',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-          ),
+          const Text('Payment history', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
           const SizedBox(height: 10),
           _buildHistory(),
         ],
@@ -467,13 +424,10 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Record payment',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-          ),
+          const Text('Record payment', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _selectedScopeKey,
+            initialValue: _selectedScopeKey,
             isExpanded: true,
             decoration: const InputDecoration(
               labelText: 'Car + Warehouse',
@@ -487,40 +441,14 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
                   child: Text(scope.label, overflow: TextOverflow.ellipsis),
                 ),
             ],
-            onChanged: _processing
-                ? null
-                : (value) => setState(() => _selectedScopeKey = value),
+            onChanged: _processing ? null : (value) => setState(() => _selectedScopeKey = value),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: TextField(
-                  controller: _cashController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Cash',
-                    suffixText: 'EGP',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
+              Expanded(child: _amountField(_cashController, 'Cash')),
               const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  controller: _transferController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Transfer',
-                    suffixText: 'EGP',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
+              Expanded(child: _amountField(_transferController, 'Transfer')),
             ],
           ),
           const SizedBox(height: 10),
@@ -534,35 +462,30 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Total payment',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              ),
-              Text(
-                'EGP ${amount.toStringAsFixed(2)}',
-                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17),
-              ),
+              Expanded(child: Text('Total payment', style: TextStyle(color: scheme.onSurfaceVariant))),
+              Text('EGP ${amount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
             ],
           ),
           const SizedBox(height: 14),
           FilledButton.icon(
             onPressed: _processing || _selectedScope == null ? null : _pay,
             icon: _processing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.payments_rounded),
             label: Text(_processing ? 'Applying...' : 'Apply payment'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-            ),
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _amountField(TextEditingController controller, String label) {
+    return TextField(
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(labelText: label, suffixText: 'EGP', border: const OutlineInputBorder()),
+      onChanged: (_) => setState(() {}),
     );
   }
 
@@ -575,47 +498,19 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
         padding: const EdgeInsets.all(14),
         child: Row(
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer,
-                borderRadius: BorderRadius.circular(15),
-              ),
-              child: Icon(Icons.receipt_long_rounded, color: scheme.primary),
-            ),
+            Icon(Icons.receipt_long_rounded, color: scheme.primary),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    _paymentInvoiceLabel(trip),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  Text(_paymentInvoiceLabel(trip), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 3),
-                  Text(
-                    '${trip.warehouseName} · ${trip.payment.totalPaid.units.toStringAsFixed(2)} paid',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
+                  Text('${trip.warehouseName} · ${trip.payment.totalPaid.units.toStringAsFixed(2)} paid', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            Text(
-              'EGP ${(remaining / 100).toStringAsFixed(2)}',
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                color: scheme.error,
-              ),
-            ),
+            Text('EGP ${(remaining / 100).toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.w900, color: scheme.error)),
           ],
         ),
       ),
@@ -635,57 +530,34 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
     for (final item in _history) {
       groups.putIfAbsent(_dayKey(item.transaction.createdAt), () => []).add(item);
     }
-
-    final orderedGroups = groups.values.toList()
-      ..sort(
-        (a, b) => b.first.transaction.createdAt.compareTo(a.first.transaction.createdAt),
-      );
+    final ordered = groups.values.toList()
+      ..sort((a, b) => b.first.transaction.createdAt.compareTo(a.first.transaction.createdAt));
 
     return Column(
       children: [
-        for (var index = 0; index < orderedGroups.length; index++)
-          _historyDaySection(
-            orderedGroups[index],
-            initiallyExpanded: index == 0,
-          ),
+        for (var i = 0; i < ordered.length; i++)
+          _historyDaySection(ordered[i], initiallyExpanded: i == 0),
       ],
     );
   }
 
-  Widget _historyDaySection(
-    List<_PaymentHistoryItem> items, {
-    required bool initiallyExpanded,
-  }) {
-    final firstDate = items.first.transaction.createdAt.toLocal();
-    final total = items.fold<double>(
-      0,
-      (sum, item) => sum + item.transaction.totalAmount.units,
-    );
-    final allocationCount = items.fold<int>(
-      0,
-      (sum, item) => sum + item.allocations.length,
-    );
-
+  Widget _historyDaySection(List<_PaymentHistoryItem> items, {required bool initiallyExpanded}) {
+    final date = items.first.transaction.createdAt.toLocal();
+    final total = items.fold<double>(0, (sum, item) => sum + item.transaction.totalAmount.units);
+    final allocations = items.fold<int>(0, (sum, item) => sum + item.allocations.length);
     return DaySummarySection(
-      title: _dayTitle(firstDate),
-      summary:
-          '${items.length} payment${items.length == 1 ? '' : 's'} · EGP ${total.toStringAsFixed(2)} · $allocationCount invoice allocations',
+      title: _dayTitle(date),
+      summary: '${items.length} payment${items.length == 1 ? '' : 's'} · EGP ${total.toStringAsFixed(2)} · $allocations invoice allocations',
       initiallyExpanded: initiallyExpanded,
-      children: [
-        for (final item in items) _historyCard(item),
-      ],
+      children: [for (final item in items) _historyCard(item)],
     );
   }
 
   Widget _historyCard(_PaymentHistoryItem item) {
     final scheme = Theme.of(context).colorScheme;
     final transaction = item.transaction;
-    final firstTrip = item.allocations.isEmpty
-        ? null
-        : _tripById(item.allocations.first.tripId);
-    final scopeLabel = firstTrip == null
-        ? 'Payment group unavailable'
-        : '${firstTrip.salesCarName} · ${firstTrip.warehouseName}';
+    final trip = item.allocations.isEmpty ? null : _tripById(item.allocations.first.tripId);
+    final scopeLabel = trip == null ? 'Payment group unavailable' : '${trip.salesCarName} · ${trip.warehouseName}';
     final deleting = _deletingTransactionId == transaction.id;
 
     return Card(
@@ -707,51 +579,28 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Payment · ${_formatTime(transaction.createdAt)}',
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
+                      Text('Payment · ${_formatTime(transaction.createdAt)}', style: const TextStyle(fontWeight: FontWeight.w900)),
                       const SizedBox(height: 3),
-                      Text(
-                        scopeLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
+                      Text(scopeLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
                     ],
                   ),
                 ),
-                Text(
-                  'EGP ${transaction.totalAmount.units.toStringAsFixed(2)}',
-                  style: const TextStyle(fontWeight: FontWeight.w900),
-                ),
+                Text('EGP ${transaction.totalAmount.units.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900)),
                 IconButton(
                   tooltip: 'Delete payment',
                   onPressed: deleting ? null : () => _deletePayment(item),
                   icon: deleting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.delete_outline_rounded),
                 ),
               ],
             ),
-            if (transaction.reference != null &&
-                transaction.reference!.isNotEmpty) ...[
+            if (transaction.reference?.isNotEmpty == true) ...[
               const SizedBox(height: 8),
-              Text(
-                'Reference: ${transaction.reference}',
-                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-              ),
+              Text('Reference: ${transaction.reference}', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
             ],
             const SizedBox(height: 10),
-            for (final allocation in item.allocations)
-              _historyAllocationRow(allocation),
+            for (final allocation in item.allocations) _historyAllocationRow(allocation),
           ],
         ),
       ),
@@ -761,10 +610,9 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
   Widget _historyAllocationRow(CarPaymentAllocation allocation) {
     final scheme = Theme.of(context).colorScheme;
     final trip = _tripById(allocation.tripId);
-    final total = trip == null ? 0 : _totalFor(trip);
     final remaining = trip == null
         ? null
-        : (total - trip.payment.totalPaid.minorUnits).clamp(0, 1 << 62);
+        : (_totalFor(trip) - trip.payment.totalPaid.minorUnits).clamp(0, 1 << 62);
     final paid = remaining == 0;
 
     return Padding(
@@ -777,11 +625,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
         ),
         child: Row(
           children: [
-            Icon(
-              paid ? Icons.check_circle_rounded : Icons.receipt_long_rounded,
-              size: 18,
-              color: paid ? scheme.primary : scheme.onSurfaceVariant,
-            ),
+            Icon(paid ? Icons.check_circle_rounded : Icons.receipt_long_rounded, size: 18, color: paid ? scheme.primary : scheme.onSurfaceVariant),
             const SizedBox(width: 9),
             Expanded(
               child: Text(
@@ -792,22 +636,11 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              '− EGP ${allocation.totalAmount.units.toStringAsFixed(2)}',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
+            Text('− EGP ${allocation.totalAmount.units.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900)),
             const SizedBox(width: 8),
             Text(
-              paid
-                  ? 'Paid'
-                  : remaining == null
-                      ? 'Recorded'
-                      : 'EGP ${(remaining / 100).toStringAsFixed(2)} left',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
-                color: paid ? scheme.primary : scheme.onSurfaceVariant,
-              ),
+              paid ? 'Paid' : remaining == null ? 'Recorded' : 'EGP ${(remaining / 100).toStringAsFixed(2)} left',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: paid ? scheme.primary : scheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -820,10 +653,7 @@ class _PaymentHistoryItem {
   final CarPaymentTransaction transaction;
   final List<CarPaymentAllocation> allocations;
 
-  const _PaymentHistoryItem({
-    required this.transaction,
-    required this.allocations,
-  });
+  const _PaymentHistoryItem({required this.transaction, required this.allocations});
 }
 
 class _PaymentScope {
