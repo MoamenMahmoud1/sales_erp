@@ -186,9 +186,9 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                   const SizedBox(height: 8),
                   _amount('Selling total', summary.finalTotalSoldValue),
                   _amount('Buying cost', summary.totalPurchaseCost),
-                  _amount('Product discount EGP', summary.productDiscountTotal),
-                  _amount('Global discount %', summary.globalDiscountPercentAmount),
-                  _amount('Global discount EGP', summary.globalDiscountFixedAmount),
+                  _amount('Product discount', summary.productDiscountTotal),
+                  _amount('Global % discount', summary.globalDiscountPercentAmount),
+                  _amount('Global EGP discount', summary.globalDiscountFixedAmount),
                   const Divider(height: 18),
                   _amount('Profit', summary.profit, strong: true),
                 ],
@@ -272,7 +272,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                       children: [
                         Text('Sell ${_money(line.item.sellingPrice)}', style: const TextStyle(fontSize: 11)),
                         Text('Buy ${_money(line.item.purchasePrice)}', style: const TextStyle(fontSize: 11)),
-                        Text('Disc EGP ${_money(line.discountAmount)}', style: const TextStyle(fontSize: 11)),
+                        Text('Discount ${_money(line.discountAmount)}', style: const TextStyle(fontSize: 11)),
                         Text('Cost ${_money(line.purchaseCost)}', style: const TextStyle(fontSize: 11)),
                         Text('Profit ${_money(line.profitBeforeGlobalDiscount)}', style: const TextStyle(fontSize: 11)),
                       ],
@@ -292,18 +292,10 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
         child: Row(
           children: [
             Expanded(
-              child: Text(
-                label,
-                softWrap: true,
-                style: TextStyle(fontWeight: strong ? FontWeight.w800 : FontWeight.w500),
-              ),
+              child: Text(label, softWrap: true, style: TextStyle(fontWeight: strong ? FontWeight.w800 : FontWeight.w500)),
             ),
             const SizedBox(width: 12),
-            Text(
-              _money(amount),
-              textAlign: TextAlign.end,
-              style: TextStyle(fontWeight: strong ? FontWeight.w900 : FontWeight.w700),
-            ),
+            Text(_money(amount), textAlign: TextAlign.end, style: TextStyle(fontWeight: strong ? FontWeight.w900 : FontWeight.w700)),
           ],
         ),
       );
