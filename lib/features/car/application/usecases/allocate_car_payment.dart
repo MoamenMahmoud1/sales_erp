@@ -29,11 +29,13 @@ class AllocateCarPayment {
         'Payment exceeds the outstanding balance for the selected Car + Warehouse group by ${plan.unallocated.units.toStringAsFixed(2)}.',
       );
     }
-    await repository.persistPayment(
+
+    final transactionId = await repository.persistPayment(
       transaction: transaction,
       allocations: plan.allocations,
       updatedTrips: plan.updatedTrips,
     );
-    return plan;
+
+    return plan.withTransactionId(transactionId);
   }
 }
