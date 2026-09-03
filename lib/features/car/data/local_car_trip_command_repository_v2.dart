@@ -11,18 +11,18 @@ import 'local_car_trip_command_repository.dart';
 /// already-confirmed invoices.
 class LocalCarTripCommandRepositoryV2 extends LocalCarTripCommandRepository {
   LocalCarTripCommandRepositoryV2({Future<Database> Function()? database})
-      : super(database: database);
+      : _database = database ?? (() => AppDatabase.database),
+        super(database: database);
 
+  final Future<Database> Function() _database;
   static const _calculator = CarCalculator();
   static const _draftPrefix = 'DRAFT|';
 
   @override
   Future<CarTrip> updateDraft(CarTrip trip) async {
-    if (trip.id <= 0) {
-      return super.updateDraft(trip);
-    }
+    if (trip.id <= 0) return super.updateDraft(trip);
 
-    final db = await AppDatabase.database;
+    final db = await _database();
     final rows = await db.query(
       'car_trips',
       columns: ['id', 'display_number', 'status'],
@@ -30,23 +30,15 @@ class LocalCarTripCommandRepositoryV2 extends LocalCarTripCommandRepository {
       whereArgs: [trip.id],
       limit: 1,
     );
-
-    if (rows.isEmpty) {
-      throw StateError('Car trip ${trip.id} was not found.');
-    }
+    if (rows.isEmpty) throw StateError('Car trip ${trip.id} was not found.');
 
     final status = rows.single['status'] as String?;
     final displayNumber = rows.single['display_number'] as String? ?? '';
 
-    // An editor opened on a confirmed invoice must never overwrite the
-    // confirmed row when the user chooses "Save as draft".
+    // Never overwrite a confirmed invoice when its editor uses Save as draft.
     if (status == 'closed' && !displayNumber.startsWith(_draftPrefix)) {
-      return _saveRevisionDraft(
-        trip,
-        sourceDisplayNumber: displayNumber,
-      );
+      return _saveRevisionDraft(trip, sourceDisplayNumber: displayNumber);
     }
-
     return super.updateDraft(trip);
   }
 
@@ -62,7 +54,7 @@ class LocalCarTripCommandRepositoryV2 extends LocalCarTripCommandRepository {
       closedAt: null,
     );
     final summary = _calculator.summary(draft);
-    final db = await AppDatabase.database;
+    final db = await _database();
 
     return db.transaction((txn) async {
       final existing = await txn.query(
@@ -75,13 +67,14 @@ class LocalCarTripCommandRepositoryV2 extends LocalCarTripCommandRepository {
 
       if (existing.isNotEmpty) {
         final draftId = (existing.single['id'] as num).toInt();
+        final row = CarMappers().tripToRow(
+          draft.copyWith(id: draftId),
+          summary,
+          updatedAt: DateTime.now().toUtc(),
+        )..remove('created_at');
         await txn.update(
           'car_trips',
-          CarMappers().tripToRow(
-            draft.copyWith(id: draftId),
-            summary,
-            updatedAt: DateTime.now().toUtc(),
-          )..remove('created_at'),
+          row,
           where: 'id = ? AND status = ?',
           whereArgs: [draftId, CarTripStatus.open.value],
         );
@@ -91,10 +84,7 @@ class LocalCarTripCommandRepositoryV2 extends LocalCarTripCommandRepository {
           whereArgs: [draftId],
         );
         for (final item in draft.items) {
-          await txn.insert(
-            'car_trip_items',
-            CarMappers().itemToRow(item, draftId),
-          );
+          await txn.insert('car_trip_items', CarMappers().itemToRow(item, draftId));
         }
         return draft.copyWith(id: draftId);
       }
@@ -108,10 +98,7 @@ class LocalCarTripCommandRepositoryV2 extends LocalCarTripCommandRepository {
         ),
       );
       for (final item in draft.items) {
-        await txn.insert(
-          'car_trip_items',
-          CarMappers().itemToRow(item, id),
-        );
+        await txn.insert('car_trip_items', CarMappers().itemToRow(item, id));
       }
       return draft.copyWith(id: id);
     });
@@ -155,21 +142,16 @@ class LocalCarTripCommandRepositoryV2 extends LocalCarTripCommandRepository {
         closedAt: DateTime.now().toUtc(),
         payment: source.payment,
       );
-
       final saved = await super.reviseClosedTrip(
         finalized,
         triggeredBy: triggeredBy,
       );
 
-      final db = await AppDatabase.database;
+      final db = await _database();
       await db.delete(
         'car_trips',
         where: 'id = ? AND status = ? AND display_number = ?',
-        whereArgs: [
-          trip.id,
-          CarTripStatus.open.value,
-          trip.displayNumber,
-        ],
+        whereArgs: [trip.id, CarTripStatus.open.value, trip.displayNumber],
       );
       await _syncLatestRevision(saved);
       return saved;
@@ -198,7 +180,7 @@ class LocalCarTripCommandRepositoryV2 extends LocalCarTripCommandRepository {
 
   Future<void> _syncLatestRevision(CarTrip trip) async {
     if (trip.id <= 0) return;
-    final db = await AppDatabase.database;
+    final db = await _database();
     final rows = await db.query(
       'car_revisions',
       columns: ['id'],
@@ -214,12 +196,9 @@ class LocalCarTripCommandRepositoryV2 extends LocalCarTripCommandRepository {
       'car_revisions',
       {
         'gross_subtotal_minor': summary.grossSubtotal.minorUnits,
-        'product_discount_total_minor':
-            summary.productDiscountTotal.minorUnits,
-        'subtotal_after_products_minor':
-            summary.subtotalAfterProducts.minorUnits,
-        'global_discount_amount_minor':
-            summary.globalDiscountAmount.minorUnits,
+        'product_discount_total_minor': summary.productDiscountTotal.minorUnits,
+        'subtotal_after_products_minor': summary.subtotalAfterProducts.minorUnits,
+        'global_discount_amount_minor': summary.globalDiscountAmount.minorUnits,
         'final_total_value_minor': summary.finalTotalSoldValue.minorUnits,
         'total_loaded_cartons': summary.totalLoadedCartons,
         'total_returned_cartons': summary.totalReturnedCartons,
