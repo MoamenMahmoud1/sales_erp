@@ -98,4 +98,4 @@ class CartonPricingSerializer(serializers.ModelSerializer):
         return await sync_to_async(
             self.update,
             thread_sensitive=True,
-        )(validated_data)
+        )(instance, validated_data)
