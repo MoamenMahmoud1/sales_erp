@@ -2,10 +2,12 @@ import '../../app/config/data_mode.dart';
 import '../../features/car/data/local_car_catalog_repository.dart';
 import '../../features/car/data/local_car_payment_repository.dart';
 import '../../features/car/data/local_car_report_repository.dart';
+import '../../features/car/data/local_car_trip_command_repository.dart';
 import '../../features/car/data/local_car_trip_repository.dart';
 import '../../features/car/domain/repositories/car_catalog_repository.dart';
 import '../../features/car/domain/repositories/car_payment_repository.dart';
 import '../../features/car/domain/repositories/car_report_repository.dart';
+import '../../features/car/domain/repositories/car_trip_command_repository.dart';
 import '../../features/car/domain/repositories/car_trip_repository.dart';
 import '../../features/customers/data/local_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
@@ -31,7 +33,8 @@ class AppServices {
 
   final CarCatalogRepository carCatalogRepository =
       LocalCarCatalogRepository();
-  final CarTripRepository carTripRepository = LocalCarTripRepository();
+  final CarTripCommandRepository carTripRepository =
+      LocalCarTripCommandRepository();
   final CarPaymentRepository carPaymentRepository =
       LocalCarPaymentRepository();
   final CarReportRepository carReportRepository = LocalCarReportRepository();
