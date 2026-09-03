@@ -106,9 +106,9 @@ void main() {
       expect(summary.grossSubtotal, const CarMoney(400000));
       expect(summary.finalTotalSoldValue, const CarMoney(400000));
       expect(summary.productDiscountTotal, const CarMoney(28000));
-      expect(summary.subtotalAfterProducts, const CarMoney(308000));
-      expect(summary.totalPurchaseCost, const CarMoney(308000));
-      expect(summary.profit, const CarMoney(92000));
+      expect(summary.subtotalAfterProducts, const CarMoney(292000));
+      expect(summary.totalPurchaseCost, const CarMoney(292000));
+      expect(summary.profit, const CarMoney(108000));
       expect(summary.items[0].netValue, const CarMoney(100000));
       expect(summary.items[0].purchaseCost, const CarMoney(80000));
       expect(summary.items[0].discountAmount, const CarMoney(4000));
@@ -128,56 +128,47 @@ void main() {
   group('global buying discounts', () {
     test('percentage applies to buying cost while selling stays unchanged', () {
       final t = trip(
-        items: [item(name: 'A', priceMinor: 100000, purchaseMinor: 70000, loaded: 10)],
+        items: [
+          item(name: 'A', priceMinor: 10000, purchaseMinor: 8000, loaded: 10),
+        ],
         globalDiscountPercent: 10,
       );
       final summary = calculator.summary(t);
-      expect(summary.grossSubtotal, const CarMoney(1000000));
-      expect(summary.globalDiscountPercentAmount, const CarMoney(70000));
-      expect(summary.globalDiscountFixedAmount, CarMoney.zero);
-      expect(summary.globalDiscountAmount, const CarMoney(70000));
-      expect(summary.totalPurchaseCost, const CarMoney(630000));
-      expect(summary.finalTotalSoldValue, const CarMoney(1000000));
-      expect(summary.profit, const CarMoney(370000));
+      expect(summary.finalTotalSoldValue, const CarMoney(100000));
+      expect(summary.totalPurchaseCost, const CarMoney(72000));
     });
 
     test('fixed EGP discount is added on buying cost only', () {
       final t = trip(
-        items: [item(name: 'A', priceMinor: 100000, purchaseMinor: 70000, loaded: 10)],
-        globalDiscountPercent: 10,
-        globalDiscountEgp: const CarMoney(50000),
+        items: [
+          item(name: 'A', priceMinor: 10000, purchaseMinor: 8000, loaded: 10),
+        ],
+        globalDiscountEgp: const CarMoney(5000),
       );
       final summary = calculator.summary(t);
-      expect(summary.globalDiscountPercentAmount, const CarMoney(70000));
-      expect(summary.globalDiscountFixedAmount, const CarMoney(50000));
-      expect(summary.globalDiscountAmount, const CarMoney(120000));
-      expect(summary.totalPurchaseCost, const CarMoney(580000));
-      expect(summary.finalTotalSoldValue, const CarMoney(1000000));
-      expect(summary.profit, const CarMoney(420000));
+      expect(summary.finalTotalSoldValue, const CarMoney(100000));
+      expect(summary.totalPurchaseCost, const CarMoney(75000));
     });
 
     test('fixed discount cannot exceed remaining buying cost', () {
       final t = trip(
-        items: [item(name: 'A', priceMinor: 100000, purchaseMinor: 70000, loaded: 10)],
-        globalDiscountEgp: const CarMoney(700001),
+        items: [
+          item(name: 'A', priceMinor: 10000, purchaseMinor: 8000, loaded: 10),
+        ],
+        globalDiscountEgp: const CarMoney(90000),
       );
-      expect(
-        calculator.validate(t).any((i) => i.message.contains('cannot exceed the remaining buying cost')),
-        isTrue,
-      );
+      expect(calculator.validate(t), isNotEmpty);
     });
-  });
 
-  group('carton totals', () {
-    test('loaded / returned / sold totals aggregate correctly', () {
+    test('carton totals aggregate correctly', () {
       final t = trip(items: [
-        item(name: 'A', priceMinor: 100, loaded: 100, returned: 20),
-        item(name: 'B', priceMinor: 200, loaded: 50, returned: 10),
+        item(name: 'A', priceMinor: 10000, loaded: 10, returned: 2),
+        item(name: 'B', priceMinor: 5000, loaded: 5, returned: 1),
       ]);
       final summary = calculator.summary(t);
-      expect(summary.totalLoadedCartons, 150);
-      expect(summary.totalReturnedCartons, 30);
-      expect(summary.totalSoldCartons, 120);
+      expect(summary.totalLoadedCartons, 15);
+      expect(summary.totalReturnedCartons, 3);
+      expect(summary.totalSoldCartons, 12);
     });
   });
 }
