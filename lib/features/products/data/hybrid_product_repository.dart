@@ -40,10 +40,22 @@ class HybridProductRepository implements ProductRepository {
   Future<int> addProduct({
     required String name,
     required double price,
+    double? purchasePrice,
+    double? sellingPrice,
   }) async {
-    final localId = await local.addProduct(name: name, price: price);
+    final localId = await local.addProduct(
+      name: name,
+      price: price,
+      purchasePrice: purchasePrice,
+      sellingPrice: sellingPrice,
+    );
     try {
-      await _remote.addProduct(name: name, price: price);
+      await _remote.addProduct(
+        name: name,
+        price: price,
+        purchasePrice: purchasePrice,
+        sellingPrice: sellingPrice,
+      );
     } catch (_) {
       // محفوظ محليًا.
     }
@@ -55,10 +67,24 @@ class HybridProductRepository implements ProductRepository {
     required int id,
     required String name,
     required double price,
+    double? purchasePrice,
+    double? sellingPrice,
   }) async {
-    await local.updateProduct(id: id, name: name, price: price);
+    await local.updateProduct(
+      id: id,
+      name: name,
+      price: price,
+      purchasePrice: purchasePrice,
+      sellingPrice: sellingPrice,
+    );
     try {
-      await _remote.updateProduct(id: id, name: name, price: price);
+      await _remote.updateProduct(
+        id: id,
+        name: name,
+        price: price,
+        purchasePrice: purchasePrice,
+        sellingPrice: sellingPrice,
+      );
     } catch (_) {
       // محفوظ محليًا.
     }
