@@ -95,6 +95,7 @@ Future<void> _createTripItems(DatabaseExecutor db) async {
       product_id INTEGER NOT NULL,
       product_name TEXT NOT NULL,
       unit_price_minor INTEGER NOT NULL CHECK (unit_price_minor > 0),
+      purchase_price_minor INTEGER NOT NULL DEFAULT 0 CHECK (purchase_price_minor >= 0),
       loaded_cartons INTEGER NOT NULL CHECK (loaded_cartons >= 0),
       returned_cartons INTEGER NOT NULL CHECK (returned_cartons >= 0),
       discount_percent REAL NOT NULL DEFAULT 0
@@ -157,6 +158,7 @@ Future<void> _createRevisionItems(DatabaseExecutor db) async {
       product_id INTEGER NOT NULL,
       product_name TEXT NOT NULL,
       unit_price_minor INTEGER NOT NULL CHECK (unit_price_minor > 0),
+      purchase_price_minor INTEGER NOT NULL DEFAULT 0 CHECK (purchase_price_minor >= 0),
       loaded_cartons INTEGER NOT NULL CHECK (loaded_cartons >= 0),
       returned_cartons INTEGER NOT NULL CHECK (returned_cartons >= 0),
       discount_percent REAL NOT NULL DEFAULT 0

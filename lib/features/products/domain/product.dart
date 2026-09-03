@@ -1,22 +1,40 @@
 class Product {
   final int id;
   final String name;
+
+  /// Legacy public price field. It is the product selling price.
   final double price;
+
+  final double purchasePrice;
+
+  double get sellingPrice => price;
 
   const Product({
     required this.id,
     required this.name,
     required this.price,
+    this.purchasePrice = 0,
   });
 
   factory Product.fromMap(Map<String, Object?> map) {
-    final rawPrice = map['price'];
+    double parse(Object? value, double fallback) {
+      if (value is num) return value.toDouble();
+      if (value is String) return double.tryParse(value) ?? fallback;
+      return fallback;
+    }
+
+    final legacyPrice = parse(map['price'], 0);
+    final sellingPrice = parse(map['selling_price'], legacyPrice);
+    final parsedPurchasePrice = parse(map['purchase_price'], sellingPrice);
+    final purchasePrice = parsedPurchasePrice > 0
+        ? parsedPurchasePrice
+        : sellingPrice;
+
     return Product(
       id: map['id'] as int,
       name: map['name'] as String,
-      price: rawPrice is num
-          ? rawPrice.toDouble()
-          : double.parse(rawPrice as String),
+      price: sellingPrice,
+      purchasePrice: purchasePrice,
     );
   }
 
@@ -25,6 +43,8 @@ class Product {
       'id': id,
       'name': name,
       'price': price,
+      'purchase_price': purchasePrice,
+      'selling_price': sellingPrice,
     };
   }
 
@@ -32,11 +52,15 @@ class Product {
     int? id,
     String? name,
     double? price,
+    double? purchasePrice,
+    double? sellingPrice,
   }) {
+    final nextSellingPrice = sellingPrice ?? price ?? this.sellingPrice;
     return Product(
       id: id ?? this.id,
       name: name ?? this.name,
-      price: price ?? this.price,
+      price: nextSellingPrice,
+      purchasePrice: purchasePrice ?? this.purchasePrice,
     );
   }
 }

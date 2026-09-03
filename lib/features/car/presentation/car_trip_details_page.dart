@@ -273,10 +273,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
   Widget _info(String label, String value) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
-          ),
+          Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700)),
           const SizedBox(height: 3),
           Text(
             value,
@@ -293,10 +290,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Carton flow',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-          ),
+          const Text('Carton flow', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -312,10 +306,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
             alignment: Alignment.center,
             child: Text(
               '${summary.totalLoadedCartons} loaded − ${summary.totalReturnedCartons} returned = ${summary.totalSoldCartons} sold',
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                color: scheme.onSurfaceVariant,
-              ),
+              style: TextStyle(fontWeight: FontWeight.w800, color: scheme.onSurfaceVariant),
             ),
           ),
         ],
@@ -329,17 +320,8 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
           children: [
             Icon(icon, color: color),
             const SizedBox(height: 4),
-            Text(
-              '$value',
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-            ),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
+            Text('$value', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+            Text(label, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ],
         ),
       );
@@ -350,10 +332,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Product breakdown',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-          ),
+          const Text('Product breakdown', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
           const SizedBox(height: 12),
           if (summary.items.isEmpty)
             const Text('No products on this trip.')
@@ -392,31 +371,17 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 6),
+                    _amountRow('Selling price / carton', line.item.sellingPrice),
+                    _amountRow('Buying price / carton', line.item.purchasePrice),
+                    _amountRow('Gross sold value', line.grossValue),
+                    _amountRow('Discount EGP', line.discountAmount),
+                    _amountRow('Cost of sold goods', line.purchaseCost),
+                    _amountRow('Profit before global discount', line.profitBeforeGlobalDiscount, strong: true),
                     const SizedBox(height: 4),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '${_money(line.item.unitPrice.minorUnits)} / carton',
-                          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                        ),
-                        Flexible(
-                          child: Text(
-                            'Sold ${_money(line.grossValue.minorUnits)} · Discount ${_money(line.discountAmount.minorUnits)}',
-                            textAlign: TextAlign.end,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        'Returned value: ${_money((line.item.unitPrice * line.item.returnedCartons).minorUnits)}',
-                        style: TextStyle(fontSize: 11, color: scheme.error, fontWeight: FontWeight.w700),
-                      ),
+                    _amountRow(
+                      'Returned value',
+                      line.item.sellingPrice * line.item.returnedCartons,
                     ),
                     if (line != summary.items.last) const Divider(height: 18),
                   ],
@@ -426,17 +391,11 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
           Row(
             children: [
               const Expanded(
-                child: Text(
-                  'Products total',
-                  style: TextStyle(fontWeight: FontWeight.w900),
-                ),
+                child: Text('Products total', style: TextStyle(fontWeight: FontWeight.w900)),
               ),
               Text(
                 '${summary.totalLoadedCartons} − ${summary.totalReturnedCartons} = ${summary.totalSoldCartons} cartons',
-                style: TextStyle(
-                  color: scheme.primary,
-                  fontWeight: FontWeight.w900,
-                ),
+                style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w900),
               ),
             ],
           ),
@@ -458,10 +417,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
           children: [
             const Align(
               alignment: Alignment.centerLeft,
-              child: Text(
-                'Financial summary',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-              ),
+              child: Text('Financial summary', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
             ),
             const SizedBox(height: 10),
             _amountRow('Gross sold value', summary.grossSubtotal),
@@ -471,6 +427,8 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
               'Global discount (${summary.globalDiscountPercent.toStringAsFixed(2)}%)',
               summary.globalDiscountAmount,
             ),
+            _amountRow('Buying cost', summary.totalPurchaseCost),
+            _amountRow('Profit', summary.profit, strong: true),
             const Divider(height: 22),
             _amountRow('Actual sold value', summary.finalTotalSoldValue, strong: true),
           ],
@@ -503,10 +461,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
           Row(
             children: [
               const Expanded(
-                child: Text(
-                  'Payment',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-                ),
+                child: Text('Payment', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
               ),
               StatusBadge(type: statusType, label: statusLabel),
             ],
@@ -520,10 +475,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
           ),
           if (trip.dueDate != null && days > 0) ...[
             const SizedBox(height: 10),
-            Text(
-              '$days days overdue',
-              style: TextStyle(color: scheme.error, fontWeight: FontWeight.w800),
-            ),
+            Text('$days days overdue', style: TextStyle(color: scheme.error, fontWeight: FontWeight.w800)),
           ],
         ],
       ),
@@ -534,10 +486,7 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Revision history',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-            ),
+            const Text('Revision history', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
             const SizedBox(height: 8),
             if (revisions.isEmpty)
               const Text('No revisions recorded yet.')
@@ -546,13 +495,8 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: CircleAvatar(child: Text('${revision.revisionNumber}')),
-                  title: Text(
-                    'Revision ${revision.revisionNumber}',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  subtitle: Text(
-                    '${_formatDate(revision.createdAt)} · ${revision.salesCarName} · ${revision.warehouseName}',
-                  ),
+                  title: Text('Revision ${revision.revisionNumber}', style: const TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: Text('${_formatDate(revision.createdAt)} · ${revision.salesCarName} · ${revision.warehouseName}'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
@@ -566,24 +510,24 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
 
   Widget _amountRow(String label, dynamic amount, {bool strong = false}) =>
       Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 3),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Expanded(
               child: Text(
                 label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                softWrap: true,
                 style: TextStyle(fontWeight: strong ? FontWeight.w800 : FontWeight.w500),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Text(
               _money(amount.minorUnits),
+              textAlign: TextAlign.end,
               style: TextStyle(
                 fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
-                fontSize: strong ? 17 : 13,
+                fontSize: strong ? 14 : 13,
               ),
             ),
           ],

@@ -50,7 +50,9 @@ class CarMappers {
         'trip_id': tripId,
         'product_id': item.productId,
         'product_name': item.productName,
-        'unit_price_minor': item.unitPrice.minorUnits,
+        // unit_price_minor remains the legacy selling-price snapshot.
+        'unit_price_minor': item.sellingPrice.minorUnits,
+        'purchase_price_minor': item.purchasePrice.minorUnits,
         'loaded_cartons': item.loadedCartons,
         'returned_cartons': item.returnedCartons,
         'discount_percent': item.discountPercent,
@@ -60,6 +62,10 @@ class CarMappers {
         productId: row['product_id'] as int,
         productName: row['product_name'] as String,
         unitPrice: CarMoney((row['unit_price_minor'] as num).toInt()),
+        purchasePrice: CarMoney(
+          (row['purchase_price_minor'] as num?)?.toInt() ??
+              (row['unit_price_minor'] as num).toInt(),
+        ),
         loadedCartons: (row['loaded_cartons'] as num).toInt(),
         returnedCartons: (row['returned_cartons'] as num).toInt(),
         discountPercent: (row['discount_percent'] as num?)?.toDouble() ?? 0,
@@ -208,7 +214,8 @@ class CarMappers {
         'revision_id': revisionId,
         'product_id': item.productId,
         'product_name': item.productName,
-        'unit_price_minor': item.unitPrice.minorUnits,
+        'unit_price_minor': item.sellingPrice.minorUnits,
+        'purchase_price_minor': item.purchasePrice.minorUnits,
         'loaded_cartons': item.loadedCartons,
         'returned_cartons': item.returnedCartons,
         'discount_percent': item.discountPercent,
@@ -225,8 +232,7 @@ class CarMappers {
       CarPaymentTransaction(
         id: row['id'] as int,
         cashAmount: CarMoney((row['cash_amount_minor'] as num).toInt()),
-        transferAmount:
-            CarMoney((row['transfer_amount_minor'] as num).toInt()),
+        transferAmount: CarMoney((row['transfer_amount_minor'] as num).toInt()),
         reference: row['reference'] as String?,
         createdAt: DateTime.parse(row['created_at'] as String),
       );

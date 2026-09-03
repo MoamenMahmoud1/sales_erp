@@ -14,6 +14,8 @@ class CarFinancialSummary {
   final double globalDiscountPercent;
   final CarMoney globalDiscountAmount;
   final CarMoney finalTotalSoldValue;
+  final CarMoney totalPurchaseCost;
+  final CarMoney profit;
   final List<CarItemLine> items;
 
   const CarFinancialSummary({
@@ -27,6 +29,8 @@ class CarFinancialSummary {
     required this.globalDiscountPercent,
     required this.globalDiscountAmount,
     required this.finalTotalSoldValue,
+    this.totalPurchaseCost = CarMoney.zero,
+    this.profit = CarMoney.zero,
     required this.items,
   });
 }

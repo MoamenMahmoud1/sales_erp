@@ -60,7 +60,7 @@ class _CarAppShellState extends State<CarAppShell> {
       CarDailyDashboardPageV2(onNavigate: _goTo),
       const CarTripsPageV4(),
       const CarPaymentsPage(),
-      const ProductsPage(),
+      ProductsPage(carMode: true),
       const CarReportsPage(),
     ];
     _tripDeletions = AppServices.instance.carTripEvents.deletionStream.listen(_onTripDeleted);
