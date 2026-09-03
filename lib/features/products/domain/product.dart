@@ -25,7 +25,10 @@ class Product {
 
     final legacyPrice = parse(map['price'], 0);
     final sellingPrice = parse(map['selling_price'], legacyPrice);
-    final purchasePrice = parse(map['purchase_price'], sellingPrice);
+    final parsedPurchasePrice = parse(map['purchase_price'], sellingPrice);
+    final purchasePrice = parsedPurchasePrice > 0
+        ? parsedPurchasePrice
+        : sellingPrice;
 
     return Product(
       id: map['id'] as int,
