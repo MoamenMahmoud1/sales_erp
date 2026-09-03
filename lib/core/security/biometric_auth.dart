@@ -172,4 +172,4 @@ class BiometricAuth {
       sensitiveTransaction: false,
     );
   }
-}\n
+}
