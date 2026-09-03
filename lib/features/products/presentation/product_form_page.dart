@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../data/local_product_repository.dart';
@@ -31,7 +30,7 @@ class _ProductFormPageState
   final _repository =
       LocalProductRepository();
 
-    ProductRepository get _dataSource =>
+  ProductRepository get _dataSource =>
       widget.repository ?? _repository;
 
   late final TextEditingController
@@ -115,30 +114,31 @@ class _ProductFormPageState
         double.parse(
       _priceController.text.trim(),
     );
+    final name = _nameController.text.trim();
 
     setState(() {
       _isSaving = true;
     });
 
     try {
-      if (widget.isEditing) {
-        await _dataSource.updateProduct(
-          id: widget.product!.id,
-          name: _nameController.text,
-          price: price,
-        );
-      } else {
-        await _dataSource.addProduct(
-          name: _nameController.text,
-          price: price,
-        );
-      }
+      final productId = widget.isEditing
+          ? await _updateProduct(name, price)
+          : await _dataSource.addProduct(
+              name: name,
+              price: price,
+            );
 
       if (!mounted) {
         return;
       }
 
-      Navigator.of(context).pop(true);
+      Navigator.of(context).pop(
+        Product(
+          id: productId,
+          name: name,
+          price: price,
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -159,6 +159,19 @@ class _ProductFormPageState
         });
       }
     }
+  }
+
+  Future<int> _updateProduct(
+    String name,
+    double price,
+  ) async {
+    final product = widget.product!;
+    await _dataSource.updateProduct(
+      id: product.id,
+      name: name,
+      price: price,
+    );
+    return product.id;
   }
 
   @override
@@ -282,4 +295,3 @@ class _ProductFormPageState
     );
   }
 }
-
