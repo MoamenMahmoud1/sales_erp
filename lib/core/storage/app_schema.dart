@@ -20,6 +20,7 @@ Future<void> createAppSchema(DatabaseExecutor db) async {
     CREATE TABLE products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'General',
       price REAL NOT NULL,
       purchase_price REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -27,6 +28,7 @@ Future<void> createAppSchema(DatabaseExecutor db) async {
     )
   ''');
   await db.execute('CREATE INDEX idx_products_name ON products(name)');
+  await db.execute('CREATE INDEX idx_products_category ON products(category)');
 
   await db.execute('''
     CREATE TABLE invoices (
@@ -106,7 +108,7 @@ Future<void> createAppSchema(DatabaseExecutor db) async {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       invoice_id INTEGER NOT NULL,
       coupon_id INTEGER NOT NULL,
-      quantity INTEGER NOT NULL CHECK (quantity >= 0),
+      quantity INTEGER NOT NULL,
       unit_price REAL NOT NULL,
       total_value REAL NOT NULL,
       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,

@@ -29,6 +29,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
   ProductRepository get _dataSource => widget.repository ?? _repository;
 
   late final TextEditingController _nameController;
+  late final TextEditingController _categoryController;
   late final TextEditingController _priceController;
   late final TextEditingController _purchasePriceController;
 
@@ -39,19 +40,21 @@ class _ProductFormPageState extends State<ProductFormPage> {
     super.initState();
     final product = widget.product;
     _nameController = TextEditingController(text: product?.name ?? '');
+    _categoryController = TextEditingController(
+      text: product?.category ?? 'General',
+    );
     _priceController = TextEditingController(
       text: product == null ? '' : product.sellingPrice.toStringAsFixed(2),
     );
     _purchasePriceController = TextEditingController(
-      text: product == null
-          ? ''
-          : product.purchasePrice.toStringAsFixed(2),
+      text: product == null ? '' : product.purchasePrice.toStringAsFixed(2),
     );
   }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _categoryController.dispose();
     _priceController.dispose();
     _purchasePriceController.dispose();
     super.dispose();
@@ -79,6 +82,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
     if (!_formKey.currentState!.validate()) return;
 
     final name = _nameController.text.trim();
+    final category = _categoryController.text.trim().isEmpty
+        ? 'General'
+        : _categoryController.text.trim();
     final sellingPrice = double.parse(_priceController.text.trim());
     final purchasePrice = widget.carMode
         ? double.parse(_purchasePriceController.text.trim())
@@ -88,16 +94,13 @@ class _ProductFormPageState extends State<ProductFormPage> {
 
     try {
       final productId = widget.isEditing
-          ? await _updateProduct(
-              name,
-              purchasePrice,
-              sellingPrice,
-            )
+          ? await _updateProduct(name, category, purchasePrice, sellingPrice)
           : await _dataSource.addProduct(
               name: name,
               price: sellingPrice,
               purchasePrice: purchasePrice,
               sellingPrice: sellingPrice,
+              category: category,
             );
 
       if (!mounted) return;
@@ -106,6 +109,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
         Product(
           id: productId,
           name: name,
+          category: category,
           price: sellingPrice,
           purchasePrice: purchasePrice,
         ),
@@ -122,6 +126,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
 
   Future<int> _updateProduct(
     String name,
+    String category,
     double purchasePrice,
     double sellingPrice,
   ) async {
@@ -129,6 +134,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
     await _dataSource.updateProduct(
       id: product.id,
       name: name,
+      category: category,
       price: sellingPrice,
       purchasePrice: purchasePrice,
       sellingPrice: sellingPrice,
@@ -139,7 +145,6 @@ class _ProductFormPageState extends State<ProductFormPage> {
   InputDecoration _decoration({required String label, required IconData icon}) {
     return InputDecoration(
       labelText: label,
-      suffixText: 'EGP',
       prefixIcon: Icon(icon),
       border: const OutlineInputBorder(),
     );
@@ -174,12 +179,24 @@ class _ProductFormPageState extends State<ProductFormPage> {
             ),
             const SizedBox(height: 16),
             TextFormField(
+              controller: _categoryController,
+              textCapitalization: TextCapitalization.words,
+              decoration: _decoration(
+                label: 'Category',
+                icon: Icons.category_outlined,
+              ),
+              validator: (value) => value == null || value.trim().isEmpty
+                  ? 'Category is required.'
+                  : null,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
               controller: _priceController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: _decoration(
                 label: widget.carMode ? 'Selling price' : 'Price',
                 icon: Icons.sell_outlined,
-              ),
+              ).copyWith(suffixText: 'EGP'),
               validator: (value) => _validatePrice(
                 value,
                 label: widget.carMode ? 'Selling price' : 'Price',
@@ -193,7 +210,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                 decoration: _decoration(
                   label: 'Buying price',
                   icon: Icons.shopping_cart_outlined,
-                ),
+                ).copyWith(suffixText: 'EGP'),
                 validator: (value) => _validatePrice(
                   value,
                   label: 'Buying price',
