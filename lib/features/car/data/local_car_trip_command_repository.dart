@@ -24,9 +24,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
 
   @override
   Future<CarTripDeletionResult> deleteTrip(int tripId) async {
-    if (tripId <= 0) {
-      throw ArgumentError('Invalid Car trip ID.');
-    }
+    if (tripId <= 0) throw ArgumentError('Invalid Car trip ID.');
 
     final db = await _database();
     return db.transaction((txn) async {
@@ -37,9 +35,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
         whereArgs: [tripId],
         limit: 1,
       );
-      if (tripRows.isEmpty) {
-        throw StateError('Car trip $tripId was not found.');
-      }
+      if (tripRows.isEmpty) throw StateError('Car trip $tripId was not found.');
 
       final transactionRows = await txn.rawQuery('''
         SELECT DISTINCT payment_transaction_id
@@ -52,17 +48,12 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
       final recalculatedTripIds = <int>{};
 
       for (final transactionRow in transactionRows) {
-        final transactionId =
-            (transactionRow['payment_transaction_id'] as num).toInt();
+        final transactionId = (transactionRow['payment_transaction_id'] as num).toInt();
         deletedTransactionIds.add(transactionId);
 
         final allocations = await txn.query(
           'car_payment_allocations',
-          columns: [
-            'trip_id',
-            'cash_amount_minor',
-            'transfer_amount_minor',
-          ],
+          columns: ['trip_id', 'cash_amount_minor', 'transfer_amount_minor'],
           where: 'payment_transaction_id = ?',
           whereArgs: [transactionId],
           orderBy: 'id ASC',
@@ -73,9 +64,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
           if (affectedTripId == tripId) continue;
 
           final cash = (allocation['cash_amount_minor'] as num).toInt();
-          final transfer =
-              (allocation['transfer_amount_minor'] as num).toInt();
-
+          final transfer = (allocation['transfer_amount_minor'] as num).toInt();
           final affectedRows = await txn.query(
             'car_trips',
             columns: ['paid_cash_minor', 'paid_transfer_minor'],
@@ -89,10 +78,8 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
             );
           }
 
-          final currentCash =
-              (affectedRows.single['paid_cash_minor'] as num).toInt();
-          final currentTransfer =
-              (affectedRows.single['paid_transfer_minor'] as num).toInt();
+          final currentCash = (affectedRows.single['paid_cash_minor'] as num).toInt();
+          final currentTransfer = (affectedRows.single['paid_transfer_minor'] as num).toInt();
           if (currentCash < cash || currentTransfer < transfer) {
             throw StateError(
               'Cannot delete trip $tripId because payment $transactionId is no longer consistent.',
@@ -106,16 +93,8 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
               'paid_transfer_minor': currentTransfer - transfer,
               'updated_at': DateTime.now().toUtc().toIso8601String(),
             },
-            where: '''
-              id = ?
-              AND paid_cash_minor = ?
-              AND paid_transfer_minor = ?
-            ''',
-            whereArgs: [
-              affectedTripId,
-              currentCash,
-              currentTransfer,
-            ],
+            where: 'id = ? AND paid_cash_minor = ? AND paid_transfer_minor = ?',
+            whereArgs: [affectedTripId, currentCash, currentTransfer],
           );
           if (changed != 1) {
             throw StateError(
@@ -125,7 +104,6 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
           recalculatedTripIds.add(affectedTripId);
         }
 
-        // The allocations are removed by the transaction cascade below.
         await txn.delete(
           'car_payment_transactions',
           where: 'id = ?',
@@ -138,9 +116,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
         where: 'id = ?',
         whereArgs: [tripId],
       );
-      if (deleted != 1) {
-        throw StateError('Car trip $tripId could not be deleted.');
-      }
+      if (deleted != 1) throw StateError('Car trip $tripId could not be deleted.');
 
       final recalculatedTrips = <CarTrip>[];
       for (final affectedTripId in recalculatedTripIds) {
@@ -161,15 +137,12 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
         final items = <CarLoadItem>[
           for (final itemRow in itemRows) _mappers.itemFromRow(itemRow),
         ];
-        recalculatedTrips.add(
-          _mappers.tripFromRow(row.single, items),
-        );
+        recalculatedTrips.add(_mappers.tripFromRow(row.single, items));
       }
 
       return CarTripDeletionResult(
         deletedTripId: tripId,
-        deletedPaymentTransactionIds:
-            List.unmodifiable(deletedTransactionIds),
+        deletedPaymentTransactionIds: List.unmodifiable(deletedTransactionIds),
         recalculatedTrips: List.unmodifiable(recalculatedTrips),
       );
     });
