@@ -48,6 +48,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
 
   SalesCar? _selectedCar;
   Warehouse? _selectedWarehouse;
+  DateTime? _invoiceDate;
   DateTime? _dueDate;
   String? _displayNumber;
   CarTrip? _original;
@@ -74,6 +75,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
   @override
   void initState() {
     super.initState();
+    _invoiceDate = DateTime.now();
     _load();
   }
 
@@ -99,6 +101,8 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
         final trip = await _trips.getTripById(widget.tripId!);
         if (trip == null) throw StateError('Car invoice not found.');
         _original = trip;
+        final opened = trip.openedAt.toLocal();
+        _invoiceDate = DateTime(opened.year, opened.month, opened.day);
         _selectedCar = _cars.where((car) => car.id == trip.salesCarId).firstOrNull;
         _selectedWarehouse = _warehouses.where((warehouse) => warehouse.id == trip.warehouseId).firstOrNull;
         _dueDate = trip.dueDate?.toLocal();
@@ -206,6 +210,7 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     if (car == null || warehouse == null) return null;
 
     final now = DateTime.now().toUtc();
+    final invoiceDate = _invoiceDate ?? now.toLocal();
     return CarTrip(
       id: _original?.id ?? 0,
       displayNumber: _displayNumber ?? _original?.displayNumber ?? '',
@@ -213,7 +218,11 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       salesCarName: car.name,
       warehouseId: warehouse.id,
       warehouseName: warehouse.name,
-      openedAt: _original?.openedAt ?? now,
+      openedAt: DateTime(
+        invoiceDate.year,
+        invoiceDate.month,
+        invoiceDate.day,
+      ).toUtc(),
       closedAt: closed ? (_original?.closedAt ?? now) : _original?.closedAt,
       dueDate: _dueDate?.toUtc(),
       status: closed ? CarTripStatus.closed : CarTripStatus.open,
@@ -231,6 +240,10 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
     }
     if (_selectedWarehouse == null) {
       _showError('Select a Warehouse.');
+      return false;
+    }
+    if (_invoiceDate == null) {
+      _showError('Select an invoice date.');
       return false;
     }
     if (_items.isEmpty) {
@@ -426,6 +439,24 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             const SizedBox(height: 10),
             InkWell(
               borderRadius: BorderRadius.circular(14),
+              onTap: _saving ? null : _pickInvoiceDate,
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Invoice date',
+                  prefixIcon: Icon(Icons.receipt_long_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                child: Text(
+                  _invoiceDate == null ? 'Not specified' : _formatDate(_invoiceDate!),
+                  style: TextStyle(
+                    color: _invoiceDate == null ? scheme.onSurfaceVariant : scheme.onSurface,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            InkWell(
+              borderRadius: BorderRadius.circular(14),
               onTap: _saving ? null : _pickDueDate,
               child: InputDecorator(
                 decoration: const InputDecoration(
@@ -467,6 +498,21 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
       ],
       onChanged: onChanged,
     );
+  }
+
+  Future<void> _pickInvoiceDate() async {
+    final current = _invoiceDate ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      initialDate: current,
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _invoiceDate = DateTime(picked.year, picked.month, picked.day);
+      });
+    }
   }
 
   Future<void> _pickDueDate() async {
@@ -615,7 +661,14 @@ class _CarTripEditorPageState extends State<CarTripEditorPage> {
             child: Text(label, style: TextStyle(fontWeight: strong ? FontWeight.w800 : FontWeight.w500)),
           ),
           const SizedBox(width: 10),
-          Text(_money(amount), style: TextStyle(fontWeight: strong ? FontWeight.w900 : FontWeight.w700)),
+          Flexible(
+            child: Text(
+              _money(amount),
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+              style: TextStyle(fontWeight: strong ? FontWeight.w900 : FontWeight.w700),
+            ),
+          ),
         ],
       ),
     );
@@ -1109,17 +1162,20 @@ class _ExpandableProductCardState extends State<_ExpandableProductCard> {
                             Container(
                               margin: const EdgeInsets.only(left: 6),
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                              constraints: const BoxConstraints(maxWidth: 110),
                               decoration: BoxDecoration(
                                 color: widget.scheme.surfaceContainerHighest,
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: Text(widget.category, style: TextStyle(fontSize: 10, color: widget.scheme.onSurfaceVariant, fontWeight: FontWeight.w700)),
+                              child: Text(widget.category, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: widget.scheme.onSurfaceVariant, fontWeight: FontWeight.w700)),
                             ),
                         ],
                       ),
                       const SizedBox(height: 3),
                       Text(
                         '${widget.buy} buy · ${widget.sell} sell / carton',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 11, color: widget.scheme.onSurfaceVariant),
                       ),
                     ],
@@ -1148,9 +1204,9 @@ class _ExpandableProductCardState extends State<_ExpandableProductCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text('${widget.loaded - widget.returned} sold', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+                      Text('${widget.loaded - widget.returned} sold', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
                       const SizedBox(height: 3),
-                      Text(widget.profit, style: TextStyle(color: widget.scheme.onSurfaceVariant, fontSize: 11, fontWeight: FontWeight.w700)),
+                      Text(widget.profit, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: widget.scheme.onSurfaceVariant, fontSize: 11, fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ),
@@ -1232,6 +1288,8 @@ class _MiniMetric extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       '$label $value',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
       style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Theme.of(context).colorScheme.onSurfaceVariant),
     );
   }
