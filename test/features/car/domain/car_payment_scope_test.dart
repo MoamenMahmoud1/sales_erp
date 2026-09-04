@@ -30,6 +30,7 @@ void main() {
           productId: id,
           productName: 'Product $id',
           unitPrice: CarMoney(value),
+          purchasePrice: CarMoney(value),
           loadedCartons: 1,
         ),
       ],
@@ -37,27 +38,9 @@ void main() {
   }
 
   test('allocates only inside the selected Car + Warehouse group', () {
-    final selectedGroupFirst = trip(
-      id: 1,
-      carId: 1,
-      warehouseId: 1,
-      value: 3000,
-      day: 1,
-    );
-    final selectedGroupSecond = trip(
-      id: 2,
-      carId: 1,
-      warehouseId: 1,
-      value: 4000,
-      day: 2,
-    );
-    final differentCar = trip(
-      id: 3,
-      carId: 2,
-      warehouseId: 1,
-      value: 9000,
-      day: 3,
-    );
+    final selectedGroupFirst = trip(id: 1, carId: 1, warehouseId: 1, value: 3000, day: 1);
+    final selectedGroupSecond = trip(id: 2, carId: 1, warehouseId: 1, value: 4000, day: 2);
+    final differentCar = trip(id: 3, carId: 2, warehouseId: 1, value: 9000, day: 3);
 
     final plan = allocator.allocate(
       transaction: CarPaymentTransaction(
@@ -75,20 +58,8 @@ void main() {
   });
 
   test('rejects an unscoped payment when multiple Car + Warehouse groups are mixed', () {
-    final first = trip(
-      id: 1,
-      carId: 1,
-      warehouseId: 1,
-      value: 3000,
-      day: 1,
-    );
-    final second = trip(
-      id: 2,
-      carId: 2,
-      warehouseId: 1,
-      value: 4000,
-      day: 2,
-    );
+    final first = trip(id: 1, carId: 1, warehouseId: 1, value: 3000, day: 1);
+    final second = trip(id: 2, carId: 2, warehouseId: 1, value: 4000, day: 2);
 
     expect(
       () => allocator.allocate(
