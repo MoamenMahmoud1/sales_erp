@@ -217,8 +217,10 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
     setState(() {});
   }
 
+  // Payment balances are buying-side balances. Selling revenue remains an
+  // invoice/report value and must not cap or allocate supplier payments.
   int _totalFor(CarTrip trip) =>
-      _calculator.summary(trip).finalTotalSoldValue.minorUnits;
+      _calculator.summary(trip).totalPurchaseCost.minorUnits;
 
   CarMoney _money(double amount) => CarMoney.fromUnits(amount);
 
@@ -246,7 +248,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
 
     if (_enteredPaymentMinor > _outstandingTotal) {
       _showError(
-        'Payment cannot exceed the selected group outstanding balance.',
+        'Payment cannot exceed the selected outstanding buying balance.',
       );
       return;
     }
@@ -413,8 +415,9 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
     return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
-  DateTime _invoiceDay(CarTrip trip) =>
-      (trip.closedAt ?? trip.openedAt).toLocal();
+  // The invoice date is the date entered on the Car invoice, not the payment
+  // transaction timestamp.
+  DateTime _invoiceDay(CarTrip trip) => trip.openedAt.toLocal();
 
   List<List<CarTrip>> _outstandingGroups() {
     final grouped = <String, List<CarTrip>>{};
@@ -437,7 +440,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
           (_totalFor(trip) - trip.payment.totalPaid.minorUnits)
               .clamp(0, 1 << 62),
     );
-    return '${trips.length} invoice${trips.length == 1 ? '' : 's'} · EGP ${(outstanding / 100).toStringAsFixed(2)} outstanding';
+    return '${trips.length} invoice${trips.length == 1 ? '' : 's'} · EGP ${(outstanding / 100).toStringAsFixed(2)} buying balance';
   }
 
   void _openInvoice(CarTrip trip) {
@@ -475,7 +478,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
           ),
           const SizedBox(height: 5),
           Text(
-            'Review finalized invoices, see paid vs outstanding balances, and record payments by Car + Warehouse group.',
+            'Review finalized invoices, see paid vs outstanding buying balances, and record payments by Car + Warehouse group.',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -712,14 +715,22 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
               Expanded(
                 child: Text(
                   'Total payment',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: scheme.onSurfaceVariant),
                 ),
               ),
-              Text(
-                'EGP ${amount.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 17,
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  'EGP ${amount.toStringAsFixed(2)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 17,
+                  ),
                 ),
               ),
             ],
@@ -741,7 +752,7 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
                 Expanded(
                   child: Text(
                     _paymentExceedsBalance
-                        ? 'Payment exceeds the selected outstanding balance.'
+                        ? 'Payment exceeds the selected outstanding buying balance.'
                         : 'Outstanding after payment: EGP ${((_outstandingTotal - _enteredPaymentMinor).clamp(0, 1 << 62) / 100).toStringAsFixed(2)}',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
@@ -835,16 +846,28 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 const Icon(Icons.chevron_right_rounded, size: 20),
               ],
             ),
-            const SizedBox(height: 11),
+            const SizedBox(height: 8),
+            Text(
+              'Invoice date: ${_formatDate(_invoiceDay(trip))}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 9),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 _amountPill(
-                  'Total',
+                  'Buying total',
                   'EGP ${(total / 100).toStringAsFixed(2)}',
                   scheme.surfaceContainerHighest,
                   scheme.onSurface,
@@ -866,6 +889,8 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
             const SizedBox(height: 7),
             Text(
               'Tap to open full invoice details',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 10.5,
                 color: scheme.primary,
@@ -884,18 +909,23 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
     Color background,
     Color foreground,
   ) =>
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(11),
-        ),
-        child: Text(
-          '$label  $value',
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w900,
-            color: foreground,
+      ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 290),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          child: Text(
+            '$label  $value',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+              color: foreground,
+            ),
           ),
         ),
       );
@@ -987,6 +1017,8 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
                     children: [
                       Text(
                         'Payment · ${_formatTime(transaction.createdAt)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
                       const SizedBox(height: 3),
@@ -1027,10 +1059,22 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
                 ),
               ],
             ),
+            const SizedBox(height: 6),
+            Text(
+              'Payment recorded: ${_formatDate(transaction.createdAt.toLocal())}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10.5,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
             if (transaction.reference?.isNotEmpty == true) ...[
               const SizedBox(height: 8),
               Text(
                 'Reference: ${transaction.reference}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 11,
                   color: scheme.onSurfaceVariant,
@@ -1079,13 +1123,30 @@ class _CarPaymentsPageState extends State<CarPaymentsPage> {
                 ),
                 const SizedBox(width: 9),
                 Expanded(
-                  child: Text(
-                    trip == null
-                        ? 'Invoice unavailable'
-                        : _paymentInvoiceLabel(trip),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        trip == null
+                            ? 'Invoice unavailable'
+                            : _paymentInvoiceLabel(trip),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      if (trip != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Invoice date: ${_formatDate(_invoiceDay(trip))}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
