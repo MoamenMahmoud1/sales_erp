@@ -82,9 +82,11 @@ class CarCalculator {
     );
   }
 
+  /// Remaining payment balance is the final buying cost after all buying-side
+  /// discounts. Selling revenue is intentionally not used for payments.
   CarMoney remaining(CarTrip trip, {CarFinancialSummary? summaryOf}) {
     final computed = summaryOf ?? summary(trip);
-    final remaining = computed.finalTotalSoldValue - trip.payment.totalPaid;
+    final remaining = computed.totalPurchaseCost - trip.payment.totalPaid;
     return remaining.isNegative ? CarMoney.zero : remaining;
   }
 
