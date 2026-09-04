@@ -108,6 +108,8 @@ class _PaymentDistributionAnimationState
                       children: [
                         const Text(
                           'Payment applied',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
                         ),
                         if (widget.scopeLabel != null) ...[
@@ -122,9 +124,15 @@ class _PaymentDistributionAnimationState
                       ],
                     ),
                   ),
-                  Text(
-                    '${widget.paymentAmount.toStringAsFixed(2)} EGP',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      '${widget.paymentAmount.toStringAsFixed(2)} EGP',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
                   ),
                 ],
               ),
@@ -196,6 +204,8 @@ class _PaymentDistributionAnimationState
                                       const SizedBox(height: 3),
                                       Text(
                                         '${allocation.amount.toStringAsFixed(2)} EGP applied',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
                                           fontSize: 11,
                                           color: scheme.onSurfaceVariant,
@@ -205,30 +215,39 @@ class _PaymentDistributionAnimationState
                                   ),
                                 ),
                                 const SizedBox(width: 10),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      status,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w900,
-                                        color: allocation.becomesPaid
-                                            ? scheme.primary
-                                            : scheme.tertiary,
+                                SizedBox(
+                                  width: 108,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        status,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        textAlign: TextAlign.end,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w900,
+                                          color: allocation.becomesPaid
+                                              ? scheme.primary
+                                              : scheme.tertiary,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      allocation.remainingAfter <= 0
-                                          ? '0.00 remaining'
-                                          : '${allocation.remainingAfter.toStringAsFixed(2)} remaining',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: scheme.onSurfaceVariant,
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        allocation.remainingAfter <= 0
+                                            ? '0.00 remaining'
+                                            : '${allocation.remainingAfter.toStringAsFixed(2)} remaining',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        textAlign: TextAlign.end,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: scheme.onSurfaceVariant,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),
@@ -269,6 +288,8 @@ class _PaymentDistributionAnimationState
                           const Expanded(
                             child: Text(
                               'Payment recorded successfully',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontWeight: FontWeight.w900),
                             ),
                           ),
