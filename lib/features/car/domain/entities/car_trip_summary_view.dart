@@ -58,14 +58,15 @@ class CarTripSummaryView {
   /// Selling revenue minus the final buying cost.
   CarMoney get profitValue => finalValue - purchaseValue;
 
+  /// Payment balance is based on the final buying cost, not selling revenue.
   CarMoney get remaining {
-    final value = finalValue - paidTotal;
+    final value = purchaseValue - paidTotal;
     return value.isNegative ? CarMoney.zero : value;
   }
 
   CarPaymentStatus paymentStatus(CarPaymentEvaluator evaluator, DateTime now) =>
       evaluator.statusFor(
-        totalValue: finalValue,
+        totalValue: purchaseValue,
         paid: paidTotal,
         dueDate: dueDate,
         now: now,
