@@ -46,8 +46,10 @@ class LocalCarReportRepository implements CarReportRepository {
         COALESCE(SUM(paid_cash_minor + paid_transfer_minor), 0) AS paid,
         COALESCE(SUM(
           CASE
-            WHEN final_total_value_minor > (paid_cash_minor + paid_transfer_minor)
-            THEN final_total_value_minor - (paid_cash_minor + paid_transfer_minor)
+            WHEN (subtotal_after_products_minor - global_discount_amount_minor) >
+                 (paid_cash_minor + paid_transfer_minor)
+            THEN (subtotal_after_products_minor - global_discount_amount_minor) -
+                 (paid_cash_minor + paid_transfer_minor)
             ELSE 0
           END
         ), 0) AS remaining,
@@ -57,12 +59,13 @@ class LocalCarReportRepository implements CarReportRepository {
       $clause
     ''', args)).first;
 
-    // Payment state counts also use finalized invoices only. Open drafts are
-    // deliberately invisible to report totals until confirmation.
+    // Payment state counts also use the finalized buying balance. Selling
+    // revenue remains available separately as `finalValue`.
     final paymentRows = await db.query(
       'car_trips',
       columns: [
-        'final_total_value_minor',
+        'subtotal_after_products_minor',
+        'global_discount_amount_minor',
         'paid_cash_minor',
         'paid_transfer_minor',
         'due_date',
@@ -77,7 +80,9 @@ class LocalCarReportRepository implements CarReportRepository {
     var overdueCount = 0;
     final now = DateTime.now();
     for (final paymentRow in paymentRows) {
-      final total = (paymentRow['final_total_value_minor'] as num).toInt();
+      final total =
+          (paymentRow['subtotal_after_products_minor'] as num).toInt() -
+          (paymentRow['global_discount_amount_minor'] as num).toInt();
       final paid =
           (paymentRow['paid_cash_minor'] as num).toInt() +
           (paymentRow['paid_transfer_minor'] as num).toInt();
