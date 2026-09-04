@@ -30,6 +30,10 @@ class CarPaymentAllocationPlan {
 
 /// Allocates one real payment to finalized outstanding invoices from exactly
 /// one Car + Warehouse group. Open trips are never eligible.
+///
+/// Payments are settled against the invoice's final buying cost, including
+/// product/global buying-side discounts. Selling revenue is not used as the
+/// payment balance.
 class CarPaymentAllocator {
   const CarPaymentAllocator({this.calculator = const CarCalculator()});
 
@@ -83,7 +87,9 @@ class CarPaymentAllocator {
 
     for (final trip in eligibleTrips) {
       final summary = calculator.summary(trip);
-      var outstanding = calculator.remaining(trip, summaryOf: summary);
+      final paid = trip.payment.totalPaid;
+      var outstanding = summary.totalPurchaseCost - paid;
+      if (outstanding.isNegative) outstanding = CarMoney.zero;
       if (outstanding == CarMoney.zero) continue;
 
       final cashAllocation = _min(cashRemaining, outstanding);
