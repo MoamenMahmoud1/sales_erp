@@ -4,6 +4,9 @@ import '../entities/car_trip.dart';
 import '../entities/money.dart';
 
 /// Pure payment-state rules for Car transactions.
+///
+/// Payment state is based on the invoice's final buying cost, not its
+/// customer-facing selling revenue.
 class CarPaymentEvaluator {
   const CarPaymentEvaluator();
 
@@ -56,7 +59,7 @@ class CarPaymentEvaluator {
     CarFinancialSummary summary,
   ) =>
       remainingAmount(
-        totalValue: summary.finalTotalSoldValue,
+        totalValue: summary.totalPurchaseCost,
         paid: trip.payment.totalPaid,
       );
 
@@ -66,7 +69,7 @@ class CarPaymentEvaluator {
     DateTime now,
   ) =>
       statusFor(
-        totalValue: summary.finalTotalSoldValue,
+        totalValue: summary.totalPurchaseCost,
         paid: trip.payment.totalPaid,
         dueDate: trip.dueDate,
         now: now,
@@ -78,7 +81,7 @@ class CarPaymentEvaluator {
     required CarFinancialSummary summary,
   }) =>
       daysOverdueFor(
-        totalValue: summary.finalTotalSoldValue,
+        totalValue: summary.totalPurchaseCost,
         paid: trip.payment.totalPaid,
         dueDate: trip.dueDate,
         now: now,
