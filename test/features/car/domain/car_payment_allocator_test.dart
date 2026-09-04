@@ -13,6 +13,8 @@ void main() {
     required int id,
     required int openedDay,
     required int value,
+    int? purchaseValue,
+    double discountPercent = 0,
     CarMoney paid = CarMoney.zero,
     CarTripStatus status = CarTripStatus.closed,
   }) {
@@ -31,7 +33,9 @@ void main() {
           productId: id,
           productName: 'P$id',
           unitPrice: CarMoney(value),
+          purchasePrice: CarMoney(purchaseValue ?? value),
           loadedCartons: 1,
+          discountPercent: discountPercent,
         ),
       ],
     );
@@ -56,6 +60,53 @@ void main() {
     expect(plan.allocations[0].totalAmount, const CarMoney(3000));
     expect(plan.allocations[1].tripId, 2);
     expect(plan.allocations[1].totalAmount, const CarMoney(4000));
+  });
+
+  test('allocates against buying cost instead of selling revenue', () {
+    final invoice = trip(
+      id: 1,
+      openedDay: 1,
+      value: 10000,
+      purchaseValue: 6000,
+    );
+    final transaction = CarPaymentTransaction(
+      cashAmount: CarMoney(6000),
+      createdAt: DateTime(2026, 1, 3),
+    );
+
+    final plan = allocator.allocate(
+      transaction: transaction,
+      trips: [invoice],
+    );
+
+    expect(plan.isFullyAllocated, isTrue);
+    expect(plan.unallocated, CarMoney.zero);
+    expect(plan.allocations.single.tripId, 1);
+    expect(plan.allocations.single.totalAmount, const CarMoney(6000));
+    expect(plan.updatedTrips.single.payment.totalPaid, const CarMoney(6000));
+  });
+
+  test('buying discount reduces the payment balance', () {
+    final invoice = trip(
+      id: 1,
+      openedDay: 1,
+      value: 10000,
+      purchaseValue: 8000,
+      discountPercent: 10,
+    );
+    final transaction = CarPaymentTransaction(
+      cashAmount: CarMoney(7200),
+      createdAt: DateTime(2026, 1, 3),
+    );
+
+    final plan = allocator.allocate(
+      transaction: transaction,
+      trips: [invoice],
+    );
+
+    expect(plan.isFullyAllocated, isTrue);
+    expect(plan.allocations.single.totalAmount, const CarMoney(7200));
+    expect(plan.updatedTrips.single.payment.totalPaid, const CarMoney(7200));
   });
 
   test('does not allocate payments to open trips', () {
