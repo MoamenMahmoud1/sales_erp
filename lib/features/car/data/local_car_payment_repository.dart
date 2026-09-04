@@ -7,6 +7,8 @@ import '../domain/entities/car_trip.dart';
 import '../domain/entities/car_trip_status.dart';
 import '../domain/entities/money.dart';
 import '../domain/repositories/car_payment_repository.dart';
+import '../domain/services/car_calculator.dart';
+import 'car_mappers.dart';
 
 /// Persists payment events and allocations atomically in AppDatabase.
 ///
@@ -18,6 +20,8 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
       : _database = database ?? (() => AppDatabase.database);
 
   final Future<Database> Function() _database;
+  static const _calculator = CarCalculator();
+  static const _mappers = CarMappers();
 
   @override
   Future<int> persistPayment({
@@ -89,15 +93,6 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
       for (final allocation in allocations) {
         final tripRows = await txn.query(
           'car_trips',
-          columns: [
-            'id',
-            'status',
-            'sales_car_id',
-            'warehouse_id',
-            'final_total_value_minor',
-            'paid_cash_minor',
-            'paid_transfer_minor',
-          ],
           where: 'id = ?',
           whereArgs: [allocation.tripId],
           limit: 1,
@@ -110,6 +105,18 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
         if (row['status'] != CarTripStatus.closed.value) {
           throw StateError('Payments can only be allocated to closed trips.');
         }
+
+        final tripItems = await txn.query(
+          'car_trip_items',
+          where: 'trip_id = ?',
+          whereArgs: [allocation.tripId],
+          orderBy: 'id ASC',
+        );
+        final trip = _mappers.tripFromRow(row, [
+          for (final itemRow in tripItems) _mappers.itemFromRow(itemRow),
+        ]);
+        final finalPurchaseCost =
+            _calculator.summary(trip).totalPurchaseCost.minorUnits;
 
         final tripCarId = (row['sales_car_id'] as num).toInt();
         final tripWarehouseId = (row['warehouse_id'] as num).toInt();
@@ -125,12 +132,11 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
         final currentPaidCash = (row['paid_cash_minor'] as num).toInt();
         final currentPaidTransfer =
             (row['paid_transfer_minor'] as num).toInt();
-        final finalValue = (row['final_total_value_minor'] as num).toInt();
         final allocationTotal = allocation.totalAmount.minorUnits;
         if (currentPaidCash + currentPaidTransfer + allocationTotal >
-            finalValue) {
+            finalPurchaseCost) {
           throw StateError(
-            'Payment exceeds the remaining balance of car trip ${allocation.tripId}.',
+            'Payment exceeds the remaining buying cost of car trip ${allocation.tripId}.',
           );
         }
 
