@@ -4,6 +4,8 @@ import '../../../core/presentation/payment_time_picker.dart';
 import '../../customers/domain/customer.dart';
 import '../../customers/domain/payment_method.dart';
 import '../../payment/data/local_payment_repository.dart';
+import '../../payment/data/payment_date_actions.dart';
+import '../../payment/domain/payment.dart';
 import '../../products/data/local_product_repository.dart';
 import '../../products/domain/product.dart';
 import '../data/local_sale_repository.dart';
@@ -30,13 +32,17 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
   final _discountController = TextEditingController(text: '0');
   final _paymentController = TextEditingController(text: '0');
   final Map<int, int> _quantities = {};
+  final Map<int, DateTime> _paymentDates = {};
 
   List<Product> _products = const [];
+  List<Payment> _existingPayments = const [];
   bool _loading = true;
   bool _saving = false;
   double _existingPaid = 0;
   double _existingPending = 0;
   String? _error;
+
+  bool get editing => widget.invoiceId != null;
 
   @override
   void initState() {
@@ -57,6 +63,7 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
       if (widget.invoiceId != null) {
         final invoice = await _saleRepository.getInvoiceWithItems(widget.invoiceId!);
         if (invoice == null) throw StateError('Invoice not found.');
+
         final rawItems = invoice['items'] as List? ?? const [];
         for (final raw in rawItems) {
           final item = Map<String, Object?>.from(raw as Map);
@@ -64,11 +71,19 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
           final quantity = (item['quantity'] as num).toInt();
           if (quantity > 0) _quantities[id] = quantity;
         }
+
         _discountController.text =
             ((invoice['coupon_discount'] as num?)?.toDouble() ?? 0).toStringAsFixed(2);
         _existingPaid = (invoice['paid_amount'] as num?)?.toDouble() ?? 0;
         _existingPending = (invoice['pending_amount'] as num?)?.toDouble() ?? 0;
+
+        final payments = await _paymentRepository.getPaymentsForInvoice(widget.invoiceId!);
+        _existingPayments = List.unmodifiable(payments);
+        for (final payment in payments) {
+          _paymentDates[payment.id] = payment.effectivePaymentAt;
+        }
       }
+
       if (!mounted) return;
       setState(() {
         _products = products;
@@ -128,6 +143,15 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
     setState(() {});
   }
 
+  Future<void> _pickExistingPaymentDate(Payment payment) async {
+    final selected = await pickPaymentDateTime(
+      context,
+      initial: _paymentDates[payment.id] ?? payment.effectivePaymentAt,
+    );
+    if (selected == null || !mounted) return;
+    setState(() => _paymentDates[payment.id] = selected);
+  }
+
   Future<void> _save() async {
     if (_quantities.isEmpty || _saving) return;
     if (_paymentNow > _remainingBeforeNewPayment) {
@@ -137,10 +161,10 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
       return;
     }
 
-    DateTime? paymentAt;
+    DateTime? newPaymentAt;
     if (_paymentNow > 0) {
-      paymentAt = await resolvePaymentTime(context);
-      if (paymentAt == null || !mounted) return;
+      newPaymentAt = await resolvePaymentTime(context);
+      if (newPaymentAt == null || !mounted) return;
     }
 
     setState(() => _saving = true);
@@ -148,7 +172,8 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
       final method = _isTransfer ? PaymentMethod.transfer : PaymentMethod.cash;
       final products = Map.of(_quantities);
       late final int invoiceId;
-      if (widget.invoiceId == null) {
+
+      if (!editing) {
         invoiceId = await _saleRepository.createInvoice(
           customerId: widget.customer.id,
           products: products,
@@ -168,8 +193,18 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
         );
       }
 
-      if (_paymentNow > 0 && paymentAt != null) {
-        await _paymentRepository.setLatestPaymentDate(invoiceId, paymentAt);
+      if (editing) {
+        for (final payment in _existingPayments) {
+          final selected = _paymentDates[payment.id];
+          if (selected == null) continue;
+          if (selected.toUtc() != payment.effectivePaymentAt.toUtc()) {
+            await _paymentRepository.setPaymentDate(payment.id, selected);
+          }
+        }
+      }
+
+      if (_paymentNow > 0 && newPaymentAt != null) {
+        await _paymentRepository.setLatestPaymentDate(invoiceId, newPaymentAt);
       }
 
       if (mounted) Navigator.of(context).pop(true);
@@ -184,7 +219,6 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final editing = widget.invoiceId != null;
     return Scaffold(
       appBar: AppBar(
         title: Text(editing ? 'Edit Invoice' : 'New Invoice'),
@@ -201,7 +235,7 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
   Widget _body() {
     final scheme = Theme.of(context).colorScheme;
     final remainingBeforePayment = _remainingBeforeNewPayment;
-    final editing = widget.invoiceId != null;
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
       children: [
@@ -211,20 +245,26 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
             child: Row(
               children: [
                 CircleAvatar(
-                  child: Text(widget.customer.name.trim().isEmpty
-                      ? '?'
-                      : widget.customer.name.trim()[0].toUpperCase()),
+                  child: Text(
+                    widget.customer.name.trim().isEmpty
+                        ? '?'
+                        : widget.customer.name.trim()[0].toUpperCase(),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(widget.customer.name,
-                          style: const TextStyle(fontWeight: FontWeight.w800)),
+                      Text(
+                        widget.customer.name,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                       const SizedBox(height: 3),
-                      Text(widget.customer.phone,
-                          style: TextStyle(color: scheme.onSurfaceVariant)),
+                      Text(
+                        widget.customer.phone,
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                      ),
                     ],
                   ),
                 ),
@@ -246,11 +286,18 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(product.name,
-                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        Text(
+                          product.name,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                         const SizedBox(height: 3),
-                        Text('${product.price.toStringAsFixed(2)} EGP / carton',
-                            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+                        Text(
+                          '${product.price.toStringAsFixed(2)} EGP / carton',
+                          style: TextStyle(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -303,6 +350,10 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
             label: Text(editing ? 'Pay remaining' : 'Pay full amount'),
           ),
         ),
+        if (editing && _existingPayments.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          _existingPaymentsCard(),
+        ],
         if (editing) ...[
           const SizedBox(height: 4),
           Card(
@@ -333,7 +384,11 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
                 if (editing && _existingPending > 0)
                   _summaryRow('Pending already', _existingPending),
                 const Divider(height: 20),
-                _summaryRow('Remaining', _remainingAfterNewPayment, emphasized: true),
+                _summaryRow(
+                  'Remaining',
+                  _remainingAfterNewPayment,
+                  emphasized: true,
+                ),
               ],
             ),
           ),
@@ -342,7 +397,83 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
     );
   }
 
-  bool get editing => widget.invoiceId != null;
+  Widget _existingPaymentsCard() {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.history_rounded, color: scheme.primary),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Payment details',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'You can update the payment date and time for any previous payment.',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 10),
+            for (final payment in _existingPayments) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      payment.isCash
+                          ? Icons.payments_rounded
+                          : Icons.account_balance_rounded,
+                      size: 19,
+                      color: scheme.primary,
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${payment.amount.toStringAsFixed(2)} EGP · ${payment.isPaid ? 'Paid' : 'Pending'}',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Payment date: ${formatPaymentDateTime(_paymentDates[payment.id] ?? payment.effectivePaymentAt)}',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _saving ? null : () => _pickExistingPaymentDate(payment),
+                      icon: const Icon(Icons.edit_calendar_rounded, size: 17),
+                      label: const Text('Edit date'),
+                    ),
+                  ],
+                ),
+              ),
+              if (payment != _existingPayments.last) const SizedBox(height: 7),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
   String get editingPaymentTitle =>
       editing ? 'Additional payment' : 'Payment at invoice creation';
