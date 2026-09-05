@@ -76,17 +76,17 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
 
     final db = await _database();
     var createdTransactionId = 0;
+    final paymentAt = transaction.createdAt.toUtc().toIso8601String();
 
     await db.transaction((txn) async {
-      final transactionDate = transaction.createdAt.toUtc().toIso8601String();
       createdTransactionId = await txn.insert('car_payment_transactions', {
         'cash_amount_minor': cash,
         'transfer_amount_minor': transfer,
         'reference': transaction.reference?.trim().isEmpty == true
             ? null
             : transaction.reference?.trim(),
-        'created_at': transactionDate,
-        'payment_at': transactionDate,
+        'created_at': paymentAt,
+        'payment_at': paymentAt,
       });
 
       int? scopeCarId;
@@ -142,14 +142,12 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
           );
         }
 
-        final paymentDate =
-            (allocation.paymentAt ?? transaction.createdAt).toUtc().toIso8601String();
         await txn.insert('car_payment_allocations', {
           'payment_transaction_id': createdTransactionId,
           'trip_id': allocation.tripId,
           'cash_amount_minor': allocation.cashAmount.minorUnits,
           'transfer_amount_minor': allocation.transferAmount.minorUnits,
-          'payment_at': paymentDate,
+          'payment_at': paymentAt,
         });
 
         final nextCash = currentPaidCash + allocation.cashAmount.minorUnits;
@@ -160,7 +158,7 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
           {
             'paid_cash_minor': nextCash,
             'paid_transfer_minor': nextTransfer,
-            'updated_at': DateTime.now().toUtc().toIso8601String(),
+            'updated_at': paymentAt,
           },
           where: '''
             id = ? AND status = ?
@@ -272,7 +270,9 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
       final providedIds = paymentDates.keys.toSet();
       if (expectedIds.length != providedIds.length ||
           !expectedIds.containsAll(providedIds)) {
-        throw StateError('Payment dates must be provided for every invoice allocation.');
+        throw StateError(
+          'Payment dates must be provided for every invoice allocation.',
+        );
       }
 
       for (final entry in paymentDates.entries) {
