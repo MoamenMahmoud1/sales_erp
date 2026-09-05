@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../customers/domain/customer.dart';
 import '../../customers/domain/payment_method.dart';
+import '../../payment/data/local_payment_repository.dart';
 import '../../products/data/local_product_repository.dart';
 import '../../products/domain/product.dart';
+import '../../../core/presentation/payment_time_picker.dart';
 import '../data/local_sale_repository.dart';
 import 'widgets/quantity_stepper.dart';
 
@@ -24,6 +26,7 @@ class InvoiceEditorPage extends StatefulWidget {
 class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
   final _productRepository = LocalProductRepository();
   final _saleRepository = LocalSaleRepository();
+  final _paymentRepository = LocalPaymentRepository();
   final _discountController = TextEditingController(text: '0');
   final _paymentController = TextEditingController(text: '0');
   final Map<int, int> _quantities = {};
@@ -113,7 +116,9 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
       (_total - _existingPaid - _existingPending).clamp(0, _total).toDouble();
 
   double get _remainingAfterNewPayment =>
-      (_remainingBeforeNewPayment - _paymentNow).clamp(0, _remainingBeforeNewPayment).toDouble();
+      (_remainingBeforeNewPayment - _paymentNow)
+          .clamp(0, _remainingBeforeNewPayment)
+          .toDouble();
 
   bool get _isTransfer => widget.customer.paymentType == CustomerPaymentType.transfer;
 
@@ -131,12 +136,19 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
       return;
     }
 
+    DateTime? paymentAt;
+    if (_paymentNow > 0) {
+      paymentAt = await resolvePaymentTime(context);
+      if (paymentAt == null || !mounted) return;
+    }
+
     setState(() => _saving = true);
     try {
       final method = _isTransfer ? PaymentMethod.transfer : PaymentMethod.cash;
       final products = Map.of(_quantities);
+      late final int invoiceId;
       if (widget.invoiceId == null) {
-        await _saleRepository.createInvoice(
+        invoiceId = await _saleRepository.createInvoice(
           customerId: widget.customer.id,
           products: products,
           paymentMethod: method,
@@ -144,8 +156,9 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
           initialPaymentAmount: _paymentNow,
         );
       } else {
+        invoiceId = widget.invoiceId!;
         await _saleRepository.updateInvoice(
-          invoiceId: widget.invoiceId!,
+          invoiceId: invoiceId,
           customerId: widget.customer.id,
           products: products,
           paymentMethod: method,
@@ -153,6 +166,11 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
           additionalPaymentAmount: _paymentNow,
         );
       }
+
+      if (_paymentNow > 0 && paymentAt != null) {
+        await _paymentRepository.setLatestPaymentDate(invoiceId, paymentAt);
+      }
+
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
       if (mounted) {
@@ -182,6 +200,7 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
   Widget _body() {
     final scheme = Theme.of(context).colorScheme;
     final remainingBeforePayment = _remainingBeforeNewPayment;
+    final editing = widget.invoiceId != null;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
       children: [
@@ -256,8 +275,10 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 16),
-        Text(editingPaymentTitle,
-            style: Theme.of(context).textTheme.titleMedium),
+        Text(
+          editingPaymentTitle,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
         const SizedBox(height: 8),
         TextField(
           controller: _paymentController,
@@ -306,7 +327,8 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
                 if (_discount > 0) _summaryRow('Discount', -_discount),
                 const Divider(height: 20),
                 _summaryRow('Total', _total, emphasized: true),
-                if (_paymentNow > 0) _summaryRow(editing ? 'Payment now' : 'Paid now', _paymentNow),
+                if (_paymentNow > 0)
+                  _summaryRow(editing ? 'Payment now' : 'Paid now', _paymentNow),
                 if (editing && _existingPending > 0)
                   _summaryRow('Pending already', _existingPending),
                 const Divider(height: 20),
