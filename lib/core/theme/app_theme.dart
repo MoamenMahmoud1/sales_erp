@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'app_colors.dart';
 import 'app_tokens.dart';
@@ -160,11 +163,56 @@ class AppTheme {
 enum AppThemeMode { light, mid, dark }
 
 class AppThemeController extends ChangeNotifier {
-  AppThemeMode mode = AppThemeMode.mid;
+  static const _storageKey = 'app_theme_mode';
+
+  final FlutterSecureStorage _storage;
+  AppThemeMode _mode = AppThemeMode.mid;
+  int _changeGeneration = 0;
+
+  AppThemeController({FlutterSecureStorage? storage})
+      : _storage = storage ?? const FlutterSecureStorage();
+
+  AppThemeMode get mode => _mode;
+
+  Future<void> load() async {
+    final generationAtStart = _changeGeneration;
+
+    try {
+      final saved = await _storage.read(key: _storageKey);
+      if (generationAtStart != _changeGeneration) return;
+
+      final loadedMode = _decodeMode(saved);
+      if (loadedMode == null || loadedMode == _mode) return;
+
+      _mode = loadedMode;
+      notifyListeners();
+    } catch (_) {
+      // Theme persistence is best-effort; the app keeps the default theme.
+    }
+  }
 
   void setMode(AppThemeMode value) {
-    if (mode == value) return;
-    mode = value;
+    if (_mode == value) return;
+
+    _changeGeneration++;
+    _mode = value;
     notifyListeners();
+
+    unawaited(_persistMode(value));
+  }
+
+  Future<void> _persistMode(AppThemeMode value) async {
+    try {
+      await _storage.write(key: _storageKey, value: value.name);
+    } catch (_) {
+      // Theme persistence must never block or break the UI.
+    }
+  }
+
+  AppThemeMode? _decodeMode(String? value) {
+    for (final mode in AppThemeMode.values) {
+      if (mode.name == value) return mode;
+    }
+    return null;
   }
 }
