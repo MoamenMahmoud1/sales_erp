@@ -151,8 +151,11 @@ class _PaymentDistributionAnimationState
         builder: (context, setDialogState) {
           return AlertDialog(
             title: const Text('Payment date details'),
-            content: SizedBox(
-              width: 520,
+            content: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 520,
+                maxHeight: MediaQuery.sizeOf(context).height * .62,
+              ),
               child: SingleChildScrollView(
                 child: Column(
                   children: [
@@ -365,6 +368,12 @@ class _PaymentDistributionAnimationState
                       final progress = _rowProgress(index);
                       final status = allocation.becomesPaid ? 'Paid' : 'Partial';
                       final isActive = progress > 0 && progress < 1;
+                      final stored = index < _storedAllocations.length
+                          ? _storedAllocations[index]
+                          : null;
+                      final paymentDate = stored == null
+                          ? null
+                          : _allocationDates[stored.id];
 
                       return Opacity(
                         opacity: progress,
@@ -423,10 +432,10 @@ class _PaymentDistributionAnimationState
                                           color: scheme.onSurfaceVariant,
                                         ),
                                       ),
-                                      if (_allocationDates[index] != null) ...[
+                                      if (paymentDate != null) ...[
                                         const SizedBox(height: 3),
                                         Text(
-                                          'Payment: ${formatPaymentDateTime(_allocationDates[index]!)}',
+                                          'Payment: ${formatPaymentDateTime(paymentDate)}',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
