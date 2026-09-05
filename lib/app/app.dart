@@ -18,12 +18,14 @@ typedef AppHomeBuilder = Widget Function(
 /// feature dependency graph.
 class SalesErpApp extends StatefulWidget {
   final AppLockController lockController;
+  final AppThemeController themeController;
   final AppHomeBuilder homeBuilder;
   final String title;
 
   const SalesErpApp({
     super.key,
     required this.lockController,
+    required this.themeController,
     required this.homeBuilder,
     this.title = 'Sales ERP',
   });
@@ -33,13 +35,12 @@ class SalesErpApp extends StatefulWidget {
 }
 
 class _SalesErpAppState extends State<SalesErpApp> {
-  late final AppThemeController _themeController;
+  late final AppThemeController _themeController = widget.themeController;
   late final BiometricAuth _deviceAuth = BiometricAuth();
 
   @override
   void initState() {
     super.initState();
-    _themeController = AppThemeController();
     _themeController.addListener(_onThemeChanged);
     widget.lockController.addListener(_onLockChanged);
   }
