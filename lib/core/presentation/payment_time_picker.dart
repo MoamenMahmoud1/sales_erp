@@ -23,6 +23,7 @@ Future<DateTime?> resolvePaymentTime(BuildContext context) async {
     ),
   );
 
+  if (!context.mounted) return null;
   if (specify != true) return DateTime.now().toUtc();
 
   final now = DateTime.now();
