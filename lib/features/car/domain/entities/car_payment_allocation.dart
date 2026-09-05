@@ -11,6 +11,7 @@ class CarPaymentAllocation {
   final int tripId;
   final CarMoney cashAmount;
   final CarMoney transferAmount;
+  final DateTime? paymentAt;
 
   const CarPaymentAllocation({
     this.id = 0,
@@ -18,6 +19,7 @@ class CarPaymentAllocation {
     required this.tripId,
     this.cashAmount = CarMoney.zero,
     this.transferAmount = CarMoney.zero,
+    this.paymentAt,
   });
 
   CarMoney get totalAmount => cashAmount + transferAmount;
