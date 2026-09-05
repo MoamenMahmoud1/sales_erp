@@ -33,6 +33,11 @@ class LocalSaleRepository {
           FROM payments p
           WHERE p.invoice_id = i.id AND p.status = 'paid'
         ), 0) AS paid_amount,
+        COALESCE((
+          SELECT SUM(p.amount)
+          FROM payments p
+          WHERE p.invoice_id = i.id AND p.status = 'pending' AND p.amount > 0
+        ), 0) AS pending_amount,
         CASE
           WHEN COALESCE((
             SELECT SUM(p.amount)
@@ -41,7 +46,7 @@ class LocalSaleRepository {
           ), 0) >= i.total THEN 'paid'
           WHEN EXISTS (
             SELECT 1 FROM payments p
-            WHERE p.invoice_id = i.id AND p.status = 'pending'
+            WHERE p.invoice_id = i.id AND p.status = 'pending' AND p.amount > 0
           ) THEN 'pending'
           ELSE 'unpaid'
         END AS payment_status
@@ -68,6 +73,11 @@ class LocalSaleRepository {
           FROM payments p
           WHERE p.invoice_id = i.id AND p.status = 'paid'
         ), 0) AS paid_amount,
+        COALESCE((
+          SELECT SUM(p.amount)
+          FROM payments p
+          WHERE p.invoice_id = i.id AND p.status = 'pending' AND p.amount > 0
+        ), 0) AS pending_amount,
         CASE
           WHEN COALESCE((
             SELECT SUM(p.amount)
@@ -76,7 +86,7 @@ class LocalSaleRepository {
           ), 0) >= i.total THEN 'paid'
           WHEN EXISTS (
             SELECT 1 FROM payments p
-            WHERE p.invoice_id = i.id AND p.status = 'pending'
+            WHERE p.invoice_id = i.id AND p.status = 'pending' AND p.amount > 0
           ) THEN 'pending'
           ELSE 'unpaid'
         END AS payment_status
@@ -105,6 +115,11 @@ class LocalSaleRepository {
           FROM payments p
           WHERE p.invoice_id = i.id AND p.status = 'paid'
         ), 0) AS paid_amount,
+        COALESCE((
+          SELECT SUM(p.amount)
+          FROM payments p
+          WHERE p.invoice_id = i.id AND p.status = 'pending' AND p.amount > 0
+        ), 0) AS pending_amount,
         CASE
           WHEN COALESCE((
             SELECT SUM(p.amount)
@@ -113,14 +128,14 @@ class LocalSaleRepository {
           ), 0) >= i.total THEN 'paid'
           WHEN EXISTS (
             SELECT 1 FROM payments p
-            WHERE p.invoice_id = i.id AND p.status = 'pending'
+            WHERE p.invoice_id = i.id AND p.status = 'pending' AND p.amount > 0
           ) THEN 'pending'
           ELSE 'unpaid'
         END AS payment_status,
         (
           SELECT p.method
           FROM payments p
-          WHERE p.invoice_id = i.id
+          WHERE p.invoice_id = i.id AND p.amount > 0
           ORDER BY p.id DESC
           LIMIT 1
         ) AS payment_method
@@ -197,11 +212,17 @@ class LocalSaleRepository {
     required Map<int, int> products,
     required PaymentMethod paymentMethod,
     double couponDiscount = 0,
+    double initialPaymentAmount = 0,
   }) async {
     if (products.isEmpty) throw ArgumentError('Invoice is empty.');
     final available = await _productRepository.getProducts();
     final byId = {for (final product in available) product.id: product};
     final calculation = _calculate(products, byId, couponDiscount);
+    final initialPayment = _normalizePaymentAmount(
+      initialPaymentAmount,
+      calculation.total,
+      fieldName: 'Initial payment amount',
+    );
     final database = await _database;
 
     return database.transaction((transaction) async {
@@ -225,14 +246,19 @@ class LocalSaleRepository {
       });
 
       await _replaceItems(transaction, invoiceId, products, byId);
-      await transaction.insert('payments', {
-        'customer_id': customerId,
-        'invoice_id': invoiceId,
-        'amount': 0,
-        'method': paymentMethod.value,
-        'status': 'pending',
-        'created_at': now,
-      });
+
+      if (initialPayment > 0) {
+        await transaction.insert('payments', {
+          'customer_id': customerId,
+          'invoice_id': invoiceId,
+          'amount': initialPayment,
+          'method': paymentMethod.value,
+          'status': _paymentStatus(paymentMethod),
+          'created_at': now,
+          'confirmed_at': paymentMethod == PaymentMethod.cash ? now : null,
+        });
+      }
+
       await _insertRevision(
         transaction,
         invoiceId: invoiceId,
@@ -256,12 +282,18 @@ class LocalSaleRepository {
     required Map<int, int> products,
     required PaymentMethod paymentMethod,
     double couponDiscount = 0,
+    double additionalPaymentAmount = 0,
   }) async {
     if (invoiceId <= 0) throw ArgumentError('Invalid invoice id.');
     if (products.isEmpty) throw ArgumentError('Invoice is empty.');
     final available = await _productRepository.getProducts();
     final byId = {for (final product in available) product.id: product};
     final calculation = _calculate(products, byId, couponDiscount);
+    final additionalPayment = _normalizePaymentAmount(
+      additionalPaymentAmount,
+      calculation.total,
+      fieldName: 'Additional payment amount',
+    );
     final database = await _database;
 
     await database.transaction((transaction) async {
@@ -277,14 +309,25 @@ class LocalSaleRepository {
         throw StateError('Invoice does not belong to this customer.');
       }
 
-      final paidRows = await transaction.rawQuery('''
-        SELECT COALESCE(SUM(amount), 0) AS paid
+      final paymentTotals = await transaction.rawQuery('''
+        SELECT
+          COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) AS paid,
+          COALESCE(SUM(CASE WHEN status = 'pending' AND amount > 0 THEN amount ELSE 0 END), 0) AS pending
         FROM payments
-        WHERE invoice_id = ? AND status = 'paid'
+        WHERE invoice_id = ?
       ''', [invoiceId]);
-      final paid = (paidRows.first['paid'] as num?)?.toDouble() ?? 0;
-      if (calculation.total < paid) {
-        throw StateError('Invoice total cannot be lower than money already paid.');
+      final paid = (paymentTotals.first['paid'] as num?)?.toDouble() ?? 0;
+      final pending = (paymentTotals.first['pending'] as num?)?.toDouble() ?? 0;
+      final alreadyAllocated = paid + pending;
+      if (calculation.total < alreadyAllocated) {
+        throw StateError(
+          'Invoice total cannot be lower than money already paid or pending.',
+        );
+      }
+      if (additionalPayment > calculation.total - alreadyAllocated) {
+        throw StateError(
+          'Payment exceeds the remaining invoice balance.',
+        );
       }
 
       final customer = await transaction.query(
@@ -310,23 +353,15 @@ class LocalSaleRepository {
       );
       await _replaceItems(transaction, invoiceId, products, byId);
 
-      // Keep payment history. Only maintain a pending placeholder when no
-      // payment record exists so the legacy payment screens still have a
-      // method to display/edit.
-      final paymentRows = await transaction.query(
-        'payments',
-        columns: ['id'],
-        where: 'invoice_id = ?',
-        limit: 1,
-      );
-      if (paymentRows.isEmpty) {
+      if (additionalPayment > 0) {
         await transaction.insert('payments', {
           'customer_id': customerId,
           'invoice_id': invoiceId,
-          'amount': 0,
+          'amount': additionalPayment,
           'method': paymentMethod.value,
-          'status': 'pending',
+          'status': _paymentStatus(paymentMethod),
           'created_at': now,
+          'confirmed_at': paymentMethod == PaymentMethod.cash ? now : null,
         });
       }
 
@@ -394,6 +429,23 @@ class LocalSaleRepository {
       total: subtotal - discount,
     );
   }
+
+  double _normalizePaymentAmount(
+    double value,
+    double total, {
+    required String fieldName,
+  }) {
+    if (!value.isFinite || value < 0) {
+      throw ArgumentError('$fieldName must be zero or greater.');
+    }
+    if (value > total) {
+      throw ArgumentError('$fieldName cannot exceed the invoice total.');
+    }
+    return value;
+  }
+
+  String _paymentStatus(PaymentMethod method) =>
+      method == PaymentMethod.cash ? 'paid' : 'pending';
 
   Future<void> _replaceItems(
     Transaction transaction,
