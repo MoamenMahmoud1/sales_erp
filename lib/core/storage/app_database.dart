@@ -50,6 +50,7 @@ class AppDatabase {
     // even though older installations may have skipped intermediate versions.
     await _ensureProductCategoryColumn(database);
     await ensureCarReturnedValueColumns(database);
+    await _ensurePaymentDateColumns(database);
     _database = database;
     await _cleanupExpiredInvoiceChanges(database);
     return database;
@@ -70,6 +71,65 @@ class AppDatabase {
       await txn.execute(
         'CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)',
       );
+    });
+  }
+
+  static Future<void> _ensurePaymentDateColumns(Database db) async {
+    await db.transaction((txn) async {
+      final paymentRows = await txn.rawQuery('PRAGMA table_info(payments)');
+      if (paymentRows.isNotEmpty) {
+        final paymentColumns = {
+          for (final row in paymentRows) row['name'] as String,
+        };
+        if (!paymentColumns.contains('payment_at')) {
+          await txn.execute('ALTER TABLE payments ADD COLUMN payment_at TEXT');
+        }
+        await txn.execute('''
+          UPDATE payments
+          SET payment_at = created_at
+          WHERE payment_at IS NULL OR TRIM(payment_at) = ''
+        ''');
+      }
+
+      final transactionRows =
+          await txn.rawQuery('PRAGMA table_info(car_payment_transactions)');
+      if (transactionRows.isNotEmpty) {
+        final transactionColumns = {
+          for (final row in transactionRows) row['name'] as String,
+        };
+        if (!transactionColumns.contains('payment_at')) {
+          await txn.execute(
+            'ALTER TABLE car_payment_transactions ADD COLUMN payment_at TEXT',
+          );
+        }
+        await txn.execute('''
+          UPDATE car_payment_transactions
+          SET payment_at = created_at
+          WHERE payment_at IS NULL OR TRIM(payment_at) = ''
+        ''');
+      }
+
+      final allocationRows =
+          await txn.rawQuery('PRAGMA table_info(car_payment_allocations)');
+      if (allocationRows.isNotEmpty) {
+        final allocationColumns = {
+          for (final row in allocationRows) row['name'] as String,
+        };
+        if (!allocationColumns.contains('payment_at')) {
+          await txn.execute(
+            'ALTER TABLE car_payment_allocations ADD COLUMN payment_at TEXT',
+          );
+        }
+        await txn.execute('''
+          UPDATE car_payment_allocations
+          SET payment_at = (
+            SELECT created_at
+            FROM car_payment_transactions
+            WHERE car_payment_transactions.id = car_payment_allocations.payment_transaction_id
+          )
+          WHERE payment_at IS NULL OR TRIM(payment_at) = ''
+        ''');
+      }
     });
   }
 
