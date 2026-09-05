@@ -5,6 +5,7 @@ import 'core/data/demo_data_seeder.dart';
 import 'core/presentation/app_shell.dart';
 import 'core/repositories/app_services.dart';
 import 'core/security/app_lock_controller.dart';
+import 'core/theme/app_theme.dart';
 
 /// Full Sales ERP entry point.
 ///
@@ -19,9 +20,13 @@ Future<void> main() async {
   final lockController = AppLockController();
   await lockController.init();
 
+  final themeController = AppThemeController();
+  await themeController.load();
+
   runApp(
     SalesErpApp(
       lockController: lockController,
+      themeController: themeController,
       homeBuilder: (themeController, onLock) => AppShell(
         themeController: themeController,
         onLock: onLock,
