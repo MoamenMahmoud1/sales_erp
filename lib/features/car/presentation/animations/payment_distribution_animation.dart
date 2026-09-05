@@ -2,8 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../../../core/repositories/app_services.dart';
 import '../../../../core/presentation/payment_time_picker.dart';
+import '../../../../core/repositories/app_services.dart';
 import '../../domain/entities/car_payment_allocation.dart';
 
 class PaymentAllocationVisual {
@@ -125,7 +125,8 @@ class _PaymentDistributionAnimationState
             _allocationDates
               ..clear()
               ..addAll({
-                for (final entry in selected.entries) entry.key: entry.value.toLocal(),
+                for (final entry in selected.entries)
+                  entry.key: entry.value.toLocal(),
               });
           } catch (error) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -255,7 +256,7 @@ class _PaymentDistributionAnimationState
                     pickedDate.day,
                     pickedTime.hour,
                     pickedTime.minute,
-                  ).toLocal();
+                  );
                   setDialogState(() => workingDates[allocation.id] = combined);
                 },
                 icon: const Icon(Icons.schedule_rounded, size: 18),
@@ -269,7 +270,7 @@ class _PaymentDistributionAnimationState
   }
 
   double _allocationAmount(CarPaymentAllocation allocation) =>
-      allocation.totalAmount.toUnits();
+      allocation.totalAmount.units;
 
   @override
   void dispose() {
