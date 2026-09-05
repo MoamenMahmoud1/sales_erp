@@ -179,6 +179,7 @@ Future<void> _createPaymentTransactions(DatabaseExecutor db) async {
       transfer_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (transfer_amount_minor >= 0),
       reference TEXT,
       created_at TEXT NOT NULL,
+      payment_at TEXT,
       CHECK (cash_amount_minor + transfer_amount_minor > 0)
     )
   ''');
