@@ -244,14 +244,14 @@ class _PaymentDistributionAnimationState
                     lastDate: DateTime(DateTime.now().year + 5),
                     helpText: 'Select payment date',
                   );
-                  if (pickedDate == null || !context.mounted) return;
+                  if (pickedDate == null || !mounted) return;
 
                   final pickedTime = await showTimePicker(
                     context: context,
                     initialTime: TimeOfDay.fromDateTime(initial),
                     helpText: 'Select payment time',
                   );
-                  if (pickedTime == null || !context.mounted) return;
+                  if (pickedTime == null || !mounted) return;
 
                   final combined = DateTime(
                     pickedDate.year,
