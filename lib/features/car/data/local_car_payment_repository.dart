@@ -78,13 +78,15 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
     var createdTransactionId = 0;
 
     await db.transaction((txn) async {
+      final transactionDate = transaction.createdAt.toUtc().toIso8601String();
       createdTransactionId = await txn.insert('car_payment_transactions', {
         'cash_amount_minor': cash,
         'transfer_amount_minor': transfer,
         'reference': transaction.reference?.trim().isEmpty == true
             ? null
             : transaction.reference?.trim(),
-        'created_at': transaction.createdAt.toUtc().toIso8601String(),
+        'created_at': transactionDate,
+        'payment_at': transactionDate,
       });
 
       int? scopeCarId;
@@ -140,11 +142,14 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
           );
         }
 
+        final paymentDate =
+            (allocation.paymentAt ?? transaction.createdAt).toUtc().toIso8601String();
         await txn.insert('car_payment_allocations', {
           'payment_transaction_id': createdTransactionId,
           'trip_id': allocation.tripId,
           'cash_amount_minor': allocation.cashAmount.minorUnits,
           'transfer_amount_minor': allocation.transferAmount.minorUnits,
+          'payment_at': paymentDate,
         });
 
         final nextCash = currentPaidCash + allocation.cashAmount.minorUnits;
@@ -236,6 +241,49 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
       orderBy: 'id ASC',
     );
     return rows.map(_allocationFromRow).toList(growable: false);
+  }
+
+  @override
+  Future<void> updateAllocationPaymentDates({
+    required int transactionId,
+    required Map<int, DateTime> paymentDates,
+  }) async {
+    if (transactionId <= 0) {
+      throw ArgumentError('Invalid payment transaction ID.');
+    }
+    if (paymentDates.isEmpty) {
+      throw ArgumentError('Payment dates are required.');
+    }
+
+    final db = await _database();
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'car_payment_allocations',
+        columns: ['id'],
+        where: 'payment_transaction_id = ?',
+        whereArgs: [transactionId],
+        orderBy: 'id ASC',
+      );
+      if (rows.isEmpty) {
+        throw StateError('Payment transaction has no allocations.');
+      }
+
+      final expectedIds = rows.map((row) => (row['id'] as num).toInt()).toSet();
+      final providedIds = paymentDates.keys.toSet();
+      if (expectedIds.length != providedIds.length ||
+          !expectedIds.containsAll(providedIds)) {
+        throw StateError('Payment dates must be provided for every invoice allocation.');
+      }
+
+      for (final entry in paymentDates.entries) {
+        await txn.update(
+          'car_payment_allocations',
+          {'payment_at': entry.value.toUtc().toIso8601String()},
+          where: 'id = ? AND payment_transaction_id = ?',
+          whereArgs: [entry.key, transactionId],
+        );
+      }
+    });
   }
 
   @override
@@ -343,5 +391,8 @@ class LocalCarPaymentRepository implements CarPaymentRepository {
         tripId: row['trip_id'] as int,
         cashAmount: CarMoney((row['cash_amount_minor'] as num).toInt()),
         transferAmount: CarMoney((row['transfer_amount_minor'] as num).toInt()),
+        paymentAt: row['payment_at'] == null
+            ? null
+            : DateTime.parse(row['payment_at'] as String),
       );
 }
