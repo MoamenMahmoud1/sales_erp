@@ -10,6 +10,7 @@ class Payment {
   final PaymentStatus status;
   final String? reference;
   final DateTime createdAt;
+  final DateTime? paymentAt;
   final DateTime? confirmedAt;
 
   const Payment({
@@ -21,8 +22,11 @@ class Payment {
     required this.status,
     required this.reference,
     required this.createdAt,
+    required this.paymentAt,
     required this.confirmedAt,
   });
+
+  DateTime get effectivePaymentAt => paymentAt ?? createdAt;
 
   bool get isPending {
     return status == PaymentStatus.pending;
@@ -58,6 +62,9 @@ class Payment {
       createdAt: DateTime.parse(
         map['created_at'] as String,
       ),
+      paymentAt: map['payment_at'] == null
+          ? null
+          : DateTime.parse(map['payment_at'] as String),
       confirmedAt:
           map['confirmed_at'] == null
               ? null
@@ -77,8 +84,8 @@ class Payment {
       'status': status.value,
       'reference': reference,
       'created_at': createdAt.toUtc().toIso8601String(),
-      'confirmed_at':
-          confirmedAt?.toUtc().toIso8601String(),
+      'payment_at': paymentAt?.toUtc().toIso8601String(),
+      'confirmed_at': confirmedAt?.toUtc().toIso8601String(),
     };
   }
 }
