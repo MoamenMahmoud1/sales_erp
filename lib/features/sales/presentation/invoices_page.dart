@@ -19,6 +19,21 @@ class _InvoicesPageState extends State<InvoicesPage> {
     _invoices = _repository.getInvoices();
   }
 
+  String _money(Object? value) {
+    return '${(value as num?)?.toDouble().toStringAsFixed(2) ?? '0.00'} EGP';
+  }
+
+  String _statusLabel(Object? value) {
+    switch (value) {
+      case 'paid':
+        return 'Paid';
+      case 'pending':
+        return 'Pending transfer';
+      default:
+        return 'Unpaid';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -38,10 +53,21 @@ class _InvoicesPageState extends State<InvoicesPage> {
             itemCount: invoices.length,
             itemBuilder: (context, index) {
               final invoice = invoices[index];
+              final total = (invoice['total'] as num?)?.toDouble() ?? 0;
+              final paid = (invoice['paid_amount'] as num?)?.toDouble() ?? 0;
+              final pending = (invoice['pending_amount'] as num?)?.toDouble() ?? 0;
+              final remaining = (total - paid).clamp(0, total).toDouble();
+
               return ListTile(
                 title: Text('Invoice #${invoice['id']}'),
-                subtitle: Text('${invoice['customer_name']}\nTotal: ${invoice['total']}'),
+                subtitle: Text(
+                  '${invoice['customer_name']}\n'
+                  'Total: ${_money(total)}  •  Paid: ${_money(paid)}\n'
+                  'Remaining: ${_money(remaining)}'
+                  '${pending > 0 ? '  •  Pending: ${_money(pending)}' : ''}',
+                ),
                 isThreeLine: true,
+                trailing: Chip(label: Text(_statusLabel(invoice['payment_status']))),
               );
             },
           );
