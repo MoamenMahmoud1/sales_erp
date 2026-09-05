@@ -25,11 +25,14 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
   final _productRepository = LocalProductRepository();
   final _saleRepository = LocalSaleRepository();
   final _discountController = TextEditingController(text: '0');
+  final _paymentController = TextEditingController(text: '0');
   final Map<int, int> _quantities = {};
 
   List<Product> _products = const [];
   bool _loading = true;
   bool _saving = false;
+  double _existingPaid = 0;
+  double _existingPending = 0;
   String? _error;
 
   @override
@@ -41,6 +44,7 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
   @override
   void dispose() {
     _discountController.dispose();
+    _paymentController.dispose();
     super.dispose();
   }
 
@@ -59,6 +63,8 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
         }
         _discountController.text =
             ((invoice['coupon_discount'] as num?)?.toDouble() ?? 0).toStringAsFixed(2);
+        _existingPaid = (invoice['paid_amount'] as num?)?.toDouble() ?? 0;
+        _existingPending = (invoice['pending_amount'] as num?)?.toDouble() ?? 0;
       }
       if (!mounted) return;
       setState(() {
@@ -97,13 +103,37 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
 
   double get _total => _subtotal - _discount;
 
+  double get _paymentNow {
+    final value = double.tryParse(_paymentController.text) ?? 0;
+    if (!value.isFinite || value <= 0) return 0;
+    return value;
+  }
+
+  double get _remainingBeforeNewPayment =>
+      (_total - _existingPaid - _existingPending).clamp(0, _total).toDouble();
+
+  double get _remainingAfterNewPayment =>
+      (_remainingBeforeNewPayment - _paymentNow).clamp(0, _remainingBeforeNewPayment).toDouble();
+
+  bool get _isTransfer => widget.customer.paymentType == CustomerPaymentType.transfer;
+
+  void _fillFullPayment() {
+    _paymentController.text = _remainingBeforeNewPayment.toStringAsFixed(2);
+    setState(() {});
+  }
+
   Future<void> _save() async {
     if (_quantities.isEmpty || _saving) return;
+    if (_paymentNow > _remainingBeforeNewPayment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment exceeds the remaining invoice balance.')),
+      );
+      return;
+    }
+
     setState(() => _saving = true);
     try {
-      final method = widget.customer.paymentType == CustomerPaymentType.cash
-          ? PaymentMethod.cash
-          : PaymentMethod.transfer;
+      final method = _isTransfer ? PaymentMethod.transfer : PaymentMethod.cash;
       final products = Map.of(_quantities);
       if (widget.invoiceId == null) {
         await _saleRepository.createInvoice(
@@ -111,6 +141,7 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
           products: products,
           paymentMethod: method,
           couponDiscount: _discount,
+          initialPaymentAmount: _paymentNow,
         );
       } else {
         await _saleRepository.updateInvoice(
@@ -119,6 +150,7 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
           products: products,
           paymentMethod: method,
           couponDiscount: _discount,
+          additionalPaymentAmount: _paymentNow,
         );
       }
       if (mounted) Navigator.of(context).pop(true);
@@ -149,6 +181,7 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
 
   Widget _body() {
     final scheme = Theme.of(context).colorScheme;
+    final remainingBeforePayment = _remainingBeforeNewPayment;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
       children: [
@@ -223,6 +256,47 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 16),
+        Text(editingPaymentTitle,
+            style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _paymentController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: editingPaymentLabel,
+            suffixText: 'EGP',
+            border: const OutlineInputBorder(),
+            helperText: _isTransfer
+                ? 'Transfer payments stay pending until confirmed from Payments.'
+                : 'Cash payments are recorded as paid immediately.',
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: TextButton.icon(
+            onPressed: remainingBeforePayment <= 0 ? null : _fillFullPayment,
+            icon: const Icon(Icons.done_all_rounded),
+            label: Text(editing ? 'Pay remaining' : 'Pay full amount'),
+          ),
+        ),
+        if (editing) ...[
+          const SizedBox(height: 4),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                children: [
+                  _summaryRow('Already paid', _existingPaid),
+                  if (_existingPending > 0)
+                    _summaryRow('Pending transfer', _existingPending),
+                ],
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -232,6 +306,11 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
                 if (_discount > 0) _summaryRow('Discount', -_discount),
                 const Divider(height: 20),
                 _summaryRow('Total', _total, emphasized: true),
+                if (_paymentNow > 0) _summaryRow(editing ? 'Payment now' : 'Paid now', _paymentNow),
+                if (editing && _existingPending > 0)
+                  _summaryRow('Pending already', _existingPending),
+                const Divider(height: 20),
+                _summaryRow('Remaining', _remainingAfterNewPayment, emphasized: true),
               ],
             ),
           ),
@@ -239,6 +318,14 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
       ],
     );
   }
+
+  bool get editing => widget.invoiceId != null;
+
+  String get editingPaymentTitle =>
+      editing ? 'Additional payment' : 'Payment at invoice creation';
+
+  String get editingPaymentLabel =>
+      editing ? 'Amount to pay now' : 'Amount paid now';
 
   Widget _summaryRow(String label, double amount, {bool emphasized = false}) {
     final style = TextStyle(
