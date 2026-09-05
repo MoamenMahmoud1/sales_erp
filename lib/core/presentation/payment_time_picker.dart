@@ -26,29 +26,39 @@ Future<DateTime?> resolvePaymentTime(BuildContext context) async {
   if (!context.mounted) return null;
   if (specify != true) return DateTime.now().toUtc();
 
-  final now = DateTime.now();
-  final date = await showDatePicker(
+  return pickPaymentDateTime(context, initial: DateTime.now());
+}
+
+/// Opens date and time pickers using [initial] as the starting value.
+Future<DateTime?> pickPaymentDateTime(
+  BuildContext context, {
+  DateTime? initial,
+}) async {
+  if (!context.mounted) return null;
+
+  final seed = initial?.toLocal() ?? DateTime.now();
+  final pickedDate = await showDatePicker(
     context: context,
-    initialDate: now,
+    initialDate: seed,
     firstDate: DateTime(2000),
-    lastDate: DateTime(now.year + 5, now.month, now.day),
+    lastDate: DateTime(DateTime.now().year + 5, 12, 31),
     helpText: 'Select payment date',
   );
-  if (date == null || !context.mounted) return null;
+  if (pickedDate == null || !context.mounted) return null;
 
-  final time = await showTimePicker(
+  final pickedTime = await showTimePicker(
     context: context,
-    initialTime: TimeOfDay.fromDateTime(now),
+    initialTime: TimeOfDay.fromDateTime(seed),
     helpText: 'Select payment time',
   );
-  if (time == null || !context.mounted) return null;
+  if (pickedTime == null || !context.mounted) return null;
 
   return DateTime(
-    date.year,
-    date.month,
-    date.day,
-    time.hour,
-    time.minute,
+    pickedDate.year,
+    pickedDate.month,
+    pickedDate.day,
+    pickedTime.hour,
+    pickedTime.minute,
   ).toUtc();
 }
 
