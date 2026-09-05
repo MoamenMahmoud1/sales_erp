@@ -81,14 +81,15 @@ class LocalPaymentRepository implements PaymentRepository {
           'status': status.value,
           'reference': _normalizeReference(reference),
           'created_at': now,
+          'payment_at': now,
           'confirmed_at': status == PaymentStatus.paid ? now : null,
         },
       );
     });
   }
 
-  /// Updates only the timestamp of the newest positive payment for an invoice.
-  /// Amounts, status, references, and balances are intentionally untouched.
+  /// Updates only the payment timestamp of the newest positive payment.
+  /// Amounts, creation time, status, references, and balances are untouched.
   Future<void> setLatestPaymentDate(int invoiceId, DateTime paymentAt) async {
     if (invoiceId <= 0) {
       throw ArgumentError('Invalid invoice ID.');
@@ -113,10 +114,7 @@ class LocalPaymentRepository implements PaymentRepository {
       final paymentId = (rows.single['id'] as num).toInt();
       final updated = await transaction.update(
         'payments',
-        {
-          'created_at': paymentDate,
-          'payment_at': paymentDate,
-        },
+        {'payment_at': paymentDate},
         where: 'id = ?',
         whereArgs: [paymentId],
       );
@@ -184,6 +182,7 @@ class LocalPaymentRepository implements PaymentRepository {
         {
           'status': PaymentStatus.paid.value,
           'confirmed_at': now,
+          'payment_at': payment['payment_at'] ?? now,
         },
         where: 'id = ? AND method = ? AND status = ?',
         whereArgs: [
@@ -213,12 +212,13 @@ class LocalPaymentRepository implements PaymentRepository {
         p.status,
         p.reference,
         p.created_at,
+        p.payment_at,
         p.confirmed_at,
         c.name AS customer_name,
         c.phone AS customer_phone
       FROM payments p
       INNER JOIN customers c ON c.id = p.customer_id
-      ORDER BY p.created_at DESC
+      ORDER BY COALESCE(p.payment_at, p.created_at) DESC
     ''');
 
     return rows.map(Payment.fromMap).toList(growable: false);
@@ -238,12 +238,13 @@ class LocalPaymentRepository implements PaymentRepository {
         p.status,
         p.reference,
         p.created_at,
+        p.payment_at,
         p.confirmed_at
       FROM payments p
       WHERE p.method = ?
         AND p.status = ?
         AND p.amount > 0
-      ORDER BY p.created_at ASC
+      ORDER BY COALESCE(p.payment_at, p.created_at) ASC
     ''', [
       PaymentMethod.transfer.value,
       PaymentStatus.pending.value,
@@ -256,11 +257,24 @@ class LocalPaymentRepository implements PaymentRepository {
   Future<List<Payment>> getPaymentsForCustomer(int customerId) async {
     final database = await _database;
 
-    final rows = await database.query(
-      'payments',
-      where: 'customer_id = ?',
-      whereArgs: [customerId],
-      orderBy: 'created_at DESC',
+    final rows = await database.rawQuery(
+      '''
+      SELECT
+        id,
+        customer_id,
+        invoice_id,
+        amount,
+        method,
+        status,
+        reference,
+        created_at,
+        payment_at,
+        confirmed_at
+      FROM payments
+      WHERE customer_id = ?
+      ORDER BY COALESCE(payment_at, created_at) DESC
+      ''',
+      [customerId],
     );
 
     return rows.map(Payment.fromMap).toList(growable: false);
