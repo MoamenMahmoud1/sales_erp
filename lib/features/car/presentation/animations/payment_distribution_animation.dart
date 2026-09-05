@@ -52,20 +52,23 @@ class _PaymentDistributionAnimationState
     duration: Duration(
       milliseconds: math.min(1800, 850 + widget.allocations.length * 170),
     ),
-  )..addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        widget.onComplete?.call();
-      }
-    });
+  )..addStatusListener(_handleAnimationStatus);
 
   final Map<int, DateTime> _allocationDates = {};
   List<CarPaymentAllocation> _storedAllocations = const [];
   int? _activeTransactionId;
+  bool _ready = false;
 
   @override
   void initState() {
     super.initState();
     _preparePaymentDates();
+  }
+
+  void _handleAnimationStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed || !mounted) return;
+    setState(() => _ready = true);
+    widget.onComplete?.call();
   }
 
   Future<void> _preparePaymentDates() async {
@@ -77,18 +80,21 @@ class _PaymentDistributionAnimationState
         return;
       }
 
-      final transaction = widget.transactionId == null
-          ? transactions.reduce((a, b) => a.id > b.id ? a : b)
+      final fallback = transactions.reduce((a, b) => a.id > b.id ? a : b);
+      final requestedId = widget.transactionId;
+      final transaction = requestedId == null
+          ? fallback
           : transactions.firstWhere(
-              (item) => item.id == widget.transactionId,
-              orElse: () => transactions.reduce((a, b) => a.id > b.id ? a : b),
+              (item) => item.id == requestedId,
+              orElse: () => fallback,
             );
       _activeTransactionId = transaction.id;
 
       final allocations = await repository.getAllocationsForTransaction(
         transaction.id,
       );
-      if (allocations.length != widget.allocations.length || allocations.isEmpty) {
+      if (allocations.length != widget.allocations.length ||
+          allocations.isEmpty) {
         if (mounted) _controller.forward();
         return;
       }
@@ -319,6 +325,7 @@ class _PaymentDistributionAnimationState
 
   @override
   void dispose() {
+    _controller.removeStatusListener(_handleAnimationStatus);
     _controller.dispose();
     super.dispose();
   }
@@ -505,11 +512,11 @@ class _PaymentDistributionAnimationState
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 5, 20, 18),
               child: FilledButton.icon(
-                onPressed: _controller.isCompleted
-                    ? () => Navigator.of(context).pop()
+                onPressed: _ready
+                    ? () => Navigator.of(context).pop(_activeTransactionId)
                     : null,
                 icon: const Icon(Icons.done_rounded),
-                label: const Text('Done'),
+                label: Text(_ready ? 'Done' : 'Preparing...'),
                 style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(50),
                 ),
@@ -524,24 +531,18 @@ class _PaymentDistributionAnimationState
   Widget _metric(BuildContext context, String label, String value) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
       decoration: BoxDecoration(
         color: scheme.surface,
-        borderRadius: BorderRadius.circular(11),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: scheme.outlineVariant),
       ),
-      child: RichText(
-        text: TextSpan(
-          style: TextStyle(fontSize: 11, color: scheme.onSurface),
-          children: [
-            TextSpan(
-              text: '$label  ',
-              style: TextStyle(color: scheme.onSurfaceVariant),
-            ),
-            TextSpan(
-              text: value,
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-          ],
+      child: Text(
+        '$label  $value',
+        style: TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w800,
+          color: scheme.onSurface,
         ),
       ),
     );
