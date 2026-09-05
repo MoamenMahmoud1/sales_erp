@@ -1,6 +1,6 @@
 import '../entities/car_payment_allocation.dart';
 import '../entities/car_payment_transaction.dart';
-import '../domain/entities/car_trip.dart';
+import '../entities/car_trip.dart';
 
 abstract interface class CarPaymentRepository {
   Future<int> persistPayment({
