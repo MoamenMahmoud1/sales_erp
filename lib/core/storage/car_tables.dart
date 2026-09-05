@@ -194,6 +194,7 @@ Future<void> _createPaymentAllocations(DatabaseExecutor db) async {
       trip_id INTEGER NOT NULL,
       cash_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (cash_amount_minor >= 0),
       transfer_amount_minor INTEGER NOT NULL DEFAULT 0 CHECK (transfer_amount_minor >= 0),
+      payment_at TEXT,
       FOREIGN KEY (payment_transaction_id)
         REFERENCES car_payment_transactions(id) ON DELETE CASCADE,
       FOREIGN KEY (trip_id) REFERENCES car_trips(id) ON DELETE CASCADE,
