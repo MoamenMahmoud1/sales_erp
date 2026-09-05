@@ -216,7 +216,6 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
     final paymentStatus =
         _evaluator.statusOf(trip, summary, DateTime.now());
     final remaining = _calculator.remaining(trip, summaryOf: summary);
-    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
