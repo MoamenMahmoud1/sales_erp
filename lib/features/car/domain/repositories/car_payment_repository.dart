@@ -1,6 +1,6 @@
 import '../entities/car_payment_allocation.dart';
 import '../entities/car_payment_transaction.dart';
-import '../entities/car_trip.dart';
+import '../domain/entities/car_trip.dart';
 
 abstract interface class CarPaymentRepository {
   Future<int> persistPayment({
@@ -13,6 +13,11 @@ abstract interface class CarPaymentRepository {
   Future<List<CarPaymentAllocation>> getAllocations();
   Future<List<CarPaymentAllocation>> getAllocationsForTransaction(int transactionId);
   Future<List<CarPaymentAllocation>> getAllocationsForTrip(int tripId);
+
+  Future<void> updateAllocationPaymentDates({
+    required int transactionId,
+    required Map<int, DateTime> paymentDates,
+  });
 
   /// Reverses every allocation and removes the payment event atomically.
   /// Returns the affected trip IDs so the UI can refresh only those trips.
