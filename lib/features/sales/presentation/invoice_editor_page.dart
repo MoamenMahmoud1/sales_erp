@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/presentation/payment_time_picker.dart';
 import '../../customers/domain/customer.dart';
 import '../../customers/domain/payment_method.dart';
 import '../../payment/data/local_payment_repository.dart';
 import '../../products/data/local_product_repository.dart';
 import '../../products/domain/product.dart';
-import '../../../core/presentation/payment_time_picker.dart';
 import '../data/local_sale_repository.dart';
 import 'widgets/quantity_stepper.dart';
 
@@ -120,7 +120,8 @@ class _InvoiceEditorPageState extends State<InvoiceEditorPage> {
           .clamp(0, _remainingBeforeNewPayment)
           .toDouble();
 
-  bool get _isTransfer => widget.customer.paymentType == CustomerPaymentType.transfer;
+  bool get _isTransfer =>
+      widget.customer.paymentType == CustomerPaymentType.bankTransfer;
 
   void _fillFullPayment() {
     _paymentController.text = _remainingBeforeNewPayment.toStringAsFixed(2);
