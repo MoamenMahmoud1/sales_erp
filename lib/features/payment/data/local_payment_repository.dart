@@ -87,6 +87,45 @@ class LocalPaymentRepository implements PaymentRepository {
     });
   }
 
+  /// Updates only the timestamp of the newest positive payment for an invoice.
+  /// Amounts, status, references, and balances are intentionally untouched.
+  Future<void> setLatestPaymentDate(int invoiceId, DateTime paymentAt) async {
+    if (invoiceId <= 0) {
+      throw ArgumentError('Invalid invoice ID.');
+    }
+
+    final database = await _database;
+    final paymentDate = paymentAt.toUtc().toIso8601String();
+
+    await database.transaction((transaction) async {
+      final rows = await transaction.query(
+        'payments',
+        columns: ['id'],
+        where: 'invoice_id = ? AND amount > 0',
+        whereArgs: [invoiceId],
+        orderBy: 'id DESC',
+        limit: 1,
+      );
+      if (rows.isEmpty) {
+        throw StateError('No payment was recorded for this invoice.');
+      }
+
+      final paymentId = (rows.single['id'] as num).toInt();
+      final updated = await transaction.update(
+        'payments',
+        {
+          'created_at': paymentDate,
+          'payment_at': paymentDate,
+        },
+        where: 'id = ?',
+        whereArgs: [paymentId],
+      );
+      if (updated != 1) {
+        throw StateError('Payment date could not be updated.');
+      }
+    });
+  }
+
   @override
   Future<void> confirmTransfer(int paymentId) async {
     if (paymentId <= 0) {
