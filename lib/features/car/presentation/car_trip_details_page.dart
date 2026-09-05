@@ -10,6 +10,7 @@ import '../domain/entities/car_trip.dart';
 import '../domain/entities/money.dart';
 import '../domain/services/car_calculator.dart';
 import '../domain/services/car_payment_evaluator.dart';
+import 'car_invoice_payment_card.dart';
 import 'car_revision_details_page.dart';
 import 'car_trip_editor_page.dart';
 
@@ -131,21 +132,35 @@ class _CarTripDetailsPageState extends State<CarTripDetailsPage> {
             const SizedBox(height: 10),
             AppCard(
               padding: const EdgeInsets.all(14),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Payment status', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
-                const SizedBox(height: 10),
-                Row(children: [
-                  Expanded(child: _moneyState('Paid', _money(trip.payment.totalPaid), scheme.primaryContainer, scheme.onPrimaryContainer, Icons.check_circle_rounded)),
-                  const SizedBox(width: 8),
-                  Expanded(child: _moneyState('Outstanding', _money(remaining), remaining == CarMoney.zero ? scheme.primaryContainer : scheme.errorContainer, remaining == CarMoney.zero ? scheme.onPrimaryContainer : scheme.onErrorContainer, remaining == CarMoney.zero ? Icons.check_rounded : Icons.account_balance_wallet_outlined)),
-                ]),
-                const SizedBox(height: 9),
-                Text(
-                  remaining == CarMoney.zero ? 'Invoice is fully paid.' : 'Outstanding balance is still due on this invoice.',
-                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant, fontWeight: FontWeight.w700),
-                ),
-              ]),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Payment status', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(child: _moneyState('Paid', _money(trip.payment.totalPaid), scheme.primaryContainer, scheme.onPrimaryContainer, Icons.check_circle_rounded)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _moneyState('Outstanding', _money(remaining), remaining == CarMoney.zero ? scheme.primaryContainer : scheme.errorContainer, remaining == CarMoney.zero ? scheme.onPrimaryContainer : scheme.onErrorContainer, remaining == CarMoney.zero ? Icons.check_rounded : Icons.account_balance_wallet_outlined)),
+                  ]),
+                  const SizedBox(height: 9),
+                  Text(
+                    remaining == CarMoney.zero ? 'Invoice is fully paid.' : 'Outstanding balance is still due on this invoice.',
+                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
             ),
+            if (remaining != CarMoney.zero) ...[
+              const SizedBox(height: 10),
+              CarInvoicePaymentCard(
+                trip: trip,
+                remaining: remaining,
+                onPaymentCompleted: (updatedTrip) {
+                  if (!mounted) return;
+                  setState(() => _trip = updatedTrip);
+                },
+              ),
+            ],
             const SizedBox(height: 10),
             _revisionCard(),
           ],
