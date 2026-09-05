@@ -127,6 +127,7 @@ Future<void> createAppSchema(DatabaseExecutor db) async {
       status TEXT NOT NULL,
       reference TEXT,
       created_at TEXT NOT NULL,
+      payment_at TEXT,
       confirmed_at TEXT,
       FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
