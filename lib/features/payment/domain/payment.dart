@@ -22,70 +22,49 @@ class Payment {
     required this.status,
     required this.reference,
     required this.createdAt,
-    required this.paymentAt,
+    this.paymentAt,
     required this.confirmedAt,
   });
 
   DateTime get effectivePaymentAt => paymentAt ?? createdAt;
 
-  bool get isPending {
-    return status == PaymentStatus.pending;
-  }
+  bool get isPending => status == PaymentStatus.pending;
 
-  bool get isPaid {
-    return status == PaymentStatus.paid;
-  }
+  bool get isPaid => status == PaymentStatus.paid;
 
-  bool get isCash {
-    return method == PaymentMethod.cash;
-  }
+  bool get isCash => method == PaymentMethod.cash;
 
-  bool get isTransfer {
-    return method == PaymentMethod.transfer;
-  }
+  bool get isTransfer => method == PaymentMethod.transfer;
 
-  factory Payment.fromMap(
-    Map<String, Object?> map,
-  ) {
+  factory Payment.fromMap(Map<String, Object?> map) {
     return Payment(
       id: map['id'] as int,
       customerId: map['customer_id'] as int,
       invoiceId: map['invoice_id'] as int,
       amount: (map['amount'] as num).toDouble(),
-      method: paymentMethodFromValue(
-        map['method'] as String?,
-      ),
-      status: PaymentStatus.fromValue(
-        map['status'] as String?,
-      ),
+      method: paymentMethodFromValue(map['method'] as String?),
+      status: PaymentStatus.fromValue(map['status'] as String?),
       reference: map['reference'] as String?,
-      createdAt: DateTime.parse(
-        map['created_at'] as String,
-      ),
+      createdAt: DateTime.parse(map['created_at'] as String),
       paymentAt: map['payment_at'] == null
           ? null
           : DateTime.parse(map['payment_at'] as String),
-      confirmedAt:
-          map['confirmed_at'] == null
-              ? null
-              : DateTime.parse(
-                  map['confirmed_at'] as String,
-                ),
+      confirmedAt: map['confirmed_at'] == null
+          ? null
+          : DateTime.parse(map['confirmed_at'] as String),
     );
   }
 
-  Map<String, Object?> toMap() {
-    return {
-      'id': id,
-      'customer_id': customerId,
-      'invoice_id': invoiceId,
-      'amount': amount,
-      'method': method.value,
-      'status': status.value,
-      'reference': reference,
-      'created_at': createdAt.toUtc().toIso8601String(),
-      'payment_at': paymentAt?.toUtc().toIso8601String(),
-      'confirmed_at': confirmedAt?.toUtc().toIso8601String(),
-    };
-  }
+  Map<String, Object?> toMap() => {
+        'id': id,
+        'customer_id': customerId,
+        'invoice_id': invoiceId,
+        'amount': amount,
+        'method': method.value,
+        'status': status.value,
+        'reference': reference,
+        'created_at': createdAt.toUtc().toIso8601String(),
+        'payment_at': paymentAt?.toUtc().toIso8601String(),
+        'confirmed_at': confirmedAt?.toUtc().toIso8601String(),
+      };
 }
