@@ -1,5 +1,3 @@
-import 'package:sqflite/sqflite.dart';
-
 import '../../../core/storage/app_database.dart';
 import 'local_payment_repository.dart';
 import '../domain/payment.dart';
