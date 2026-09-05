@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import 'app_migrations.dart';
 import 'app_schema.dart';
 import 'car_return_value_migration.dart';
+import 'payment_date_migration.dart';
 
 /// The application's single SQLite database.
 class AppDatabase {
@@ -42,7 +43,10 @@ class AppDatabase {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: (db, _) => createAppSchema(db),
-      onUpgrade: (db, oldVersion, _) => runAppMigrations(db, oldVersion),
+      onUpgrade: (db, oldVersion, _) async {
+        await runAppMigrations(db, oldVersion);
+        await runPaymentDateMigration(db, oldVersion);
+      },
     );
 
     // Version 16 adds product categories. Keep this tiny compatibility step
