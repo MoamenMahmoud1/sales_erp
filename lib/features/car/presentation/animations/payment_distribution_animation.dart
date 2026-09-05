@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/presentation/payment_time_picker.dart';
 import '../../../../core/repositories/app_services.dart';
 import '../../domain/entities/car_payment_allocation.dart';
+import '../../domain/repositories/car_payment_repository.dart';
 
 class PaymentAllocationVisual {
   final String invoiceNumber;
@@ -142,7 +143,7 @@ class _PaymentDistributionAnimationState
   }
 
   Future<void> _saveAllocationDates(
-    dynamic repository,
+    CarPaymentRepository repository,
     Map<int, DateTime> dates,
   ) async {
     final transactionId = _activeTransactionId;
@@ -252,7 +253,11 @@ class _PaymentDistributionAnimationState
                 color: scheme.surface,
                 borderRadius: BorderRadius.circular(11),
               ),
-              child: Icon(Icons.receipt_long_rounded, color: scheme.primary, size: 19),
+              child: Icon(
+                Icons.receipt_long_rounded,
+                color: scheme.primary,
+                size: 19,
+              ),
             ),
             const SizedBox(width: 9),
             Expanded(
@@ -382,9 +387,12 @@ class _PaymentDistributionAnimationState
                     itemBuilder: (context, index) {
                       final allocation = widget.allocations[index];
                       final progress = _rowProgress(index);
-                      final date = index < _storedAllocations.length
-                          ? _allocationDates[_storedAllocations[index].id]
+                      final stored = index < _storedAllocations.length
+                          ? _storedAllocations[index]
                           : null;
+                      final date = stored == null
+                          ? null
+                          : _allocationDates[stored.id];
                       final paid = allocation.remainingAfter <= 0;
 
                       return Opacity(
