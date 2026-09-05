@@ -20,15 +20,13 @@ class PaymentAllocationVisual {
   });
 }
 
-/// Fast, bounded visual confirmation of the exact invoice allocations.
-///
-/// Payment persistence completes before this route is pushed. This screen can
-/// additionally collect optional payment dates and updates metadata only;
-/// payment amounts and trip balances are never changed here.
+/// Shows the exact Car-payment allocation result and optionally records
+/// a separate payment date/time for every invoice allocation.
 class PaymentDistributionAnimation extends StatefulWidget {
   final double paymentAmount;
   final String? scopeLabel;
   final List<PaymentAllocationVisual> allocations;
+  final int? transactionId;
   final VoidCallback? onComplete;
 
   const PaymentDistributionAnimation({
@@ -36,6 +34,7 @@ class PaymentDistributionAnimation extends StatefulWidget {
     required this.paymentAmount,
     this.scopeLabel,
     required this.allocations,
+    this.transactionId,
     this.onComplete,
   });
 
@@ -52,8 +51,7 @@ class _PaymentDistributionAnimationState
     duration: Duration(
       milliseconds: math.min(1800, 850 + widget.allocations.length * 170),
     ),
-  )
-    ..addStatusListener((status) {
+  )..addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         widget.onComplete?.call();
       }
@@ -61,6 +59,7 @@ class _PaymentDistributionAnimationState
 
   final Map<int, DateTime> _allocationDates = {};
   List<CarPaymentAllocation> _storedAllocations = const [];
+  int? _activeTransactionId;
 
   @override
   void initState() {
@@ -77,9 +76,17 @@ class _PaymentDistributionAnimationState
         return;
       }
 
-      final transaction = transactions.first;
-      final allocations =
-          await repository.getAllocationsForTransaction(transaction.id);
+      final transaction = widget.transactionId == null
+          ? transactions.reduce((a, b) => a.id > b.id ? a : b)
+          : transactions.firstWhere(
+              (item) => item.id == widget.transactionId,
+              orElse: () => transactions.reduce((a, b) => a.id > b.id ? a : b),
+            );
+      _activeTransactionId = transaction.id;
+
+      final allocations = await repository.getAllocationsForTransaction(
+        transaction.id,
+      );
       if (allocations.length != widget.allocations.length || allocations.isEmpty) {
         if (mounted) _controller.forward();
         return;
@@ -87,8 +94,8 @@ class _PaymentDistributionAnimationState
 
       _storedAllocations = allocations;
       for (final allocation in allocations) {
-        final date = allocation.paymentAt ?? transaction.createdAt;
-        _allocationDates[allocation.id] = date.toLocal();
+        _allocationDates[allocation.id] =
+            (allocation.paymentAt ?? transaction.createdAt).toLocal();
       }
 
       if (!mounted) return;
@@ -114,32 +121,50 @@ class _PaymentDistributionAnimationState
       );
 
       if (!mounted) return;
+
       if (specify == true) {
         final selected = await _showAllocationDateDetails();
         if (selected != null && mounted) {
-          try {
-            await repository.updateAllocationPaymentDates(
-              transactionId: transaction.id,
-              paymentDates: selected,
-            );
-            _allocationDates
-              ..clear()
-              ..addAll({
-                for (final entry in selected.entries)
-                  entry.key: entry.value.toLocal(),
-              });
-          } catch (error) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Payment dates could not be saved: $error')),
-            );
-          }
+          await _saveAllocationDates(repository, selected);
         }
+      } else {
+        final now = DateTime.now().toUtc();
+        final selected = {
+          for (final allocation in _storedAllocations) allocation.id: now,
+        };
+        await _saveAllocationDates(repository, selected);
       }
     } catch (_) {
-      // Date details are optional; the already-persisted payment remains valid.
+      // Date details are optional; the payment itself has already been saved.
     }
 
     if (mounted) _controller.forward();
+  }
+
+  Future<void> _saveAllocationDates(
+    dynamic repository,
+    Map<int, DateTime> dates,
+  ) async {
+    final transactionId = _activeTransactionId;
+    if (transactionId == null) return;
+
+    try {
+      await repository.updateAllocationPaymentDates(
+        transactionId: transactionId,
+        paymentDates: dates,
+      );
+      _allocationDates
+        ..clear()
+        ..addAll({
+          for (final entry in dates.entries) entry.key: entry.value.toLocal(),
+        });
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Payment dates could not be saved: $error')),
+        );
+      }
+    }
   }
 
   Future<Map<int, DateTime>?> _showAllocationDateDetails() async {
@@ -148,27 +173,29 @@ class _PaymentDistributionAnimationState
     return showDialog<Map<int, DateTime>>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) {
+        builder: (dialogContext, setDialogState) {
           return AlertDialog(
             title: const Text('Payment date details'),
             content: ConstrainedBox(
               constraints: BoxConstraints(
-                maxWidth: 520,
-                maxHeight: MediaQuery.sizeOf(context).height * .62,
+                maxWidth: 540,
+                maxHeight: MediaQuery.sizeOf(dialogContext).height * .62,
               ),
               child: SingleChildScrollView(
                 child: Column(
                   children: [
-                    const Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: Text(
-                        'Set the payment date and time for each invoice allocation.',
+                    Text(
+                      'Set the payment date and time for every invoice allocation.',
+                      style: TextStyle(
+                        color: Theme.of(dialogContext)
+                            .colorScheme
+                            .onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 12),
                     for (var index = 0; index < _storedAllocations.length; index++)
                       _allocationDateRow(
-                        context,
+                        dialogContext,
                         setDialogState,
                         index,
                         workingDates,
@@ -182,9 +209,10 @@ class _PaymentDistributionAnimationState
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text('Cancel'),
               ),
-              FilledButton(
+              FilledButton.icon(
                 onPressed: () => Navigator.of(dialogContext).pop(workingDates),
-                child: const Text('Save dates'),
+                icon: const Icon(Icons.save_rounded),
+                label: const Text('Save dates'),
               ),
             ],
           );
@@ -194,7 +222,7 @@ class _PaymentDistributionAnimationState
   }
 
   Widget _allocationDateRow(
-    BuildContext context,
+    BuildContext dialogContext,
     void Function(VoidCallback) setDialogState,
     int index,
     Map<int, DateTime> workingDates,
@@ -204,69 +232,66 @@ class _PaymentDistributionAnimationState
     final visual = index < widget.allocations.length
         ? widget.allocations[index]
         : null;
+    final scheme = Theme.of(dialogContext).colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      visual?.invoiceNumber ?? 'Invoice ${allocation.tripId}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '${_allocationAmount(allocation).toStringAsFixed(2)} EGP',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(Icons.receipt_long_rounded, color: scheme.primary, size: 19),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    visual?.invoiceNumber ?? 'Invoice ${allocation.tripId}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${_allocationAmount(allocation).toStringAsFixed(2)} EGP',
+                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  final selected = await pickPaymentDateTime(
+                    dialogContext,
+                    initial: date,
+                  );
+                  if (selected == null || !dialogContext.mounted) return;
+                  setDialogState(() => workingDates[allocation.id] = selected);
+                },
+                icon: const Icon(Icons.schedule_rounded, size: 17),
+                label: Text(
+                  formatPaymentDateTime(date),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(width: 8),
-              TextButton.icon(
-                onPressed: () async {
-                  final initial = date;
-                  final pickedDate = await showDatePicker(
-                    context: context,
-                    initialDate: initial,
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime(DateTime.now().year + 5),
-                    helpText: 'Select payment date',
-                  );
-                  if (pickedDate == null || !mounted) return;
-
-                  final pickedTime = await showTimePicker(
-                    context: context,
-                    initialTime: TimeOfDay.fromDateTime(initial),
-                    helpText: 'Select payment time',
-                  );
-                  if (pickedTime == null || !mounted) return;
-
-                  final combined = DateTime(
-                    pickedDate.year,
-                    pickedDate.month,
-                    pickedDate.day,
-                    pickedTime.hour,
-                    pickedTime.minute,
-                  );
-                  setDialogState(() => workingDates[allocation.id] = combined);
-                },
-                icon: const Icon(Icons.schedule_rounded, size: 18),
-                label: Text(formatPaymentDateTime(date)),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -275,36 +300,35 @@ class _PaymentDistributionAnimationState
   double _allocationAmount(CarPaymentAllocation allocation) =>
       allocation.totalAmount.units;
 
+  double _rowProgress(int index) {
+    final count = widget.allocations.length;
+    if (count == 0) return 1;
+    const start = 0.08;
+    const available = 0.78;
+    final span = available / count;
+    final rowStart = start + index * span;
+    final rowEnd = math.min(0.98, rowStart + math.max(0.16, span * 1.45));
+    final raw = (_controller.value - rowStart) / (rowEnd - rowStart);
+    return Curves.easeOutCubic.transform(raw.clamp(0.0, 1.0));
+  }
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
 
-  double _rowProgress(int index) {
-    final count = widget.allocations.length;
-    if (count == 0) return 1;
-
-    const start = 0.08;
-    const available = 0.78;
-    final span = available / count;
-    final rowStart = start + (index * span);
-    final rowEnd = math.min(0.98, rowStart + math.max(0.16, span * 1.45));
-    final raw = ((_controller.value - rowStart) / (rowEnd - rowStart));
-    return Curves.easeOutCubic.transform(raw.clamp(0.0, 1.0));
-  }
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return Material(
-      color: scheme.surface,
-      child: SafeArea(
+    return Scaffold(
+      backgroundColor: scheme.surface,
+      body: SafeArea(
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
               child: Row(
                 children: [
                   Container(
@@ -322,32 +346,23 @@ class _PaymentDistributionAnimationState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Payment applied',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          'Payment details',
                           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
                         ),
-                        if (widget.scopeLabel != null) ...[
-                          const SizedBox(height: 3),
+                        const SizedBox(height: 3),
+                        if (widget.scopeLabel != null)
                           Text(
                             widget.scopeLabel!,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(color: scheme.onSurfaceVariant),
                           ),
-                        ],
                       ],
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: Text(
-                      '${widget.paymentAmount.toStringAsFixed(2)} EGP',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.end,
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
+                  Text(
+                    '${widget.paymentAmount.toStringAsFixed(2)} EGP',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ],
               ),
@@ -359,129 +374,116 @@ class _PaymentDistributionAnimationState
                   if (widget.allocations.isEmpty) {
                     return const Center(child: Text('No invoice allocations.'));
                   }
+
                   return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
                     itemCount: widget.allocations.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, __) => const SizedBox(height: 9),
                     itemBuilder: (context, index) {
                       final allocation = widget.allocations[index];
                       final progress = _rowProgress(index);
-                      final status = allocation.becomesPaid ? 'Paid' : 'Partial';
-                      final isActive = progress > 0 && progress < 1;
-                      final stored = index < _storedAllocations.length
-                          ? _storedAllocations[index]
+                      final date = index < _storedAllocations.length
+                          ? _allocationDates[_storedAllocations[index].id]
                           : null;
-                      final paymentDate = stored == null
-                          ? null
-                          : _allocationDates[stored.id];
+                      final paid = allocation.remainingAfter <= 0;
 
                       return Opacity(
                         opacity: progress,
                         child: Transform.translate(
-                          offset: Offset(24 * (1 - progress), 0),
+                          offset: Offset(18 * (1 - progress), 0),
                           child: Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: isActive
-                                  ? scheme.primaryContainer.withValues(alpha: .45)
-                                  : scheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(
-                                color: isActive
-                                    ? scheme.primary.withValues(alpha: .35)
-                                    : scheme.outlineVariant,
-                              ),
+                              color: scheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(17),
+                              border: Border.all(color: scheme.outlineVariant),
                             ),
-                            child: Row(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Container(
-                                  width: 38,
-                                  height: 38,
-                                  decoration: BoxDecoration(
-                                    color: scheme.surface,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Icon(
-                                    allocation.becomesPaid
-                                        ? Icons.check_circle_rounded
-                                        : Icons.receipt_long_rounded,
-                                    size: 20,
-                                    color: allocation.becomesPaid
-                                        ? scheme.primary
-                                        : scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(width: 11),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
+                                Row(
+                                  children: [
+                                    Icon(
+                                      paid
+                                          ? Icons.check_circle_rounded
+                                          : Icons.receipt_long_rounded,
+                                      color: paid
+                                          ? scheme.primary
+                                          : scheme.onSurfaceVariant,
+                                      size: 21,
+                                    ),
+                                    const SizedBox(width: 9),
+                                    Expanded(
+                                      child: Text(
                                         allocation.invoiceNumber,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontWeight: FontWeight.w800),
+                                        style: const TextStyle(fontWeight: FontWeight.w900),
                                       ),
-                                      const SizedBox(height: 3),
-                                      Text(
-                                        '${allocation.amount.toStringAsFixed(2)} EGP applied',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                                      decoration: BoxDecoration(
+                                        color: paid
+                                            ? scheme.primaryContainer
+                                            : scheme.tertiaryContainer,
+                                        borderRadius: BorderRadius.circular(999),
+                                      ),
+                                      child: Text(
+                                        paid ? 'Paid' : 'Partial',
                                         style: TextStyle(
-                                          fontSize: 11,
-                                          color: scheme.onSurfaceVariant,
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w900,
+                                          color: paid
+                                              ? scheme.onPrimaryContainer
+                                              : scheme.onTertiaryContainer,
                                         ),
                                       ),
-                                      if (paymentDate != null) ...[
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          'Payment: ${formatPaymentDateTime(paymentDate)}',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 11),
+                                Wrap(
+                                  spacing: 7,
+                                  runSpacing: 7,
+                                  children: [
+                                    _metric(
+                                      context,
+                                      'Applied',
+                                      '${allocation.amount.toStringAsFixed(2)} EGP',
+                                    ),
+                                    _metric(
+                                      context,
+                                      'Remaining',
+                                      allocation.remainingAfter <= 0
+                                          ? '0.00 EGP'
+                                          : '${allocation.remainingAfter.toStringAsFixed(2)} EGP',
+                                    ),
+                                  ],
+                                ),
+                                if (date != null) ...[
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.event_available_rounded,
+                                        size: 16,
+                                        color: scheme.primary,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          'Payment date: ${formatPaymentDateTime(date)}',
                                           style: TextStyle(
-                                            fontSize: 10.5,
+                                            fontSize: 11,
                                             color: scheme.onSurfaceVariant,
+                                            fontWeight: FontWeight.w600,
                                           ),
                                         ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                SizedBox(
-                                  width: 108,
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(
-                                        status,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.end,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w900,
-                                          color: allocation.becomesPaid
-                                              ? scheme.primary
-                                              : scheme.tertiary,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 3),
-                                      Text(
-                                        allocation.remainingAfter <= 0
-                                            ? '0.00 remaining'
-                                            : '${allocation.remainingAfter.toStringAsFixed(2)} remaining',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.end,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: scheme.onSurfaceVariant,
-                                        ),
                                       ),
                                     ],
                                   ),
-                                ),
+                                ],
                               ],
                             ),
                           ),
@@ -492,46 +494,44 @@ class _PaymentDistributionAnimationState
                 },
               ),
             ),
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (context, _) {
-                final progress = Curves.easeOutCubic.transform(
-                  ((_controller.value - .78) / .22).clamp(0.0, 1.0),
-                );
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 18),
-                  child: Opacity(
-                    opacity: progress,
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(15),
-                      decoration: BoxDecoration(
-                        color: scheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 19,
-                            backgroundColor: scheme.primary,
-                            foregroundColor: scheme.onPrimary,
-                            child: const Icon(Icons.check_rounded, size: 21),
-                          ),
-                          const SizedBox(width: 11),
-                          const Expanded(
-                            child: Text(
-                              'Payment recorded successfully',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontWeight: FontWeight.w900),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 5, 20, 18),
+              child: FilledButton.icon(
+                onPressed: _controller.isCompleted
+                    ? () => Navigator.of(context).pop()
+                    : null,
+                icon: const Icon(Icons.done_rounded),
+                label: const Text('Done'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _metric(BuildContext context, String label, String value) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: RichText(
+        text: TextSpan(
+          style: TextStyle(fontSize: 11, color: scheme.onSurface),
+          children: [
+            TextSpan(
+              text: '$label  ',
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+            TextSpan(
+              text: value,
+              style: const TextStyle(fontWeight: FontWeight.w900),
             ),
           ],
         ),
