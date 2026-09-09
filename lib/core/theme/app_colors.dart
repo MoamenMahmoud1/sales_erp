@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 /// Semantic colors shared across the Sales ERP application.
 ///
-/// Base theme palettes stay independent. The dashboard hero also has
-/// theme-specific tones so its strong visual treatment follows the active
-/// theme instead of introducing a shared unrelated accent color.
+/// Base theme palettes stay independent. Featured dashboard colors are also
+/// theme-specific: each mode gets its own strong variant of its own primary
+/// color, so the featured card follows the active theme without becoming a
+/// shared accent across all modes.
 class AppColors {
   final Color primary;
   final Color onPrimary;
@@ -192,10 +193,10 @@ class AppColors {
     textSecondary: Color(0xFF505D55),
     textMuted: Color(0xFF7D8982),
     textDisabled: Color(0xFFAAB4AD),
-    heroStart: Color(0xFF214F3D),
+    heroStart: Color(0xFF23493C),
     heroMiddle: Color(0xFF356B57),
-    heroEnd: Color(0xFF679B82),
-    heroHighlight: Color(0xFFF5FFFA),
+    heroEnd: Color(0xFF5B8D78),
+    heroHighlight: Color(0xFFF7FFFB),
   );
 
   static const AppColors mid = AppColors(
