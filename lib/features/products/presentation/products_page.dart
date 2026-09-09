@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_tokens.dart';
+import '../../../core/ui/app_card.dart';
 import '../data/local_product_repository.dart';
 import '../domain/product.dart';
 import '../domain/product_repository.dart';
@@ -21,14 +24,13 @@ class ProductsPage extends StatefulWidget {
 
 class _ProductsPageState extends State<ProductsPage> {
   final _repository = LocalProductRepository();
-
-  ProductRepository get _dataSource => widget.repository ?? _repository;
-
   final _searchController = TextEditingController();
 
   List<Product> _products = [];
   bool _isLoading = true;
   String? _errorMessage;
+
+  ProductRepository get _dataSource => widget.repository ?? _repository;
 
   @override
   void initState() {
@@ -74,7 +76,7 @@ class _ProductsPageState extends State<ProductsPage> {
         _products = products;
         _isLoading = false;
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
@@ -100,6 +102,7 @@ class _ProductsPageState extends State<ProductsPage> {
   }
 
   Future<void> _deleteProduct(Product product) async {
+    final colors = AppColors.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -112,6 +115,10 @@ class _ProductsPageState extends State<ProductsPage> {
               child: const Text('Cancel'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.error,
+                foregroundColor: colors.onError,
+              ),
               onPressed: () => Navigator.of(context).pop(true),
               child: const Text('Delete'),
             ),
@@ -138,55 +145,143 @@ class _ProductsPageState extends State<ProductsPage> {
     }
   }
 
-  Widget _buildProductCard(Product product) {
-    final subtitle = widget.carMode
-        ? 'Buy ${product.purchasePrice.toStringAsFixed(2)} EGP · Sell ${product.sellingPrice.toStringAsFixed(2)} EGP'
-        : '${product.price.toStringAsFixed(2)} EGP';
+  Widget _buildHeader(BuildContext context) {
+    final colors = AppColors.of(context);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: CircleAvatar(
-          child: Text(
-            product.name.trim().isEmpty
-                ? '?'
-                : product.name.trim()[0].toUpperCase(),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.xl,
+        AppSpacing.lg,
+        AppSpacing.md,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Products', style: AppTextStyles.headline(context)),
+                const SizedBox(height: 4),
+                Text(
+                  '${_products.length} ${_products.length == 1 ? 'product' : 'products'}',
+                  style: AppTextStyles.caption(context).copyWith(
+                    color: colors.textMuted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        title: Text(
-          product.name,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(subtitle),
-        ),
-        trailing: PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'edit') {
-              _openProductForm(product: product);
-            } else if (value == 'delete') {
-              _deleteProduct(product);
-            }
-          },
-          itemBuilder: (_) => const [
-            PopupMenuItem(
-              value: 'edit',
-              child: Text('Edit'),
-            ),
-            PopupMenuItem(
-              value: 'delete',
-              child: Text('Delete'),
-            ),
-          ],
+          const SizedBox(width: AppSpacing.md),
+          FilledButton.icon(
+            onPressed: _openProductForm,
+            icon: const Icon(Icons.add_rounded, size: 19),
+            label: const Text('Add product'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearch(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      child: TextField(
+        controller: _searchController,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: 'Search products',
+          prefixIcon: const Icon(Icons.search_rounded),
+          suffixIcon: _searchController.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Clear search',
+                  onPressed: _searchController.clear,
+                  icon: const Icon(Icons.close_rounded),
+                ),
         ),
       ),
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildProductRow(BuildContext context, Product product) {
+    final colors = AppColors.of(context);
+    final subtitle = widget.carMode
+        ? 'Buy ${product.purchasePrice.toStringAsFixed(2)} EGP · Sell ${product.sellingPrice.toStringAsFixed(2)} EGP'
+        : '${product.price.toStringAsFixed(2)} EGP';
+    final initial = product.name.trim().isEmpty
+        ? '?'
+        : product.name.trim()[0].toUpperCase();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: colors.primaryContainer,
+              borderRadius: AppRadius.mdAll,
+            ),
+            child: Text(
+              initial,
+              style: TextStyle(
+                color: colors.onPrimaryContainer,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.title(context).copyWith(fontSize: 15),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.caption(context).copyWith(
+                    color: colors.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          PopupMenuButton<String>(
+            tooltip: 'Product actions',
+            onSelected: (value) {
+              if (value == 'edit') {
+                _openProductForm(product: product);
+              } else if (value == 'delete') {
+                _deleteProduct(product);
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('Edit')),
+              PopupMenuItem(value: 'delete', child: Text('Delete')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -194,14 +289,18 @@ class _ProductsPageState extends State<ProductsPage> {
     if (_errorMessage != null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(AppSpacing.xl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48),
-              const SizedBox(height: 12),
+              Icon(
+                Icons.error_outline_rounded,
+                size: 42,
+                color: AppColors.of(context).error,
+              ),
+              const SizedBox(height: AppSpacing.md),
               Text(_errorMessage!, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpacing.lg),
               FilledButton(
                 onPressed: _loadProducts,
                 child: const Text('Retry'),
@@ -216,20 +315,34 @@ class _ProductsPageState extends State<ProductsPage> {
       return RefreshIndicator(
         onRefresh: _loadProducts,
         child: ListView(
-          padding: const EdgeInsets.only(top: 120),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            88,
+            AppSpacing.lg,
+            120,
+          ),
           children: [
             Icon(
               Icons.inventory_2_outlined,
-              size: 64,
-              color: Theme.of(context).colorScheme.outline,
+              size: 52,
+              color: AppColors.of(context).textMuted,
             ),
-            const SizedBox(height: 16),
-            Center(
-              child: Text(
-                _searchController.text.trim().isEmpty
-                    ? 'No products yet.'
-                    : 'No products found.',
-                style: Theme.of(context).textTheme.titleMedium,
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              _searchController.text.trim().isEmpty
+                  ? 'No products yet'
+                  : 'No products found',
+              textAlign: TextAlign.center,
+              style: AppTextStyles.title(context),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _searchController.text.trim().isEmpty
+                  ? 'Add a product to start building your catalog.'
+                  : 'Try a different product name.',
+              textAlign: TextAlign.center,
+              style: AppTextStyles.caption(context).copyWith(
+                color: AppColors.of(context).textMuted,
               ),
             ),
           ],
@@ -240,9 +353,27 @@ class _ProductsPageState extends State<ProductsPage> {
     return RefreshIndicator(
       onRefresh: _loadProducts,
       child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
-        itemCount: _products.length,
-        itemBuilder: (context, index) => _buildProductCard(_products[index]),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          120,
+        ),
+        itemCount: 1,
+        itemBuilder: (context, _) {
+          return AppCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                for (var index = 0; index < _products.length; index++) ...[
+                  _buildProductRow(context, _products[index]),
+                  if (index < _products.length - 1)
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -250,35 +381,13 @@ class _ProductsPageState extends State<ProductsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Products')),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search products...',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchController.text.isEmpty
-                    ? null
-                    : IconButton(
-                        onPressed: _searchController.clear,
-                        icon: const Icon(Icons.clear),
-                      ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ),
-          Expanded(child: _buildBody()),
+          _buildHeader(context),
+          _buildSearch(context),
+          const SizedBox(height: AppSpacing.md),
+          Expanded(child: _buildBody(context)),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openProductForm,
-        icon: const Icon(Icons.add_box),
-        label: const Text('Product'),
       ),
     );
   }
