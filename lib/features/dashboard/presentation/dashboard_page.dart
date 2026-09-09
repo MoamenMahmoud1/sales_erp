@@ -57,17 +57,17 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildHeader(BuildContext context) {
-    final colors = AppColors.of(context);
     final now = DateTime.now();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.lg,
+        AppSpacing.xl,
         AppSpacing.lg,
         AppSpacing.lg,
-        AppSpacing.md,
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
             child: Column(
@@ -75,24 +75,29 @@ class _DashboardPageState extends State<DashboardPage> {
               children: [
                 Text(
                   _greeting(now),
-                  style: AppTextStyles.title(context).copyWith(
-                    color: colors.textMuted,
-                    fontSize: 14,
+                  style: AppTextStyles.caption(context).copyWith(
+                    color: AppColors.of(context).textMuted,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 5),
                 Text('Sales overview', style: AppTextStyles.headline(context)),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   _formatDate(now),
                   style: AppTextStyles.caption(context).copyWith(
-                    color: colors.textMuted,
+                    color: AppColors.of(context).textMuted,
                   ),
                 ),
               ],
             ),
           ),
-          _ProtectedIndicator(colors: colors),
+          const SizedBox(width: AppSpacing.md),
+          FilledButton.icon(
+            onPressed: () => widget.onNavigateTo(1),
+            icon: const Icon(Icons.add_rounded, size: 19),
+            label: const Text('New sale'),
+          ),
         ],
       ),
     );
@@ -131,6 +136,10 @@ class _DashboardPageState extends State<DashboardPage> {
           RevenueSummaryCard(snapshot: snapshot),
           const SizedBox(height: AppSpacing.md),
           _buildKpis(context, snapshot),
+          if (snapshot.overdueInvoiceCount > 0) ...[
+            const SizedBox(height: AppSpacing.lg),
+            _buildOverdueNotice(context, snapshot),
+          ],
           const SizedBox(height: AppSpacing.xl),
           SectionHeader(
             title: 'Revenue — last 7 days',
@@ -139,14 +148,6 @@ class _DashboardPageState extends State<DashboardPage> {
           const SizedBox(height: AppSpacing.md),
           _RevenueBars(snapshot: snapshot),
           const SizedBox(height: AppSpacing.xl),
-          const SectionHeader(title: 'Quick actions'),
-          const SizedBox(height: AppSpacing.md),
-          _buildQuickActions(),
-          if (snapshot.overdueInvoiceCount > 0) ...[
-            const SizedBox(height: AppSpacing.xl),
-            _buildOverdueNotice(context, snapshot),
-          ],
-          const SizedBox(height: AppSpacing.xl),
           SectionHeader(
             title: 'Recent sales',
             actionLabel: 'View all',
@@ -154,8 +155,6 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
           const SizedBox(height: AppSpacing.md),
           _buildRecentSales(snapshot),
-          const SizedBox(height: AppSpacing.xl),
-          _buildInventorySummary(context, snapshot),
         ],
       ),
     );
@@ -186,30 +185,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildQuickActions() {
-    return Wrap(
-      spacing: AppSpacing.sm,
-      runSpacing: AppSpacing.sm,
-      children: [
-        OutlinedButton.icon(
-          onPressed: () => widget.onNavigateTo(1),
-          icon: const Icon(Icons.add_shopping_cart_outlined),
-          label: const Text('New sale'),
-        ),
-        OutlinedButton.icon(
-          onPressed: () => widget.onNavigateTo(2),
-          icon: const Icon(Icons.inventory_2_outlined),
-          label: const Text('Products'),
-        ),
-        OutlinedButton.icon(
-          onPressed: () => widget.onNavigateTo(3),
-          icon: const Icon(Icons.person_add_alt_1_outlined),
-          label: const Text('Customers'),
-        ),
-      ],
-    );
-  }
-
   Widget _buildOverdueNotice(
     BuildContext context,
     DashboardSnapshot snapshot,
@@ -217,7 +192,10 @@ class _DashboardPageState extends State<DashboardPage> {
     final colors = AppColors.of(context);
     return AppCard(
       color: colors.warningContainer,
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
       borderRadius: AppRadius.mdAll,
       child: Row(
         children: [
@@ -260,52 +238,15 @@ class _DashboardPageState extends State<DashboardPage> {
       );
     }
 
-    return Column(
-      children: [
-        for (final invoice in snapshot.recentInvoices.take(5))
-          RecentSaleTile(invoice: invoice),
-      ],
-    );
-  }
-
-  Widget _buildInventorySummary(
-    BuildContext context,
-    DashboardSnapshot snapshot,
-  ) {
-    final colors = AppColors.of(context);
     return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      child: Row(
+      padding: EdgeInsets.zero,
+      child: Column(
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: colors.infoContainer,
-              borderRadius: AppRadius.mdAll,
-            ),
-            child: Icon(Icons.inventory_outlined, color: colors.info),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${snapshot.productCount} products tracked',
-                  style: AppTextStyles.title(context).copyWith(fontSize: 15),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Keep stock updated as sales are recorded.',
-                  style: AppTextStyles.caption(context).copyWith(
-                    color: colors.textMuted,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          for (var index = 0; index < snapshot.recentInvoices.take(5).length; index++) ...[
+            RecentSaleTile(invoice: snapshot.recentInvoices[index]),
+            if (index < snapshot.recentInvoices.take(5).length - 1)
+              const Divider(height: 1, indent: 16, endIndent: 16),
+          ],
         ],
       ),
     );
@@ -329,39 +270,6 @@ class _DashboardPageState extends State<DashboardPage> {
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
     return months[month - 1];
-  }
-}
-
-class _ProtectedIndicator extends StatelessWidget {
-  final AppColors colors;
-
-  const _ProtectedIndicator({required this.colors});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: colors.successContainer,
-        borderRadius: AppRadius.mdAll,
-        border: Border.all(color: colors.success.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.lock_outline_rounded, size: 15, color: colors.success),
-          const SizedBox(width: 5),
-          Text(
-            'Protected',
-            style: TextStyle(
-              color: colors.onSuccessContainer,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
