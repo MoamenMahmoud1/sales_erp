@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Centralized spacing scale. Use these instead of scattered magic numbers.
+/// Shared spacing scale for every Sales ERP feature.
 class AppSpacing {
   AppSpacing._();
 
@@ -17,7 +17,7 @@ class AppSpacing {
   static const EdgeInsets cardCompact = EdgeInsets.all(md);
 }
 
-/// Centralized border-radius scale.
+/// Shared border-radius scale.
 class AppRadius {
   AppRadius._();
 
@@ -29,18 +29,18 @@ class AppRadius {
   static const double xxl = 24;
   static const double sheet = 28;
 
-  static BorderRadius xsAll = BorderRadius.circular(xs);
-  static BorderRadius smAll = BorderRadius.circular(sm);
-  static BorderRadius mdAll = BorderRadius.circular(md);
-  static BorderRadius lgAll = BorderRadius.circular(lg);
-  static BorderRadius xlAll = BorderRadius.circular(xl);
-  static BorderRadius xxlAll = BorderRadius.circular(xxl);
-  static BorderRadius sheetTop = const BorderRadius.vertical(
+  static const BorderRadius xsAll = BorderRadius.all(Radius.circular(xs));
+  static const BorderRadius smAll = BorderRadius.all(Radius.circular(sm));
+  static const BorderRadius mdAll = BorderRadius.all(Radius.circular(md));
+  static const BorderRadius lgAll = BorderRadius.all(Radius.circular(lg));
+  static const BorderRadius xlAll = BorderRadius.all(Radius.circular(xl));
+  static const BorderRadius xxlAll = BorderRadius.all(Radius.circular(xxl));
+  static const BorderRadius sheetTop = BorderRadius.vertical(
     top: Radius.circular(sheet),
   );
 }
 
-/// Centralized animation durations.
+/// Shared animation durations.
 class AppDurations {
   AppDurations._();
 
@@ -49,7 +49,7 @@ class AppDurations {
   static const Duration slow = Duration(milliseconds: 520);
 }
 
-/// Centralized typography helpers layered on the active [TextTheme].
+/// Typography helpers layered on the active Material text theme.
 class AppTextStyles {
   AppTextStyles._();
 
@@ -65,24 +65,22 @@ class AppTextStyles {
           );
 
   static TextStyle title(BuildContext context) =>
-      Theme.of(context)
-          .textTheme
-          .titleMedium!
-          .copyWith(fontWeight: FontWeight.w600);
+      Theme.of(context).textTheme.titleMedium!.copyWith(
+            fontWeight: FontWeight.w600,
+          );
 
   static TextStyle body(BuildContext context) =>
       Theme.of(context).textTheme.bodyMedium!;
 
   static TextStyle label(BuildContext context) =>
-      Theme.of(context)
-          .textTheme
-          .labelMedium!
-          .copyWith(fontWeight: FontWeight.w600);
+      Theme.of(context).textTheme.labelMedium!.copyWith(
+            fontWeight: FontWeight.w600,
+          );
 
   static TextStyle caption(BuildContext context) =>
       Theme.of(context).textTheme.bodySmall!;
 
-  /// Large, scannable numeric values (KPI hero, totals).
+  /// Large, scannable numeric values for totals and KPI figures.
   static TextStyle numeric(
     BuildContext context, {
     double size = 28,
