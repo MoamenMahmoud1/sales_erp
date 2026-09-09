@@ -21,126 +21,163 @@ class RevenueSummaryCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: AppRadius.xlAll,
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [colors.primaryDark, colors.primary],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          stops: const [0.0, 0.48, 1.0],
+          colors: [
+            colors.primaryLight,
+            colors.primary,
+            colors.primaryDark,
+          ],
         ),
         boxShadow: [
           BoxShadow(
-            color: colors.primaryDark.withValues(alpha: 0.24),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
+            color: colors.primaryDark.withValues(alpha: 0.22),
+            blurRadius: 18,
+            offset: const Offset(0, 9),
           ),
         ],
       ),
       child: ClipRRect(
         borderRadius: AppRadius.xlAll,
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xl),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: const Alignment(-1.0, -1.0),
+                    radius: 1.15,
+                    colors: [
+                      colors.onPrimary.withValues(alpha: 0.16),
+                      colors.onPrimary.withValues(alpha: 0.05),
+                      Colors.transparent,
+                    ],
+                    stops: const [0.0, 0.22, 0.62],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              top: 20,
+              bottom: 20,
+              width: 2,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colors.onPrimary.withValues(alpha: 0.28),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.xl),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Total revenue',
-                          style: TextStyle(
-                            color: colors.onPrimary.withValues(alpha: 0.76),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Total revenue',
+                              style: TextStyle(
+                                color: colors.onPrimary.withValues(alpha: 0.76),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _money(snapshot.totalRevenue),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.numeric(
+                                context,
+                                size: 32,
+                                weight: FontWeight.w900,
+                              ).copyWith(color: colors.onPrimary),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              '${snapshot.invoiceCount} invoices · ${_money(snapshot.todayRevenue)} today',
+                              style: TextStyle(
+                                color: colors.onPrimary.withValues(alpha: 0.72),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _money(snapshot.totalRevenue),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTextStyles.numeric(
-                            context,
-                            size: 32,
-                            weight: FontWeight.w900,
-                          ).copyWith(color: colors.onPrimary),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          '${snapshot.invoiceCount} invoices · ${_money(snapshot.todayRevenue)} today',
-                          style: TextStyle(
-                            color: colors.onPrimary.withValues(alpha: 0.72),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: colors.onPrimary.withValues(alpha: 0.13),
-                      borderRadius: AppRadius.mdAll,
-                      border: Border.all(
-                        color: colors.onPrimary.withValues(alpha: 0.18),
                       ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          isPositive
-                              ? Icons.arrow_upward_rounded
-                              : Icons.arrow_downward_rounded,
-                          size: 14,
-                          color: colors.onPrimary,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          '${trend.abs().toStringAsFixed(1)}%',
-                          style: TextStyle(
-                            color: colors.onPrimary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: colors.onPrimary.withValues(alpha: 0.12),
+                          borderRadius: AppRadius.mdAll,
+                          border: Border.all(
+                            color: colors.onPrimary.withValues(alpha: 0.18),
                           ),
                         ),
-                      ],
-                    ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isPositive
+                                  ? Icons.arrow_upward_rounded
+                                  : Icons.arrow_downward_rounded,
+                              size: 14,
+                              color: colors.onPrimary,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${trend.abs().toStringAsFixed(1)}%',
+                              style: TextStyle(
+                                color: colors.onPrimary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(child: _MiniBars(snapshot: snapshot)),
-                  const SizedBox(width: AppSpacing.lg),
-                  Column(
+                  const SizedBox(height: AppSpacing.lg),
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(
-                        '7-day revenue',
-                        style: TextStyle(
-                          color: colors.onPrimary.withValues(alpha: 0.68),
-                          fontSize: 11,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        _money(snapshot.lastSevenDaysRevenue),
-                        style: TextStyle(
-                          color: colors.onPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                        ),
+                      Expanded(child: _MiniBars(snapshot: snapshot)),
+                      const SizedBox(width: AppSpacing.lg),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '7-day revenue',
+                            style: TextStyle(
+                              color: colors.onPrimary.withValues(alpha: 0.68),
+                              fontSize: 11,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            _money(snapshot.lastSevenDaysRevenue),
+                            style: TextStyle(
+                              color: colors.onPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
