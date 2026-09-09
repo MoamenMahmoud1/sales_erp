@@ -24,11 +24,15 @@ class RevenueSummaryCard extends StatelessWidget {
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
           stops: const [0.0, 0.5, 1.0],
-          colors: [colors.heroStart, colors.heroMiddle, colors.heroEnd],
+          colors: [
+            colors.featuredStart,
+            colors.featuredMiddle,
+            colors.featuredEnd,
+          ],
         ),
         boxShadow: [
           BoxShadow(
-            color: colors.heroStart.withValues(alpha: 0.22),
+            color: colors.featuredStart.withValues(alpha: 0.22),
             blurRadius: 18,
             offset: const Offset(0, 9),
           ),
@@ -46,25 +50,13 @@ class RevenueSummaryCard extends StatelessWidget {
                       center: const Alignment(1.02, -1.02),
                       radius: 1.1,
                       colors: [
-                        colors.heroHighlight.withValues(alpha: 0.16),
-                        colors.heroHighlight.withValues(alpha: 0.05),
+                        colors.featuredHighlight.withValues(alpha: 0.16),
+                        colors.featuredHighlight.withValues(alpha: 0.05),
                         Colors.transparent,
                       ],
                       stops: const [0.0, 0.2, 0.58],
                     ),
                   ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: 0,
-              top: 20,
-              bottom: 20,
-              width: 2,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: colors.heroHighlight.withValues(alpha: 0.24),
-                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
