@@ -1,66 +1,65 @@
 # Sales ERP
 
-A production-oriented Sales ERP backend built with Django, Django REST Framework and ASGI, with a Flutter client in the same repository.
+A production-oriented **Flutter mobile client** for the Sales ERP platform, built for **sales representatives and warehouse staff**.
 
-## Backend
+The app is the mobile counterpart to the [`erp-api`](https://github.com/MoamenMahmoud1/erp-api) backend and shares the same business workflows used by the ERP web application.
 
-The backend lives in [`erp-api/`](erp-api/).
+## Features
 
-### Core domains
+- Authentication and secure session handling
+- Sales and customer workflows for field representatives
+- Product catalog and carton pricing
+- Payment collection workflows
+- Sales and inventory operations for warehouse teams
+- Coupons and related sales flows
+- Local data support and background work
+- Secure storage and device authentication
 
-- Accounts and authentication
-- Stateful authentication sessions with stateless JWT access tokens
-- Organization, employees and role-based permissions
-- Customers and suppliers
-- Products and carton pricing
-- Purchases with atomic stock intake
-- Invoices with immutable price snapshots and lifecycle transitions
-- Inventory balances plus an immutable stock-movement ledger
-- Payment collections with deterministic invoice allocation
-- Database-backed idempotency for financial writes
+## Architecture
 
-### Architecture
+The app follows a feature-oriented **Clean Architecture** structure:
 
-The API is served through ASGI. Async API endpoints delegate transactional business operations to synchronous service boundaries so Django database transactions remain well-defined. PostgreSQL is the system of record; Redis is used for cache/throttling workloads.
-
-Financial operations use database transactions and row-level locking. Current stock is derived from `StockBalance`, while `StockMovement` records the immutable inventory history.
-
-### Authentication
-
-Access requests use stateless JWT authentication. Authorization claims are embedded in the access token so ordinary API authentication does not require a user-table lookup. Refresh tokens and device/session state are stored in `AuthSession`.
-
-Refresh tokens are kept in an HttpOnly cookie, and sensitive authentication operations use CSRF protection and throttling.
-
-## Local backend setup
-
-```bash
-cd erp-api
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver
+```text
+lib/
+├── app/
+├── core/
+└── features/
+    ├── auth/
+    ├── customers/
+    ├── products/
+    ├── sales/
+    ├── payment/
+    ├── coupons/
+    └── car/
 ```
 
-For local PostgreSQL and Redis, the repository includes `erp-api/compose.yaml`.
+Networking is handled with **Dio**, with secure session/storage support, local persistence, and background task support where needed.
 
-## Testing
+## Tech Stack
 
-Run the complete suite from `erp-api/`:
+- Flutter / Dart
+- Dio
+- SQLite
+- Secure Storage
+- Local Authentication
+- Background WorkManager
+- Flutter testing and linting
 
-```bash
-python manage.py test
-```
-
-CI runs dependency checks, Django deployment checks, migration checks, the full test suite, Python compilation and Ruff against PostgreSQL and Redis service containers.
-
-## Production
-
-Use the production settings and the checked-in Gunicorn configuration:
+## Development
 
 ```bash
-DJANGO_SETTINGS_MODULE=core.settings.settings_prod \
-gunicorn core.asgi:application -c gunicorn.conf.py
+flutter pub get
+flutter analyze
+flutter test
+flutter run
 ```
 
-The production container runs as a non-root user and collects static files during image build. See `erp-api/Dockerfile` and `erp-api/gunicorn.conf.py` for deployment configuration.
+## Related Repository
+
+**Backend + Web:** [`MoamenMahmoud1/erp-api`](https://github.com/MoamenMahmoud1/erp-api)
+
+Together, `sales_erp` and `erp-api` form the mobile and web/API sides of the same ERP platform.
+
+## License
+
+This repository is **proprietary**. All rights are reserved by the copyright holder. No permission is granted to use, copy, modify, distribute, publish, sublicense, or create derivative works from this code without prior written permission. See [`LICENSE`](LICENSE).
