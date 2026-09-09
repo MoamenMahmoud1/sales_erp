@@ -5,9 +5,9 @@ import '../theme/app_tokens.dart';
 
 /// Standard content surface for ERP screens.
 ///
-/// Visual treatment stays deliberately restrained: solid surface, compact
-/// radius, and a subtle border. Feature-specific decoration belongs in the
-/// feature widget rather than in the shared card primitive.
+/// The shared card owns structure only: a solid surface, compact radius,
+and a subtle border. Feature-specific decoration should live with the
+///feature that needs it rather than becoming a global styling escape hatch.
 class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -16,7 +16,6 @@ class AppCard extends StatelessWidget {
   final BorderRadius? borderRadius;
   final bool filled;
   final EdgeInsets? margin;
-  final Gradient? gradient;
 
   const AppCard({
     super.key,
@@ -27,7 +26,6 @@ class AppCard extends StatelessWidget {
     this.borderRadius,
     this.filled = true,
     this.margin,
-    this.gradient,
   });
 
   @override
@@ -42,8 +40,7 @@ class AppCard extends StatelessWidget {
       margin: margin,
       padding: padding,
       decoration: BoxDecoration(
-        color: gradient == null ? surfaceColor : null,
-        gradient: gradient,
+        color: surfaceColor,
         borderRadius: radius,
         border: filled ? Border.all(color: colors.divider) : null,
       ),
