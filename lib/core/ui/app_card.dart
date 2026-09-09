@@ -6,8 +6,8 @@ import '../theme/app_tokens.dart';
 /// Standard content surface for ERP screens.
 ///
 /// The shared card owns structure only: a solid surface, compact radius,
-and a subtle border. Feature-specific decoration should live with the
-///feature that needs it rather than becoming a global styling escape hatch.
+/// and a subtle border. Feature-specific decoration should live with the
+/// feature that needs it rather than becoming a global styling escape hatch.
 class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
