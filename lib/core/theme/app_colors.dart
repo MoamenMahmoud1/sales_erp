@@ -197,7 +197,7 @@ class AppColors {
     success: Color(0xFF76B996),
     onSuccess: Color(0xFF082316),
     successContainer: Color(0xFF2A4D3A),
-    onSuccessContainer: Color(0xFFD9EF E4),
+    onSuccessContainer: Color(0xFFD9EFE4),
     warning: Color(0xFFD3A25E),
     onWarning: Color(0xFF2D1D0B),
     warningContainer: Color(0xFF504026),
