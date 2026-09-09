@@ -26,6 +26,7 @@ class _ProductsPageState extends State<ProductsPage> {
   final _repository = LocalProductRepository();
   final _searchController = TextEditingController();
 
+  List<Product> _allProducts = [];
   List<Product> _products = [];
   bool _isLoading = true;
   String? _errorMessage;
@@ -49,16 +50,14 @@ class _ProductsPageState extends State<ProductsPage> {
 
   void _onSearchChanged() {
     final query = _searchController.text.trim().toLowerCase();
-    if (query.isEmpty) {
-      _loadProducts();
-      return;
-    }
+    final filtered = query.isEmpty
+        ? _allProducts
+        : _allProducts.where((product) {
+            return product.name.toLowerCase().contains(query);
+          }).toList();
 
-    setState(() {
-      _products = _products.where((product) {
-        return product.name.toLowerCase().contains(query);
-      }).toList();
-    });
+    if (!mounted) return;
+    setState(() => _products = filtered);
   }
 
   Future<void> _loadProducts() async {
@@ -73,9 +72,10 @@ class _ProductsPageState extends State<ProductsPage> {
       final products = await _dataSource.getProducts();
       if (!mounted) return;
       setState(() {
-        _products = products;
+        _allProducts = products;
         _isLoading = false;
       });
+      _onSearchChanged();
     } catch (_) {
       if (!mounted) return;
       setState(() {
