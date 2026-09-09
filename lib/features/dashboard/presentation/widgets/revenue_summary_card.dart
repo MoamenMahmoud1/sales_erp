@@ -23,7 +23,7 @@ class RevenueSummaryCard extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
-          stops: const [0.0, 0.48, 1.0],
+          stops: const [0.0, 0.5, 1.0],
           colors: [colors.heroStart, colors.heroMiddle, colors.heroEnd],
         ),
         boxShadow: [
@@ -43,14 +43,14 @@ class RevenueSummaryCard extends StatelessWidget {
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
-                      center: const Alignment(-1.04, -1.02),
-                      radius: 1.08,
+                      center: const Alignment(1.02, -1.02),
+                      radius: 1.1,
                       colors: [
-                        colors.heroHighlight.withValues(alpha: 0.18),
-                        colors.heroHighlight.withValues(alpha: 0.06),
+                        colors.heroHighlight.withValues(alpha: 0.16),
+                        colors.heroHighlight.withValues(alpha: 0.05),
                         Colors.transparent,
                       ],
-                      stops: const [0.0, 0.18, 0.56],
+                      stops: const [0.0, 0.2, 0.58],
                     ),
                   ),
                 ),
@@ -63,7 +63,7 @@ class RevenueSummaryCard extends StatelessWidget {
               width: 2,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: colors.heroHighlight.withValues(alpha: 0.34),
+                  color: colors.heroHighlight.withValues(alpha: 0.24),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
