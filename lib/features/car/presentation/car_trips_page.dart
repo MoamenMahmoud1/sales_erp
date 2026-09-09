@@ -3,10 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/repositories/app_services.dart';
-import '../../../core/ui/app_card.dart';
 import '../../../core/ui/day_summary_section.dart';
 import '../../../core/ui/empty_state.dart';
-import '../../../core/ui/status_badge.dart';
 import '../application/usecases/confirm_car_trip.dart';
 import '../domain/entities/car_payment_status.dart';
 import '../domain/entities/car_trip.dart';
@@ -17,81 +15,89 @@ import '../domain/services/car_calculator.dart';
 import '../domain/services/car_payment_evaluator.dart';
 import 'car_trip_details_page.dart';
 import 'car_trip_editor_page.dart';
+import 'car_trip_list_tile.dart';
 
 class CarTripsPage extends StatefulWidget {
   const CarTripsPage({super.key});
 
   @override
-  State<CarTripsPage> createState() => _CarTripsPageV4State();
+  State<CarTripsPage> createState() => _CarTripsPageState();
 }
 
-class _CarTripsPageV4State extends State<CarTripsPage> {
+class _CarTripsPageState extends State<CarTripsPage> {
   final _repository = AppServices.instance.carTripRepository;
   final _searchController = TextEditingController();
   final _calculator = const CarCalculator();
-  final _evaluator = const CarPaymentEvaluator();
-  late final ConfirmCarTrip _confirm = ConfirmCarTrip(_repository);
+  final _paymentEvaluator = const CarPaymentEvaluator();
+  late final ConfirmCarTrip _confirmCarTrip = ConfirmCarTrip(_repository);
 
-  late final StreamSubscription<CarTrip> _tripChanges;
-  late final StreamSubscription<int> _tripDeletions;
+  late final StreamSubscription<CarTrip> _tripChangesSubscription;
+  late final StreamSubscription<int> _tripDeletionsSubscription;
 
   List<CarTripSummaryView> _trips = const [];
-  _TripFilter _filter = _TripFilter.all;
+  TripListFilter _filter = TripListFilter.all;
   bool _loading = true;
   String? _error;
   int? _deletingTripId;
   int? _confirmingTripId;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_refresh);
-    _tripChanges = AppServices.instance.carTripEvents.stream.listen(_onTripChanged);
-    _tripDeletions = AppServices.instance.carTripEvents.deletionStream.listen(_onTripDeleted);
+    _tripChangesSubscription =
+        AppServices.instance.carTripEvents.stream.listen(_onTripChanged);
+    _tripDeletionsSubscription = AppServices.instance.carTripEvents.deletionStream
+        .listen(_onTripDeleted);
     _refresh();
   }
 
   @override
   void dispose() {
-    _tripChanges.cancel();
-    _tripDeletions.cancel();
+    _tripChangesSubscription.cancel();
+    _tripDeletionsSubscription.cancel();
     _searchController.removeListener(_refresh);
     _searchController.dispose();
     super.dispose();
   }
 
-  CarTripFilter _query() {
+  CarTripFilter _buildFilter() {
     final text = _searchController.text.trim();
     final query = text.isEmpty ? null : text;
-    switch (_filter) {
-      case _TripFilter.all:
-        return CarTripFilter(query: query);
-      case _TripFilter.drafts:
-        return CarTripFilter(status: CarTripStatus.open, query: query);
-      case _TripFilter.confirmed:
-        return CarTripFilter(status: CarTripStatus.closed, query: query);
-      case _TripFilter.paid:
-        return CarTripFilter(paymentStatus: CarPaymentStatus.paid, query: query);
-      case _TripFilter.partial:
-        return CarTripFilter(paymentStatus: CarPaymentStatus.partiallyPaid, query: query);
-      case _TripFilter.unpaid:
-        return CarTripFilter(paymentStatus: CarPaymentStatus.unpaid, query: query);
-      case _TripFilter.overdue:
-        return CarTripFilter(paymentStatus: CarPaymentStatus.overdue, query: query);
-    }
+
+    return switch (_filter) {
+      TripListFilter.all => CarTripFilter(query: query),
+      TripListFilter.drafts =>
+        CarTripFilter(status: CarTripStatus.open, query: query),
+      TripListFilter.confirmed =>
+        CarTripFilter(status: CarTripStatus.closed, query: query),
+      TripListFilter.paid =>
+        CarTripFilter(paymentStatus: CarPaymentStatus.paid, query: query),
+      TripListFilter.partial => CarTripFilter(
+          paymentStatus: CarPaymentStatus.partiallyPaid,
+          query: query,
+        ),
+      TripListFilter.unpaid =>
+        CarTripFilter(paymentStatus: CarPaymentStatus.unpaid, query: query),
+      TripListFilter.overdue =>
+        CarTripFilter(paymentStatus: CarPaymentStatus.overdue, query: query),
+    };
   }
 
   Future<void> _refresh() async {
+    final generation = ++_loadGeneration;
+
     try {
-      final trips = await _repository.getTripSummaries(filter: _query());
-      if (!mounted) return;
+      final trips = await _repository.getTripSummaries(filter: _buildFilter());
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _trips = List.unmodifiable(trips);
         _loading = false;
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _loading = false;
         _error = '$error';
@@ -99,8 +105,8 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
     }
   }
 
-  CarTripSummaryView _project(CarTrip trip) {
-    final summary = _calculator.summary(trip);
+  CarTripSummaryView _toSummary(CarTrip trip) {
+    final totals = _calculator.summary(trip);
     return CarTripSummaryView(
       id: trip.id,
       displayNumber: trip.displayNumber,
@@ -110,15 +116,15 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
       closedAt: trip.closedAt,
       dueDate: trip.dueDate,
       status: trip.status,
-      totalLoadedCartons: summary.totalLoadedCartons,
-      totalReturnedCartons: summary.totalReturnedCartons,
-      totalSoldCartons: summary.totalSoldCartons,
-      totalReturnedValue: summary.totalReturnedValue,
-      grossSubtotal: summary.grossSubtotal,
-      productDiscountTotal: summary.productDiscountTotal,
-      subtotalAfterProducts: summary.subtotalAfterProducts,
-      globalDiscountAmount: summary.globalDiscountAmount,
-      finalValue: summary.finalTotalSoldValue,
+      totalLoadedCartons: totals.totalLoadedCartons,
+      totalReturnedCartons: totals.totalReturnedCartons,
+      totalSoldCartons: totals.totalSoldCartons,
+      totalReturnedValue: totals.totalReturnedValue,
+      grossSubtotal: totals.grossSubtotal,
+      productDiscountTotal: totals.productDiscountTotal,
+      subtotalAfterProducts: totals.subtotalAfterProducts,
+      globalDiscountAmount: totals.globalDiscountAmount,
+      finalValue: totals.finalTotalSoldValue,
       paidCash: trip.payment.cashAmount,
       paidTransfer: trip.payment.transferAmount,
     );
@@ -126,60 +132,65 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
 
   void _onTripChanged(CarTrip trip) {
     if (!mounted || trip.id <= 0) return;
-    final view = _project(trip);
-    final next = [..._trips]..removeWhere((item) => item.id == trip.id);
-    if (_matches(view)) next.add(view);
-    next.sort((a, b) => b.openedAt.compareTo(a.openedAt));
-    setState(() => _trips = List.unmodifiable(next));
+
+    final summary = _toSummary(trip);
+    final nextTrips = [..._trips]..removeWhere((item) => item.id == trip.id);
+    if (_matchesCurrentFilter(summary)) nextTrips.add(summary);
+    nextTrips.sort((a, b) => b.openedAt.compareTo(a.openedAt));
+
+    setState(() => _trips = List.unmodifiable(nextTrips));
   }
 
   void _onTripDeleted(int id) {
     if (!mounted) return;
-    final next = [..._trips]..removeWhere((trip) => trip.id == id);
-    if (next.length != _trips.length) {
-      setState(() => _trips = List.unmodifiable(next));
+    final nextTrips = [..._trips]..removeWhere((trip) => trip.id == id);
+    if (nextTrips.length != _trips.length) {
+      setState(() => _trips = List.unmodifiable(nextTrips));
     }
   }
 
-  bool _matches(CarTripSummaryView trip) {
-    final q = _searchController.text.trim().toLowerCase();
-    if (q.isNotEmpty &&
-        !trip.displayNumber.toLowerCase().contains(q) &&
-        !trip.salesCarName.toLowerCase().contains(q) &&
-        !trip.warehouseName.toLowerCase().contains(q)) {
+  bool _matchesCurrentFilter(CarTripSummaryView trip) {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query.isNotEmpty &&
+        !trip.displayNumber.toLowerCase().contains(query) &&
+        !trip.salesCarName.toLowerCase().contains(query) &&
+        !trip.warehouseName.toLowerCase().contains(query)) {
       return false;
     }
-    final status = trip.paymentStatus(_evaluator, DateTime.now());
-    switch (_filter) {
-      case _TripFilter.all:
-        return true;
-      case _TripFilter.drafts:
-        return trip.status == CarTripStatus.open;
-      case _TripFilter.confirmed:
-        return trip.status == CarTripStatus.closed;
-      case _TripFilter.paid:
-        return status == CarPaymentStatus.paid;
-      case _TripFilter.partial:
-        return status == CarPaymentStatus.partiallyPaid;
-      case _TripFilter.unpaid:
-        return status == CarPaymentStatus.unpaid;
-      case _TripFilter.overdue:
-        return status == CarPaymentStatus.overdue;
-    }
+
+    final paymentStatus = trip.paymentStatus(_paymentEvaluator, DateTime.now());
+    return switch (_filter) {
+      TripListFilter.all => true,
+      TripListFilter.drafts => trip.status == CarTripStatus.open,
+      TripListFilter.confirmed => trip.status == CarTripStatus.closed,
+      TripListFilter.paid => paymentStatus == CarPaymentStatus.paid,
+      TripListFilter.partial =>
+        paymentStatus == CarPaymentStatus.partiallyPaid,
+      TripListFilter.unpaid => paymentStatus == CarPaymentStatus.unpaid,
+      TripListFilter.overdue => paymentStatus == CarPaymentStatus.overdue,
+    };
   }
 
   Future<void> _confirmDraft(CarTripSummaryView summary) async {
     if (_confirmingTripId != null || summary.status != CarTripStatus.open) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Confirm draft?'),
         content: Text(
-          'Confirm ${summary.displayNumber} for ${summary.salesCarName}? This will finalize the Car trip and it will no longer be a draft.',
+          'Confirm ${summary.displayNumber} for ${summary.salesCarName}? '
+          'This will finalize the trip and it will no longer be a draft.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirm')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Confirm'),
+          ),
         ],
       ),
     );
@@ -189,15 +200,22 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
     try {
       final draft = await _repository.getTripById(summary.id);
       if (draft == null) throw StateError('Draft was not found.');
-      final persisted = await _confirm(draft, triggeredBy: 'draft_confirm');
+
+      final persisted = await _confirmCarTrip(
+        draft,
+        triggeredBy: 'draft_confirm',
+      );
       AppServices.instance.carTripEvents.publish(persisted);
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${persisted.displayNumber} confirmed successfully.')),
       );
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')),
+        );
       }
     } finally {
       if (mounted) setState(() => _confirmingTripId = null);
@@ -206,16 +224,25 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
 
   Future<void> _deleteTrip(CarTripSummaryView trip) async {
     if (_deletingTripId != null || _confirmingTripId != null) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Delete trip?'),
         content: Text(
-          'Delete ${_dayLabel(trip.openedAt)} for ${trip.salesCarName} · ${trip.warehouseName}? Linked payments will also be removed and shared balances recalculated.',
+          'Delete ${_dayLabel(trip.openedAt)} for ${trip.salesCarName} · '
+          '${trip.warehouseName}? Linked payments will also be removed and '
+          'shared balances recalculated.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton.tonal(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -229,46 +256,60 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
         recalculatedTrips: result.recalculatedTrips,
         deletedPaymentTransactionIds: result.deletedPaymentTransactionIds,
       );
+
       if (!mounted) return;
-      final count = result.deletedPaymentTransactionIds.length;
+      final paymentCount = result.deletedPaymentTransactionIds.length;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            count == 0 ? 'Trip deleted.' : 'Trip deleted with $count linked payment${count == 1 ? '' : 's'}. Balances recalculated.',
+            paymentCount == 0
+                ? 'Trip deleted.'
+                : 'Trip deleted with $paymentCount linked payment${paymentCount == 1 ? '' : 's'}. Balances recalculated.',
           ),
         ),
       );
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _deletingTripId = null);
     }
   }
 
   String _dayKey(DateTime value) {
-    final d = value.toLocal();
-    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final local = value.toLocal();
+    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
   }
 
   String _dayLabel(DateTime value) {
-    final d = value.toLocal();
+    final local = value.toLocal();
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final day = DateTime(d.year, d.month, d.day);
-    final formatted = '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+    final day = DateTime(local.year, local.month, local.day);
+    final formatted =
+        '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year}';
+
     if (day == today) return 'Today · $formatted';
-    if (day == today.subtract(const Duration(days: 1))) return 'Yesterday · $formatted';
+    if (day == today.subtract(const Duration(days: 1))) {
+      return 'Yesterday · $formatted';
+    }
     return formatted;
   }
 
-  String _money(int minor) => 'EGP ${(minor / 100).toStringAsFixed(2)}';
+  String _money(int minorUnits) =>
+      'EGP ${(minorUnits / 100).toStringAsFixed(2)}';
 
-  List<List<CarTripSummaryView>> _groups() {
+  List<List<CarTripSummaryView>> _groupedTrips() {
     final grouped = <String, List<CarTripSummaryView>>{};
     for (final trip in _trips) {
       grouped.putIfAbsent(_dayKey(trip.openedAt), () => []).add(trip);
     }
-    final groups = grouped.values.toList()..sort((a, b) => b.first.openedAt.compareTo(a.first.openedAt));
+
+    final groups = grouped.values.toList()
+      ..sort((a, b) => b.first.openedAt.compareTo(a.first.openedAt));
     for (final group in groups) {
       group.sort((a, b) => b.openedAt.compareTo(a.openedAt));
     }
@@ -277,7 +318,10 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading && _trips.isEmpty) return const Center(child: CircularProgressIndicator());
+    if (_loading && _trips.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     if (_error != null && _trips.isEmpty) {
       return Center(
         child: EmptyState(
@@ -290,7 +334,7 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
       );
     }
 
-    final groups = _groups();
+    final groups = _groupedTrips();
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
@@ -298,9 +342,19 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
         children: [
           Row(
             children: [
-              const Expanded(child: Text('Car trips', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900))),
+              const Expanded(
+                child: Text(
+                  'Car trips',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+                ),
+              ),
               FilledButton.icon(
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CarTripEditorPage())),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CarTripEditorPage(),
+                  ),
+                ),
                 icon: const Icon(Icons.add_rounded),
                 label: const Text('New trip'),
               ),
@@ -321,7 +375,7 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
-                for (final filter in _TripFilter.values)
+                for (final filter in TripListFilter.values)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
@@ -344,12 +398,28 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
               message: 'Create a trip or adjust the current filter.',
             )
           else
-            for (var i = 0; i < groups.length; i++)
+            for (var index = 0; index < groups.length; index++)
               DaySummarySection(
-                title: _dayLabel(groups[i].first.openedAt),
-                summary: _daySummary(groups[i]),
-                initiallyExpanded: i == 0,
-                children: [for (final trip in groups[i]) _tripCard(trip)],
+                title: _dayLabel(groups[index].first.openedAt),
+                summary: _daySummary(groups[index]),
+                initiallyExpanded: index == 0,
+                children: [
+                  for (final trip in groups[index])
+                    CarTripListTile(
+                      trip: trip,
+                      paymentEvaluator: _paymentEvaluator,
+                      deleting: _deletingTripId == trip.id,
+                      confirming: _confirmingTripId == trip.id,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CarTripDetailsPage(tripId: trip.id),
+                        ),
+                      ),
+                      onConfirm: () => _confirmDraft(trip),
+                      onDelete: () => _deleteTrip(trip),
+                    ),
+                ],
               ),
         ],
       ),
@@ -357,96 +427,34 @@ class _CarTripsPageV4State extends State<CarTripsPage> {
   }
 
   String _daySummary(List<CarTripSummaryView> trips) {
-    final loaded = trips.fold<int>(0, (sum, trip) => sum + trip.totalLoadedCartons);
-    final returned = trips.fold<int>(0, (sum, trip) => sum + trip.totalReturnedCartons);
-    final sold = trips.fold<int>(0, (sum, trip) => sum + trip.totalSoldCartons);
-    final value = trips.fold<int>(0, (sum, trip) => sum + trip.finalValue.minorUnits);
-    final drafts = trips.where((trip) => trip.status == CarTripStatus.open).length;
-    final suffix = drafts == 0 ? '' : ' · $drafts draft${drafts == 1 ? '' : 's'}';
-    return '${trips.length} trip${trips.length == 1 ? '' : 's'}$suffix · $loaded loaded · $returned returned · $sold sold · ${_money(value)}';
-  }
-
-  Widget _tripCard(CarTripSummaryView trip) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDraft = trip.status == CarTripStatus.open;
-    final status = trip.paymentStatus(_evaluator, DateTime.now());
-    final deleting = _deletingTripId == trip.id;
-    final confirming = _confirmingTripId == trip.id;
-    final paymentBadge = switch (status) {
-      CarPaymentStatus.paid => (StatusType.success, 'Paid'),
-      CarPaymentStatus.partiallyPaid => (StatusType.warning, 'Partial'),
-      CarPaymentStatus.unpaid => (StatusType.neutral, 'Unpaid'),
-      CarPaymentStatus.overdue => (StatusType.error, 'Overdue'),
-    };
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: AppCard(
-        padding: const EdgeInsets.all(14),
-        onTap: deleting || confirming ? null : () => Navigator.push(context, MaterialPageRoute(builder: (_) => CarTripDetailsPage(tripId: trip.id))),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(16)),
-              child: Icon(Icons.local_shipping_rounded, color: scheme.primary),
-            ),
-            const SizedBox(width: 11),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_dayLabel(trip.openedAt), style: const TextStyle(fontWeight: FontWeight.w900)),
-                const SizedBox(height: 3),
-                Text('${trip.salesCarName} · ${trip.warehouseName}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
-                const SizedBox(height: 4),
-                Text('${trip.totalLoadedCartons} loaded · ${trip.totalReturnedCartons} returned · ${trip.totalSoldCartons} sold', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11)),
-              ]),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(_money(trip.finalValue.minorUnits), style: const TextStyle(fontWeight: FontWeight.w900)),
-                const SizedBox(height: 4),
-                StatusBadge(
-                  type: isDraft ? StatusType.warning : paymentBadge.$1,
-                  label: isDraft ? 'Draft' : paymentBadge.$2,
-                ),
-                if (isDraft) ...[
-                  const SizedBox(height: 2),
-                  TextButton.icon(
-                    onPressed: confirming || _confirmingTripId != null || _deletingTripId != null
-                        ? null
-                        : () => _confirmDraft(trip),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 7),
-                    ),
-                    icon: confirming
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.check_circle_outline_rounded, size: 17),
-                    label: Text(confirming ? 'Confirming' : 'Confirm'),
-                  ),
-                ],
-                IconButton(
-                  tooltip: 'Delete trip',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: deleting || confirming ? null : () => _deleteTrip(trip),
-                  icon: deleting
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.delete_outline_rounded),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+    final loaded = trips.fold<int>(
+      0,
+      (sum, trip) => sum + trip.totalLoadedCartons,
     );
+    final returned = trips.fold<int>(
+      0,
+      (sum, trip) => sum + trip.totalReturnedCartons,
+    );
+    final sold = trips.fold<int>(
+      0,
+      (sum, trip) => sum + trip.totalSoldCartons,
+    );
+    final value = trips.fold<int>(
+      0,
+      (sum, trip) => sum + trip.finalValue.minorUnits,
+    );
+    final drafts =
+        trips.where((trip) => trip.status == CarTripStatus.open).length;
+    final draftSuffix = drafts == 0
+        ? ''
+        : ' · $drafts draft${drafts == 1 ? '' : 's'}';
+
+    return '${trips.length} trip${trips.length == 1 ? '' : 's'}$draftSuffix · '
+        '$loaded loaded · $returned returned · $sold sold · ${_money(value)}';
   }
 }
 
-enum _TripFilter {
+enum TripListFilter {
   all('All'),
   drafts('Drafts'),
   confirmed('Confirmed'),
@@ -455,6 +463,7 @@ enum _TripFilter {
   unpaid('Unpaid'),
   overdue('Overdue');
 
-  const _TripFilter(this.label);
+  const TripListFilter(this.label);
+
   final String label;
 }
