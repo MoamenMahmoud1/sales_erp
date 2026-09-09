@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../../core/repositories/app_services.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../dashboard/domain/dashboard_repository.dart';
 import '../../dashboard/presentation/dashboard_controller.dart';
 import '../../dashboard/presentation/dashboard_page.dart';
 import '../../products/domain/product_repository.dart';
