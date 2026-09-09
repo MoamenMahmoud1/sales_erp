@@ -36,9 +36,9 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  late int _index;
+  late int _selectedTabIndex;
   late final DashboardController _dashboardController;
-  late final List<Widget> _pages;
+  late final List<Widget> _navigationPages;
 
   static const _navigationItems = [
     AppNavItem(
@@ -71,11 +71,11 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    _index = widget.initialIndex;
+    _selectedTabIndex = widget.initialIndex;
     _dashboardController = DashboardController(
       repository: AppServices.instance.dashboardRepository,
     );
-    _pages = [
+    _navigationPages = [
       DashboardPage(
         onNavigateTo: _goToTab,
         controller: _dashboardController,
@@ -98,7 +98,7 @@ class _AppShellState extends State<AppShell> {
     super.dispose();
   }
 
-  void _goToTab(int index) => setState(() => _index = index);
+  void _goToTab(int index) => setState(() => _selectedTabIndex = index);
 
   Future<void> _openCarApp() async {
     await Navigator.of(context).push(
@@ -147,7 +147,7 @@ class _AppShellState extends State<AppShell> {
         body: Row(
           children: [
             NavigationRail(
-              selectedIndex: _index,
+              selectedIndex: _selectedTabIndex,
               onDestinationSelected: _goToTab,
               backgroundColor: colors.surfaceMuted,
               indicatorColor: colors.primaryContainer,
@@ -162,7 +162,10 @@ class _AppShellState extends State<AppShell> {
               ],
             ),
             Expanded(
-              child: IndexedStack(index: _index, children: _pages),
+              child: IndexedStack(
+                index: _selectedTabIndex,
+                children: _navigationPages,
+              ),
             ),
           ],
         ),
@@ -173,7 +176,10 @@ class _AppShellState extends State<AppShell> {
       backgroundColor: colors.background,
       body: Stack(
         children: [
-          IndexedStack(index: _index, children: _pages),
+          IndexedStack(
+            index: _selectedTabIndex,
+            children: _navigationPages,
+          ),
           if (!keyboardOpen)
             Positioned(
               left: 16,
@@ -182,7 +188,7 @@ class _AppShellState extends State<AppShell> {
               child: SafeArea(
                 minimum: const EdgeInsets.only(bottom: 12),
                 child: AppBottomNav(
-                  index: _index,
+                  index: _selectedTabIndex,
                   items: _navigationItems,
                   onChanged: _goToTab,
                 ),
