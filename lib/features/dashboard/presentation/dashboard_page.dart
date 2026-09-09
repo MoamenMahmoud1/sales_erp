@@ -9,6 +9,8 @@ import '../../../core/ui/section_header.dart';
 import '../../../core/ui/status_badge.dart';
 import '../domain/dashboard_snapshot.dart';
 import 'dashboard_controller.dart';
+import 'widgets/recent_sale_tile.dart';
+import 'widgets/revenue_summary_card.dart';
 
 class DashboardPage extends StatefulWidget {
   final ValueChanged<int> onNavigateTo;
@@ -35,24 +37,22 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: widget.controller,
-      builder: (context, _) {
-        return Scaffold(
-          body: SafeArea(
-            bottom: false,
-            child: RefreshIndicator(
-              onRefresh: widget.controller.load,
-              child: CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
-                  SliverToBoxAdapter(child: _buildHeader(context)),
-                  SliverToBoxAdapter(child: _buildContent(context)),
-                  const SliverToBoxAdapter(child: SizedBox(height: 32)),
-                ],
-              ),
+      builder: (context, _) => Scaffold(
+        body: SafeArea(
+          bottom: false,
+          child: RefreshIndicator(
+            onRefresh: widget.controller.load,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(child: _buildHeader(context)),
+                SliverToBoxAdapter(child: _buildContent(context)),
+                const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xxl)),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -65,7 +65,7 @@ class _DashboardPageState extends State<DashboardPage> {
         AppSpacing.lg,
         AppSpacing.lg,
         AppSpacing.lg,
-        AppSpacing.sm,
+        AppSpacing.md,
       ),
       child: Row(
         children: [
@@ -77,12 +77,12 @@ class _DashboardPageState extends State<DashboardPage> {
                   _greeting(now),
                   style: AppTextStyles.title(context).copyWith(
                     color: colors.textMuted,
-                    fontSize: 15,
+                    fontSize: 14,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text('Sales overview', style: AppTextStyles.headline(context)),
                 const SizedBox(height: 3),
+                Text('Sales overview', style: AppTextStyles.headline(context)),
+                const SizedBox(height: 2),
                 Text(
                   _formatDate(now),
                   style: AppTextStyles.caption(context).copyWith(
@@ -92,33 +92,14 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            decoration: BoxDecoration(
-              color: colors.surfaceMuted,
-              borderRadius: AppRadius.mdAll,
-              border: Border.all(color: colors.divider),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.lock_outline_rounded, size: 16, color: colors.success),
-                const SizedBox(width: 6),
-                Text(
-                  'Protected',
-                  style: AppTextStyles.label(context).copyWith(fontSize: 12),
-                ),
-              ],
-            ),
-          ),
+          _ProtectedIndicator(colors: colors),
         ],
       ),
     );
   }
 
   Widget _buildContent(BuildContext context) {
-    final controller = widget.controller;
-    switch (controller.status) {
+    switch (widget.controller.status) {
       case DashboardStatus.initial:
       case DashboardStatus.loading:
         return const Padding(
@@ -131,40 +112,36 @@ class _DashboardPageState extends State<DashboardPage> {
           child: EmptyState(
             icon: Icons.error_outline_rounded,
             title: 'Dashboard unavailable',
-            message: controller.errorMessage ?? 'Please try again.',
+            message: widget.controller.errorMessage ?? 'Please try again.',
             actionLabel: 'Retry',
-            onAction: controller.load,
+            onAction: widget.controller.load,
           ),
         );
       case DashboardStatus.ready:
-        final snapshot = controller.snapshot!;
-        return _buildDashboard(context, snapshot);
+        return _buildDashboard(context, widget.controller.snapshot!);
     }
   }
 
-  Widget _buildDashboard(
-    BuildContext context,
-    DashboardSnapshot snapshot,
-  ) {
+  Widget _buildDashboard(BuildContext context, DashboardSnapshot snapshot) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      padding: AppSpacing.screen,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildRevenueSummary(context, snapshot),
+          RevenueSummaryCard(snapshot: snapshot),
           const SizedBox(height: AppSpacing.md),
-          _buildKpis(snapshot),
+          _buildKpis(context, snapshot),
           const SizedBox(height: AppSpacing.xl),
           SectionHeader(
             title: 'Revenue — last 7 days',
             subtitle: _money(snapshot.lastSevenDaysRevenue),
           ),
           const SizedBox(height: AppSpacing.md),
-          _buildRevenueChart(context, snapshot),
+          _RevenueBars(snapshot: snapshot),
           const SizedBox(height: AppSpacing.xl),
           const SectionHeader(title: 'Quick actions'),
           const SizedBox(height: AppSpacing.md),
-          _buildQuickActions(context),
+          _buildQuickActions(),
           if (snapshot.overdueInvoiceCount > 0) ...[
             const SizedBox(height: AppSpacing.xl),
             _buildOverdueNotice(context, snapshot),
@@ -176,7 +153,7 @@ class _DashboardPageState extends State<DashboardPage> {
             onAction: () => widget.onNavigateTo(1),
           ),
           const SizedBox(height: AppSpacing.md),
-          _buildRecentSales(context, snapshot),
+          _buildRecentSales(snapshot),
           const SizedBox(height: AppSpacing.xl),
           _buildInventorySummary(context, snapshot),
         ],
@@ -184,89 +161,14 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildRevenueSummary(
-    BuildContext context,
-    DashboardSnapshot snapshot,
-  ) {
-    final colors = AppColors.of(context);
-    final isPositive = snapshot.revenueTrendPercentage >= 0;
-
-    return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.xl),
-      color: colors.surface,
-      borderRadius: AppRadius.lgAll,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Total revenue',
-                  style: AppTextStyles.label(context).copyWith(
-                    color: colors.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _money(snapshot.totalRevenue, 2),
-                  style: AppTextStyles.numeric(context, size: 32),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${snapshot.invoiceCount} invoices · ${_money(snapshot.todayRevenue, 2)} today',
-                  style: AppTextStyles.caption(context).copyWith(
-                    color: colors.textMuted,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-            decoration: BoxDecoration(
-              color: isPositive ? colors.successContainer : colors.errorContainer,
-              borderRadius: AppRadius.mdAll,
-              border: Border.all(
-                color: (isPositive ? colors.success : colors.error)
-                    .withValues(alpha: .35),
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  isPositive
-                      ? Icons.arrow_upward_rounded
-                      : Icons.arrow_downward_rounded,
-                  size: 14,
-                  color: isPositive ? colors.success : colors.error,
-                ),
-                const SizedBox(width: 3),
-                Text(
-                  '${snapshot.revenueTrendPercentage.abs().toStringAsFixed(1)}%',
-                  style: TextStyle(
-                    color: isPositive ? colors.success : colors.error,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildKpis(DashboardSnapshot snapshot) {
+  Widget _buildKpis(BuildContext context, DashboardSnapshot snapshot) {
     return Row(
       children: [
         Expanded(
           child: KpiCard(
             title: 'Products',
             value: '${snapshot.productCount}',
+            subtitle: 'Tracked products',
             icon: Icons.inventory_2_outlined,
           ),
         ),
@@ -275,70 +177,16 @@ class _DashboardPageState extends State<DashboardPage> {
           child: KpiCard(
             title: 'Customers',
             value: '${snapshot.customerCount}',
+            subtitle: 'Active customer records',
             icon: Icons.people_outline_rounded,
+            accentColor: AppColors.of(context).secondary,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildRevenueChart(
-    BuildContext context,
-    DashboardSnapshot snapshot,
-  ) {
-    final colors = AppColors.of(context);
-    final maximumRevenue = snapshot.maximumDailyRevenue;
-
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.lg,
-        AppSpacing.lg,
-        AppSpacing.md,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          for (final point in snapshot.weeklyRevenue)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Column(
-                  children: [
-                    SizedBox(
-                      height: 72,
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Container(
-                          width: 12,
-                          height: (point.revenue / maximumRevenue).clamp(.02, 1) * 72,
-                          decoration: BoxDecoration(
-                            color: colors.primary,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(4),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _weekdayLabel(point.date),
-                      style: AppTextStyles.caption(context).copyWith(
-                        color: colors.textMuted,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActions(BuildContext context) {
+  Widget _buildQuickActions() {
     return Wrap(
       spacing: AppSpacing.sm,
       runSpacing: AppSpacing.sm,
@@ -389,20 +237,21 @@ class _DashboardPageState extends State<DashboardPage> {
                 const SizedBox(height: 2),
                 Text(
                   'Outstanding balance: ${_money(snapshot.outstandingAmount, 2)}',
-                  style: TextStyle(color: colors.onWarningContainer, fontSize: 13),
+                  style: TextStyle(
+                    color: colors.onWarningContainer,
+                    fontSize: 13,
+                  ),
                 ),
               ],
             ),
           ),
+          const StatusBadge(type: StatusType.warning, label: 'Action needed'),
         ],
       ),
     );
   }
 
-  Widget _buildRecentSales(
-    BuildContext context,
-    DashboardSnapshot snapshot,
-  ) {
+  Widget _buildRecentSales(DashboardSnapshot snapshot) {
     if (snapshot.recentInvoices.isEmpty) {
       return const EmptyState(
         icon: Icons.receipt_long_outlined,
@@ -413,8 +262,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
     return Column(
       children: [
-        for (final invoice in snapshot.recentInvoices)
-          _RecentSaleTile(invoice: invoice),
+        for (final invoice in snapshot.recentInvoices.take(5))
+          RecentSaleTile(invoice: invoice),
       ],
     );
   }
@@ -429,7 +278,9 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(9),
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               color: colors.infoContainer,
               borderRadius: AppRadius.mdAll,
@@ -473,101 +324,107 @@ class _DashboardPageState extends State<DashboardPage> {
       '${_monthName(date.month)} ${date.day}, ${date.year}';
 
   String _monthName(int month) {
-    const monthNames = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
-    return monthNames[month - 1];
-  }
-
-  String _weekdayLabel(DateTime date) {
-    const weekdayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-    return weekdayNames[date.weekday - 1];
+    return months[month - 1];
   }
 }
 
-class _RecentSaleTile extends StatelessWidget {
-  final DashboardInvoiceSummary invoice;
+class _ProtectedIndicator extends StatelessWidget {
+  final AppColors colors;
 
-  const _RecentSaleTile({required this.invoice});
+  const _ProtectedIndicator({required this.colors});
 
-  StatusType _statusType(String? status) => switch (status) {
-        'paid' => StatusType.success,
-        'pending' => StatusType.warning,
-        'overdue' => StatusType.error,
-        _ => StatusType.neutral,
-      };
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: colors.successContainer,
+        borderRadius: AppRadius.mdAll,
+        border: Border.all(color: colors.success.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.lock_outline_rounded, size: 15, color: colors.success),
+          const SizedBox(width: 5),
+          Text(
+            'Protected',
+            style: TextStyle(
+              color: colors.onSuccessContainer,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-  String _statusLabel(String? status) => switch (status) {
-        'paid' => 'Paid',
-        'pending' => 'Pending',
-        'overdue' => 'Overdue',
-        _ => 'Unknown',
-      };
+class _RevenueBars extends StatelessWidget {
+  final DashboardSnapshot snapshot;
+
+  const _RevenueBars({required this.snapshot});
+
+  String _weekdayLabel(DateTime date) {
+    const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    return labels[date.weekday - 1];
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: AppRadius.mdAll,
-        border: Border.all(color: colors.divider),
+    final maximum = snapshot.maximumDailyRevenue;
+
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.md,
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(
-            '#${invoice.id}',
-            style: AppTextStyles.label(context).copyWith(
-              color: colors.textSecondary,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  invoice.customerName,
-                  style: AppTextStyles.title(context).copyWith(fontSize: 14),
+          for (final point in snapshot.weeklyRevenue)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: 86,
+                      child: Align(
+                        alignment: Alignment.bottomCenter,
+                        child: FractionallySizedBox(
+                          heightFactor: (point.revenue / maximum).clamp(0.05, 1.0),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: colors.primary,
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(6),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      _weekdayLabel(point.date),
+                      style: AppTextStyles.caption(context).copyWith(
+                        color: colors.textMuted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '${invoice.createdAt.toLocal().month}/${invoice.createdAt.toLocal().day}',
-                  style: AppTextStyles.caption(context).copyWith(
-                    color: colors.textMuted,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                'EGP ${invoice.total.toStringAsFixed(0)}',
-                style: AppTextStyles.label(context).copyWith(fontSize: 13),
-              ),
-              const SizedBox(height: 4),
-              StatusBadge(
-                type: _statusType(invoice.paymentStatus),
-                label: _statusLabel(invoice.paymentStatus),
-              ),
-            ],
-          ),
         ],
       ),
     );
