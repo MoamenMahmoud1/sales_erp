@@ -16,12 +16,9 @@ class AppNavItem {
   });
 }
 
-/// Premium floating custom bottom navigation bar.
+/// Compact mobile navigation with a restrained selected state.
 ///
-/// - Floating rounded surface with subtle border + elevation.
-/// - Animated pill behind the active destination.
-/// - Clear selected/unselected icon & label states.
-/// - Safe-area and keyboard awareness is handled by the parent shell.
+/// The parent shell remains responsible for safe-area and keyboard handling.
 class AppBottomNav extends StatelessWidget {
   final int index;
   final ValueChanged<int> onChanged;
@@ -37,25 +34,17 @@ class AppBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
+
     return Container(
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.all(5),
       decoration: BoxDecoration(
-        color: colors.surfaceElevated,
-        borderRadius: AppRadius.xxlAll,
-        border: Border.all(color: colors.divider, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: colors.scrim.withValues(alpha: 0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: colors.surface,
+        borderRadius: AppRadius.xlAll,
+        border: Border.all(color: colors.divider),
       ),
       child: Row(
         children: [
-          for (var i = 0; i < items.length; i++) ...[
-            Expanded(child: _buildItem(context, i)),
-          ],
+          for (var i = 0; i < items.length; i++) Expanded(child: _buildItem(context, i)),
         ],
       ),
     );
@@ -70,15 +59,15 @@ class AppBottomNav extends StatelessWidget {
       selected: selected,
       label: item.label,
       button: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      child: InkWell(
+        borderRadius: AppRadius.lgAll,
         onTap: () => onChanged(i),
         child: AnimatedContainer(
           duration: AppDurations.normal,
-          curve: Curves.easeOut,
-          height: 52,
+          curve: Curves.easeOutCubic,
+          height: 50,
           decoration: BoxDecoration(
-            color: selected ? colors.primary : Colors.transparent,
+            color: selected ? colors.primaryContainer : Colors.transparent,
             borderRadius: AppRadius.lgAll,
           ),
           child: Padding(
@@ -90,25 +79,17 @@ class AppBottomNav extends StatelessWidget {
                 children: [
                   Icon(
                     selected ? item.selectedIcon : item.icon,
-                    size: 22,
-                    color: selected ? colors.onPrimary : colors.textSecondary,
+                    size: 21,
+                    color: selected ? colors.onPrimaryContainer : colors.textSecondary,
                   ),
-                  AnimatedSize(
-                    duration: AppDurations.normal,
-                    curve: Curves.easeOut,
-                    child: selected
-                        ? Padding(
-                            padding: const EdgeInsets.only(left: 6),
-                            child: Text(
-                              item.label,
-                              style: TextStyle(
-                                color: colors.onPrimary,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                              ),
-                            ),
-                          )
-                        : const SizedBox.shrink(),
+                  const SizedBox(width: 5),
+                  Text(
+                    item.label,
+                    style: TextStyle(
+                      color: selected ? colors.onPrimaryContainer : colors.textMuted,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
