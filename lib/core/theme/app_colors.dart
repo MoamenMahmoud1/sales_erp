@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
-/// Central semantic color system used across the application.
+/// Semantic color palette shared by every Sales ERP feature.
 ///
-/// Every widget reads colors from the active theme (via [Theme.of(context)])
-/// rather than hardcoding raw values. Each [AppColors] instance holds the
-/// full semantic palette for one of the three visual modes (light / mid / dark).
+/// Brand colors stay in one restrained blue-teal family across light, mid,
+/// and dark modes. Status colors communicate meaning independently of the
+/// brand, and surfaces/lines remain neutral so business data stays dominant.
 class AppColors {
-  // Brand / primary
   final Color primary;
   final Color onPrimary;
   final Color primaryContainer;
@@ -14,17 +13,13 @@ class AppColors {
   final Color primaryDark;
   final Color primaryLight;
 
-  // Secondary / muted brand
   final Color secondary;
   final Color onSecondary;
-
-  // Warm accent (used for highlights & hero elements)
   final Color accent;
   final Color onAccent;
   final Color accentContainer;
   final Color onAccentContainer;
 
-  // Semantic status colors
   final Color success;
   final Color onSuccess;
   final Color successContainer;
@@ -42,18 +37,15 @@ class AppColors {
   final Color infoContainer;
   final Color onInfoContainer;
 
-  // Surfaces
   final Color background;
   final Color surface;
   final Color surfaceElevated;
   final Color surfaceMuted;
   final Color scrim;
 
-  // Lines
   final Color border;
   final Color divider;
 
-  // Typography
   final Color textPrimary;
   final Color textSecondary;
   final Color textMuted;
@@ -99,195 +91,186 @@ class AppColors {
     required this.textSecondary,
     required this.textMuted,
     required this.textDisabled,
-});
+  });
 
-  /// Smoothly interpolates every semantic color between two palettes.
-  /// Used by the global theme transition so switching themes animates
-  /// all colors coherently instead of cutting abruptly.
   static AppColors lerp(AppColors a, AppColors b, double t) {
-    Color c(Color x, Color y) => Color.lerp(x, y, t)!;
+    Color mix(Color first, Color second) => Color.lerp(first, second, t)!;
+
     return AppColors(
-      primary: c(a.primary, b.primary),
-      onPrimary: c(a.onPrimary, b.onPrimary),
-      primaryContainer: c(a.primaryContainer, b.primaryContainer),
-      onPrimaryContainer: c(a.onPrimaryContainer, b.onPrimaryContainer),
-      primaryDark: c(a.primaryDark, b.primaryDark),
-      primaryLight: c(a.primaryLight, b.primaryLight),
-      secondary: c(a.secondary, b.secondary),
-      onSecondary: c(a.onSecondary, b.onSecondary),
-      accent: c(a.accent, b.accent),
-      onAccent: c(a.onAccent, b.onAccent),
-      accentContainer: c(a.accentContainer, b.accentContainer),
-      onAccentContainer: c(a.onAccentContainer, b.onAccentContainer),
-      success: c(a.success, b.success),
-      onSuccess: c(a.onSuccess, b.onSuccess),
-      successContainer: c(a.successContainer, b.successContainer),
-      onSuccessContainer: c(a.onSuccessContainer, b.onSuccessContainer),
-      warning: c(a.warning, b.warning),
-      onWarning: c(a.onWarning, b.onWarning),
-      warningContainer: c(a.warningContainer, b.warningContainer),
-      onWarningContainer: c(a.onWarningContainer, b.onWarningContainer),
-      error: c(a.error, b.error),
-      onError: c(a.onError, b.onError),
-      errorContainer: c(a.errorContainer, b.errorContainer),
-      onErrorContainer: c(a.onErrorContainer, b.onErrorContainer),
-      info: c(a.info, b.info),
-      onInfo: c(a.onInfo, b.onInfo),
-      infoContainer: c(a.infoContainer, b.infoContainer),
-      onInfoContainer: c(a.onInfoContainer, b.onInfoContainer),
-      background: c(a.background, b.background),
-      surface: c(a.surface, b.surface),
-      surfaceElevated: c(a.surfaceElevated, b.surfaceElevated),
-      surfaceMuted: c(a.surfaceMuted, b.surfaceMuted),
-      scrim: c(a.scrim, b.scrim),
-      border: c(a.border, b.border),
-      divider: c(a.divider, b.divider),
-      textPrimary: c(a.textPrimary, b.textPrimary),
-      textSecondary: c(a.textSecondary, b.textSecondary),
-      textMuted: c(a.textMuted, b.textMuted),
-      textDisabled: c(a.textDisabled, b.textDisabled),
+      primary: mix(a.primary, b.primary),
+      onPrimary: mix(a.onPrimary, b.onPrimary),
+      primaryContainer: mix(a.primaryContainer, b.primaryContainer),
+      onPrimaryContainer: mix(a.onPrimaryContainer, b.onPrimaryContainer),
+      primaryDark: mix(a.primaryDark, b.primaryDark),
+      primaryLight: mix(a.primaryLight, b.primaryLight),
+      secondary: mix(a.secondary, b.secondary),
+      onSecondary: mix(a.onSecondary, b.onSecondary),
+      accent: mix(a.accent, b.accent),
+      onAccent: mix(a.onAccent, b.onAccent),
+      accentContainer: mix(a.accentContainer, b.accentContainer),
+      onAccentContainer: mix(a.onAccentContainer, b.onAccentContainer),
+      success: mix(a.success, b.success),
+      onSuccess: mix(a.onSuccess, b.onSuccess),
+      successContainer: mix(a.successContainer, b.successContainer),
+      onSuccessContainer: mix(a.onSuccessContainer, b.onSuccessContainer),
+      warning: mix(a.warning, b.warning),
+      onWarning: mix(a.onWarning, b.onWarning),
+      warningContainer: mix(a.warningContainer, b.warningContainer),
+      onWarningContainer: mix(a.onWarningContainer, b.onWarningContainer),
+      error: mix(a.error, b.error),
+      onError: mix(a.onError, b.onError),
+      errorContainer: mix(a.errorContainer, b.errorContainer),
+      onErrorContainer: mix(a.onErrorContainer, b.onErrorContainer),
+      info: mix(a.info, b.info),
+      onInfo: mix(a.onInfo, b.onInfo),
+      infoContainer: mix(a.infoContainer, b.infoContainer),
+      onInfoContainer: mix(a.onInfoContainer, b.onInfoContainer),
+      background: mix(a.background, b.background),
+      surface: mix(a.surface, b.surface),
+      surfaceElevated: mix(a.surfaceElevated, b.surfaceElevated),
+      surfaceMuted: mix(a.surfaceMuted, b.surfaceMuted),
+      scrim: mix(a.scrim, b.scrim),
+      border: mix(a.border, b.border),
+      divider: mix(a.divider, b.divider),
+      textPrimary: mix(a.textPrimary, b.textPrimary),
+      textSecondary: mix(a.textSecondary, b.textSecondary),
+      textMuted: mix(a.textMuted, b.textMuted),
+      textDisabled: mix(a.textDisabled, b.textDisabled),
     );
   }
 
-/// Light theme — deep premium GREEN + refined ivory/neutral surfaces.
   static const AppColors light = AppColors(
-    primary: Color(0xFF356B57),
+    primary: Color(0xFF356A82),
     onPrimary: Color(0xFFFFFFFF),
-    primaryContainer: Color(0xFFD8E7DF),
-    primaryDark: Color(0xFF23493C),
-    primaryLight: Color(0xFF5B8D78),
-    onPrimaryContainer: Color(0xFF123025),
-    secondary: Color(0xFF596B61),
+    primaryContainer: Color(0xFFD9EAF1),
+    onPrimaryContainer: Color(0xFF0D2C39),
+    primaryDark: Color(0xFF2A596F),
+    primaryLight: Color(0xFF5A879D),
+    secondary: Color(0xFF60727C),
     onSecondary: Color(0xFFFFFFFF),
-    accent: Color(0xFF596B61),
+    accent: Color(0xFF60727C),
     onAccent: Color(0xFFFFFFFF),
-    accentContainer: Color(0xFFDEE5E0),
-    onAccentContainer: Color(0xFF222B25),
-    success: Color(0xFF397052),
+    accentContainer: Color(0xFFE0E7EA),
+    onAccentContainer: Color(0xFF202B31),
+    success: Color(0xFF3F7C60),
     onSuccess: Color(0xFFFFFFFF),
-    successContainer: Color(0xFFDAEAE1),
-    onSuccessContainer: Color(0xFF0F2E1E),
-    warning: Color(0xFFA56F2A),
+    successContainer: Color(0xFFDCECE4),
+    onSuccessContainer: Color(0xFF123525),
+    warning: Color(0xFF9B6D34),
     onWarning: Color(0xFFFFFFFF),
-    warningContainer: Color(0xFFF2E4CB),
-    onWarningContainer: Color(0xFF3A2708),
-    error: Color(0xFFA9444B),
+    warningContainer: Color(0xFFF2E4CF),
+    onWarningContainer: Color(0xFF3A270D),
+    error: Color(0xFFB84F58),
     onError: Color(0xFFFFFFFF),
-    errorContainer: Color(0xFFF3DBDD),
-    onErrorContainer: Color(0xFF421114),
-    info: Color(0xFF466F78),
+    errorContainer: Color(0xFFF3DADD),
+    onErrorContainer: Color(0xFF45161A),
+    info: Color(0xFF42738B),
     onInfo: Color(0xFFFFFFFF),
-    infoContainer: Color(0xFFD9E8EB),
-    onInfoContainer: Color(0xFF12282C),
-    background: Color(0xFFF3F6F2),
-    surface: Color(0xFFFBFDFC),
+    infoContainer: Color(0xFFDCEAF0),
+    onInfoContainer: Color(0xFF17323E),
+    background: Color(0xFFF5F7F8),
+    surface: Color(0xFFFFFFFF),
     surfaceElevated: Color(0xFFFFFFFF),
-    surfaceMuted: Color(0xFFE5ECE6),
+    surfaceMuted: Color(0xFFEEF2F4),
     scrim: Color(0x66000000),
-    border: Color(0xFFD0DAD3),
-    divider: Color(0xFFDEE5E0),
-    textPrimary: Color(0xFF202823),
-    textSecondary: Color(0xFF505D55),
-    textMuted: Color(0xFF7D8982),
-    textDisabled: Color(0xFFAAB4AD),
-  );
-/// Mid theme — deep charcoal + rich PURPLE / plum / muted lavender.
-  static const AppColors mid = AppColors(
-    primary: Color(0xFF76559A),
-    onPrimary: Color(0xFFFFFFFF),
-    primaryContainer: Color(0xFF4A3660),
-    primaryDark: Color(0xFF60437F),
-    primaryLight: Color(0xFF9A7BB8),
-    onPrimaryContainer: Color(0xFFE9DCF5),
-    secondary: Color(0xFF9587A5),
-    onSecondary: Color(0xFF241D2B),
-    accent: Color(0xFF9587A5),
-    onAccent: Color(0xFF241D2B),
-    accentContainer: Color(0xFF453D52),
-    onAccentContainer: Color(0xFFE6DEEE),
-    success: Color(0xFF629277),
-    onSuccess: Color(0xFF0B2016),
-    successContainer: Color(0xFF27402F),
-    onSuccessContainer: Color(0xFFD9EBDF),
-    warning: Color(0xFFC08A43),
-    onWarning: Color(0xFF241804),
-    warningContainer: Color(0xFF4A3A1B),
-    onWarningContainer: Color(0xFFF2E3C8),
-    error: Color(0xFFC96A70),
-    onError: Color(0xFF2B090B),
-    errorContainer: Color(0xFF4E2A2E),
-    onErrorContainer: Color(0xFFF6DADC),
-    info: Color(0xFF6C91A5),
-    onInfo: Color(0xFF0C1B26),
-    infoContainer: Color(0xFF2C4457),
-    onInfoContainer: Color(0xFFD9E8F2),
-    background: Color(0xFF24212A),
-    surface: Color(0xFF2E2935),
-    surfaceElevated: Color(0xFF383140),
-    surfaceMuted: Color(0xFF433A4C),
-    scrim: Color(0x99000000),
-    border: Color(0xFF51485A),
-    divider: Color(0xFF5D5266),
-    textPrimary: Color(0xFFF8F5FA),
-    textSecondary: Color(0xFFD8D0DE),
-    textMuted: Color(0xFFA79CAA),
-    textDisabled: Color(0xFF736A7D),
-  );
-/// Deep, sophisticated, near-black premium dark palette.
-  static const AppColors dark = AppColors(
-    primary: Color(0xFF3F639F),
-    onPrimary: Color(0xFFFFFFFF),
-    primaryContainer: Color(0xFF263A5E),
-    primaryDark: Color(0xFF304D7E),
-    primaryLight: Color(0xFF6987BB),
-    onPrimaryContainer: Color(0xFFD6E1F4),
-    secondary: Color(0xFF697A98),
-    onSecondary: Color(0xFF101724),
-    accent: Color(0xFF697A98),
-    onAccent: Color(0xFF101724),
-    accentContainer: Color(0xFF2C3648),
-    onAccentContainer: Color(0xFFD9E0EB),
-    success: Color(0xFF60967A),
-    onSuccess: Color(0xFF0B2016),
-    successContainer: Color(0xFF243D2F),
-    onSuccessContainer: Color(0xFFD8EBE0),
-    warning: Color(0xFFC58E47),
-    onWarning: Color(0xFF241804),
-    warningContainer: Color(0xFF4C3B1E),
-    onWarningContainer: Color(0xFFF3E5CA),
-    error: Color(0xFFC96B72),
-    onError: Color(0xFF2B090B),
-    errorContainer: Color(0xFF4F2A30),
-    onErrorContainer: Color(0xFFF7DBDD),
-    info: Color(0xFF6590AD),
-    onInfo: Color(0xFF0C1B26),
-    infoContainer: Color(0xFF294254),
-    onInfoContainer: Color(0xFFD9E9F3),
-    background: Color(0xFF0E131B),
-    surface: Color(0xFF151C27),
-    surfaceElevated: Color(0xFF1D2633),
-    surfaceMuted: Color(0xFF263242),
-    scrim: Color(0xCC000000),
-    border: Color(0xFF344150),
-    divider: Color(0xFF3F4C5B),
-    textPrimary: Color(0xFFF7F9FC),
-    textSecondary: Color(0xFFD1D7E0),
-    textMuted: Color(0xFF96A0AF),
-    textDisabled: Color(0xFF5F6B7A),
+    border: Color(0xFFD0DADF),
+    divider: Color(0xFFE1E6E9),
+    textPrimary: Color(0xFF1F2D35),
+    textSecondary: Color(0xFF4C5C65),
+    textMuted: Color(0xFF74838C),
+    textDisabled: Color(0xFFA9B3B9),
   );
 
-  /// Resolves the palette for the active theme via its [AppThemeExtension].
+  static const AppColors mid = AppColors(
+    primary: Color(0xFF7FAEC2),
+    onPrimary: Color(0xFF0A2029),
+    primaryContainer: Color(0xFF2D5363),
+    onPrimaryContainer: Color(0xFFE0F0F5),
+    primaryDark: Color(0xFF5D91A7),
+    primaryLight: Color(0xFFA7CDDA),
+    secondary: Color(0xFFA5B5BC),
+    onSecondary: Color(0xFF152027),
+    accent: Color(0xFFA5B5BC),
+    onAccent: Color(0xFF152027),
+    accentContainer: Color(0xFF3C4B54),
+    onAccentContainer: Color(0xFFE1E8EC),
+    success: Color(0xFF78B395),
+    onSuccess: Color(0xFF0C2419),
+    successContainer: Color(0xFF294936),
+    onSuccessContainer: Color(0xFFDDF0E6),
+    warning: Color(0xFFD2A66A),
+    onWarning: Color(0xFF2D1E0B),
+    warningContainer: Color(0xFF4B3B22),
+    onWarningContainer: Color(0xFFF3E5CC),
+    error: Color(0xFFD47F87),
+    onError: Color(0xFF2A0B0F),
+    errorContainer: Color(0xFF533039),
+    onErrorContainer: Color(0xFFF6DBDF),
+    info: Color(0xFF80ACC3),
+    onInfo: Color(0xFF0B2029),
+    infoContainer: Color(0xFF304C5A),
+    onInfoContainer: Color(0xFFDDECF2),
+    background: Color(0xFF20292F),
+    surface: Color(0xFF29343B),
+    surfaceElevated: Color(0xFF323E46),
+    surfaceMuted: Color(0xFF3A474F),
+    scrim: Color(0x99000000),
+    border: Color(0xFF4D5B64),
+    divider: Color(0xFF56646D),
+    textPrimary: Color(0xFFF3F6F8),
+    textSecondary: Color(0xFFD1DBE0),
+    textMuted: Color(0xFF9BA9B1),
+    textDisabled: Color(0xFF6F7C84),
+  );
+
+  static const AppColors dark = AppColors(
+    primary: Color(0xFF80B9D0),
+    onPrimary: Color(0xFF0A1D25),
+    primaryContainer: Color(0xFF284A5A),
+    onPrimaryContainer: Color(0xFFDBEDF4),
+    primaryDark: Color(0xFF5A91A8),
+    primaryLight: Color(0xFFA6D0DF),
+    secondary: Color(0xFF9AADB5),
+    onSecondary: Color(0xFF111C22),
+    accent: Color(0xFF9AADB5),
+    onAccent: Color(0xFF111C22),
+    accentContainer: Color(0xFF2D3A42),
+    onAccentContainer: Color(0xFFDDE7EB),
+    success: Color(0xFF78B395),
+    onSuccess: Color(0xFF0A2016),
+    successContainer: Color(0xFF263F31),
+    onSuccessContainer: Color(0xFFD9EEE3),
+    warning: Color(0xFFD0A064),
+    onWarning: Color(0xFF2B1C08),
+    warningContainer: Color(0xFF48381E),
+    onWarningContainer: Color(0xFFF0E1C8),
+    error: Color(0xFFD27B83),
+    onError: Color(0xFF2B0B0E),
+    errorContainer: Color(0xFF4D2A31),
+    onErrorContainer: Color(0xFFF5D9DD),
+    info: Color(0xFF7FAEC4),
+    onInfo: Color(0xFF0A2029),
+    infoContainer: Color(0xFF294654),
+    onInfoContainer: Color(0xFFD9EAF1),
+    background: Color(0xFF0E151B),
+    surface: Color(0xFF151E25),
+    surfaceElevated: Color(0xFF1D2831),
+    surfaceMuted: Color(0xFF25323B),
+    scrim: Color(0xCC000000),
+    border: Color(0xFF34434D),
+    divider: Color(0xFF40505A),
+    textPrimary: Color(0xFFF5F8FA),
+    textSecondary: Color(0xFFD1D9DE),
+    textMuted: Color(0xFF98A5AD),
+    textDisabled: Color(0xFF616E77),
+  );
+
   static AppColors of(BuildContext context) {
     final extension = Theme.of(context).extension<AppThemeExtension>();
     return extension?.colors ?? light;
   }
 }
 
-/// Bridges the [AppColors] palette into Flutter's [ThemeExtension] system so
-/// screens can resolve semantic colors without hardcoding values.
-/// This is the SINGLE authoritative extension — its lerp performs real
-/// per-color interpolation so theme transitions pass through intermediate
-/// colors instead of snapping.
 class AppThemeExtension extends ThemeExtension<AppThemeExtension> {
   const AppThemeExtension(this.colors);
 
