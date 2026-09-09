@@ -9,6 +9,8 @@ import '../../features/car/domain/repositories/car_report_repository.dart';
 import '../../features/car/domain/repositories/car_trip_command_repository.dart';
 import '../../features/customers/data/local_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
+import '../../features/dashboard/data/local_dashboard_repository.dart';
+import '../../features/dashboard/domain/dashboard_repository.dart';
 import '../../features/products/data/local_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
 import 'car_trip_event_bus.dart';
@@ -23,6 +25,7 @@ class AppServices {
 
   final CustomerRepository customerRepository = LocalCustomerRepository();
   final ProductRepository productRepository = LocalProductRepository();
+  final DashboardRepository dashboardRepository = LocalDashboardRepository();
 
   final CarCatalogRepository carCatalogRepository = LocalCarCatalogRepository();
   final CarTripCommandRepository carTripRepository =
