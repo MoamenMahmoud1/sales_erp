@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 ///
 /// Each visual mode has its own tonal identity while status colors remain
 /// semantic. Dashboard hero colors are intentionally part of the theme so
-/// rich gradients adapt with the active mode instead of using fixed colors.
+/// the distinctive card adapts with the active mode instead of using fixed
+/// presentation colors.
 class AppColors {
   final Color primary;
   final Color onPrimary;
@@ -192,10 +193,10 @@ class AppColors {
     textSecondary: Color(0xFF526568),
     textMuted: Color(0xFF78898C),
     textDisabled: Color(0xFFAAB7B8),
-    heroStart: Color(0xFF0F5C59),
-    heroMiddle: Color(0xFF1E817E),
-    heroEnd: Color(0xFF4CA29E),
-    heroHighlight: Color(0xFFB9E9E4),
+    heroStart: Color(0xFF3F9FC5),
+    heroMiddle: Color(0xFF126E99),
+    heroEnd: Color(0xFF073F68),
+    heroHighlight: Color(0xFFD8F5FF),
   );
 
   static const AppColors mid = AppColors(
@@ -238,10 +239,10 @@ class AppColors {
     textSecondary: Color(0xFFD0DDDB),
     textMuted: Color(0xFF9AA9A8),
     textDisabled: Color(0xFF6E7E7D),
-    heroStart: Color(0xFF064735),
-    heroMiddle: Color(0xFF0B705A),
-    heroEnd: Color(0xFF0C9AA9),
-    heroHighlight: Color(0xFF9BE2D7),
+    heroStart: Color(0xFF1AB1A0),
+    heroMiddle: Color(0xFF087A63),
+    heroEnd: Color(0xFF053F3A),
+    heroHighlight: Color(0xFFC9F2EA),
   );
 
   static const AppColors dark = AppColors(
@@ -284,10 +285,10 @@ class AppColors {
     textSecondary: Color(0xFFC7D7DF),
     textMuted: Color(0xFF90A6B2),
     textDisabled: Color(0xFF5C6F7B),
-    heroStart: Color(0xFF05285C),
+    heroStart: Color(0xFF1559A8),
     heroMiddle: Color(0xFF08428C),
-    heroEnd: Color(0xFF1A63B1),
-    heroHighlight: Color(0xFF8FCBFF),
+    heroEnd: Color(0xFF04285E),
+    heroHighlight: Color(0xFFC1E2FF),
   );
 
   static AppColors of(BuildContext context) {
