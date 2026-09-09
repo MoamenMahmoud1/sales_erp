@@ -24,15 +24,11 @@ class RevenueSummaryCard extends StatelessWidget {
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
           stops: const [0.0, 0.48, 1.0],
-          colors: [
-            colors.primaryLight,
-            colors.primary,
-            colors.primaryDark,
-          ],
+          colors: [colors.heroStart, colors.heroMiddle, colors.heroEnd],
         ),
         boxShadow: [
           BoxShadow(
-            color: colors.primaryDark.withValues(alpha: 0.22),
+            color: colors.heroStart.withValues(alpha: 0.22),
             blurRadius: 18,
             offset: const Offset(0, 9),
           ),
@@ -43,17 +39,19 @@ class RevenueSummaryCard extends StatelessWidget {
         child: Stack(
           children: [
             Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: const Alignment(-1.0, -1.0),
-                    radius: 1.15,
-                    colors: [
-                      colors.onPrimary.withValues(alpha: 0.16),
-                      colors.onPrimary.withValues(alpha: 0.05),
-                      Colors.transparent,
-                    ],
-                    stops: const [0.0, 0.22, 0.62],
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: const Alignment(-1.04, -1.02),
+                      radius: 1.08,
+                      colors: [
+                        colors.heroHighlight.withValues(alpha: 0.18),
+                        colors.heroHighlight.withValues(alpha: 0.06),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.18, 0.56],
+                    ),
                   ),
                 ),
               ),
@@ -65,7 +63,7 @@ class RevenueSummaryCard extends StatelessWidget {
               width: 2,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: colors.onPrimary.withValues(alpha: 0.28),
+                  color: colors.heroHighlight.withValues(alpha: 0.34),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -85,7 +83,7 @@ class RevenueSummaryCard extends StatelessWidget {
                             Text(
                               'Total revenue',
                               style: TextStyle(
-                                color: colors.onPrimary.withValues(alpha: 0.76),
+                                color: colors.onPrimary.withValues(alpha: 0.78),
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
                               ),
