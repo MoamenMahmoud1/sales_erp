@@ -63,7 +63,7 @@ class _AppShellState extends State<AppShell> {
     ),
     AppNavItem(
       icon: Icons.more_horiz_rounded,
-      selectedIcon: Icons.tune_rounded,
+      selectedIcon: Icons.more_horiz_rounded,
       label: 'More',
     ),
   ];
@@ -149,8 +149,9 @@ class _AppShellState extends State<AppShell> {
             NavigationRail(
               selectedIndex: _selectedTabIndex,
               onDestinationSelected: _goToTab,
-              backgroundColor: colors.surfaceMuted,
+              backgroundColor: colors.surface,
               indicatorColor: colors.primaryContainer,
+              groupAlignment: -0.72,
               labelType: NavigationRailLabelType.selected,
               destinations: [
                 for (final item in _navigationItems)
@@ -161,6 +162,7 @@ class _AppShellState extends State<AppShell> {
                   ),
               ],
             ),
+            VerticalDivider(width: 1, color: colors.divider),
             Expanded(
               child: IndexedStack(
                 index: _selectedTabIndex,
