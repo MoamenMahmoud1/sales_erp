@@ -98,7 +98,11 @@ class _AppShellState extends State<AppShell> {
     super.dispose();
   }
 
-  void _goToTab(int index) => setState(() => _selectedTabIndex = index);
+  void _goToTab(int index) {
+    if (index < 0 || index >= _navigationPages.length) return;
+    if (_selectedTabIndex == index) return;
+    setState(() => _selectedTabIndex = index);
+  }
 
   Future<void> _openCarApp() async {
     await Navigator.of(context).push(
