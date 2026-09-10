@@ -140,7 +140,17 @@ class _CarAppShellState extends State<CarAppShell> {
   Widget _buildSelectedPage() {
     switch (_selectedTabIndex) {
       case 0:
-        return CarDailyDashboardPage(onNavigate: _goToTab);
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              secondary: AppColors.of(context).featuredMiddle,
+              onSecondary: AppColors.of(context).featuredHighlight,
+              secondaryContainer: AppColors.of(context).featuredMiddle,
+              onSecondaryContainer: AppColors.of(context).featuredHighlight,
+            ),
+          ),
+          child: CarDailyDashboardPage(onNavigate: _goToTab),
+        );
       case 1:
         return const CarTripsPage();
       case 2:
