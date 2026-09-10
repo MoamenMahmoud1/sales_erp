@@ -7,7 +7,7 @@ import '../../features/dashboard/presentation/dashboard_controller.dart';
 import '../../features/dashboard/presentation/dashboard_page.dart';
 import '../../features/products/presentation/products_page.dart';
 import '../../features/sales/presentation/invoices_page.dart';
-import '../app/navigation/app_navigation_config.dart';
+import '../../app/navigation/app_navigation_config.dart';
 import '../data/demo_data_seeder.dart';
 import '../repositories/app_services.dart';
 import '../storage/app_database.dart';
