@@ -71,10 +71,7 @@ class DioRepresentativeSaleRepository implements RepresentativeSaleRepository {
       await client.dio.post(
         '/payments/collections/',
         options: Options(
-          headers: {
-            'Idempotency-Key':
-                'rep-sale-$invoiceId-${DateTime.now().microsecondsSinceEpoch}',
-          },
+          headers: {'Idempotency-Key': 'rep-sale-payment-$invoiceId'},
         ),
         data: {
           'customer': customerId,
