@@ -3,7 +3,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'app/app.dart';
 import 'core/data/demo_data_seeder.dart';
-import 'core/presentation/app_shell.dart';
 import 'core/repositories/app_services.dart';
 import 'core/security/app_lock_controller.dart';
 import 'core/theme/app_theme.dart';
