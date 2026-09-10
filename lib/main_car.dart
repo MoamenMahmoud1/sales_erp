@@ -8,9 +8,8 @@ import 'features/car/presentation/car_app_shell.dart';
 
 /// Standalone Car application entry point.
 ///
-/// The Car dashboard is responsible for preparing its local demo state before
-/// it is shown, so a seed failure can be rendered as an in-app error instead
-/// of preventing Flutter from mounting the application.
+/// The Car feature owns its local data reads and writes after the application
+/// shell is mounted; startup itself does not perform Car seeding.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
