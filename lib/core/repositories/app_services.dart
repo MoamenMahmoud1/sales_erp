@@ -15,6 +15,8 @@ import '../../features/dashboard/data/local_dashboard_repository.dart';
 import '../../features/dashboard/domain/dashboard_repository.dart';
 import '../../features/products/data/local_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
+import '../../features/representative/data/dio_representative_vehicle_repository.dart';
+import '../../features/representative/domain/repositories/representative_vehicle_repository.dart';
 import '../network/api_client.dart';
 import 'car_trip_event_bus.dart';
 
@@ -31,13 +33,13 @@ class AppServices {
   final DashboardRepository dashboardRepository = LocalDashboardRepository();
 
   final CarCatalogRepository carCatalogRepository = LocalCarCatalogRepository();
-  final CarTripCommandRepository carTripRepository =
-      LocalCarTripCommandRepository();
+  final CarTripCommandRepository carTripRepository = LocalCarTripCommandRepository();
   final CarPaymentRepository carPaymentRepository = LocalCarPaymentRepository();
   final CarReportRepository carReportRepository = LocalCarReportRepository();
 
   late final ApiClient apiClient;
   late final AuthenticationRepository authRepository;
+  late final RepresentativeVehicleRepository representativeVehicleRepository;
 
   bool _ready = false;
 
@@ -49,6 +51,7 @@ class AppServices {
     await dataMode.load();
     apiClient = await ApiClient.create();
     authRepository = AuthRepository(apiClient);
+    representativeVehicleRepository = DioRepresentativeVehicleRepository(apiClient);
     _ready = true;
   }
 
