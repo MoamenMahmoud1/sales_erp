@@ -1,3 +1,4 @@
+import '../entities/returnable_invoice.dart';
 import '../entities/stock_transfer_request.dart';
 import '../entities/vehicle_stock_item.dart';
 import '../entities/warehouse_manager.dart';
@@ -26,6 +27,8 @@ abstract interface class RepresentativeVehicleRepository {
   Future<List<WarehouseManager>> fetchWarehouseManagers({required int warehouseId});
 
   Future<List<StockTransferRequest>> fetchStockTransferRequests();
+
+  Future<ReturnableInvoice?> fetchReturnableInvoice({required int invoiceId});
 
   Future<StockTransferRequest> createLoadingRequest({
     required int warehouseId,
