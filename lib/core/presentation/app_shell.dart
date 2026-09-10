@@ -129,7 +129,7 @@ class _AppShellState extends State<AppShell> {
     if (!confirmed || !mounted) return;
 
     await AppDatabase.resetDatabase();
-    await DemoDataSeeder().seedIfNeeded();
+    await DemoDataSeeder().seedIfNeeded(force: true);
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
