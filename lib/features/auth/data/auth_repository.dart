@@ -1,13 +1,16 @@
 import 'package:dio/dio.dart';
 
 import '../../../core/network/api_client.dart';
+import '../domain/entities/auth_user.dart';
+import '../domain/repositories/authentication_repository.dart';
 
-class AuthRepository {
+class AuthRepository implements AuthenticationRepository {
   final ApiClient client;
 
   const AuthRepository(this.client);
 
-  Future<void> login({
+  @override
+  Future<AuthUser> login({
     required String identifier,
     required String password,
   }) async {
@@ -18,6 +21,7 @@ class AuthRepository {
       options: Options(headers: {'X-CSRFToken': csrf}),
     );
     await client.saveAccessToken(response.data['access'] as String);
+    return fetchCurrentUser();
   }
 
   Future<void> signup({
@@ -38,6 +42,14 @@ class AuthRepository {
     });
   }
 
+  @override
+  Future<AuthUser> fetchCurrentUser() async {
+    final response = await client.dio.get('/auth/me/');
+    final data = Map<String, dynamic>.from(response.data as Map);
+    return AuthUser.fromJson(data);
+  }
+
+  @override
   Future<void> refresh() async {
     final csrf = await client.csrfToken();
     final response = await client.dio.post(
@@ -47,6 +59,7 @@ class AuthRepository {
     await client.saveAccessToken(response.data['access'] as String);
   }
 
+  @override
   Future<void> logout() async {
     try {
       final csrf = await client.csrfToken();
