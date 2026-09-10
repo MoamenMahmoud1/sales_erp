@@ -26,6 +26,7 @@ class AppNavigationDestination {
 enum AppNavigationId {
   home,
   sales,
+  vehicle,
   products,
   customers,
   more,
@@ -47,6 +48,13 @@ class AppNavigationConfig {
       selectedIcon: Icons.receipt_long_rounded,
       label: 'Sales',
       permissionPrefixes: ['invoices.'],
+    ),
+    AppNavigationDestination(
+      id: AppNavigationId.vehicle,
+      icon: Icons.local_shipping_outlined,
+      selectedIcon: Icons.local_shipping_rounded,
+      label: 'Vehicle',
+      permissionPrefixes: ['inventory.'],
     ),
     AppNavigationDestination(
       id: AppNavigationId.products,
