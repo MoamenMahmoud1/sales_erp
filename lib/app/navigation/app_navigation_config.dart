@@ -8,7 +8,6 @@ class AppNavigationDestination {
   final IconData icon;
   final IconData selectedIcon;
   final List<String> permissionPrefixes;
-  final bool requiresRole;
 
   const AppNavigationDestination({
     required this.id,
@@ -16,13 +15,9 @@ class AppNavigationDestination {
     required this.icon,
     required this.selectedIcon,
     this.permissionPrefixes = const [],
-    this.requiresRole = false,
   });
 
   bool isVisibleFor(AuthUser user) {
-    if (requiresRole && user.role == null && !user.isStaff && !user.isSuperuser) {
-      return false;
-    }
     if (permissionPrefixes.isEmpty) return true;
     return user.hasAnyPermissionWithPrefix(permissionPrefixes);
   }
@@ -45,14 +40,13 @@ class AppNavigationConfig {
       icon: Icons.space_dashboard_outlined,
       selectedIcon: Icons.space_dashboard_rounded,
       label: 'Home',
-      requiresRole: true,
     ),
     AppNavigationDestination(
       id: AppNavigationId.sales,
       icon: Icons.receipt_long_outlined,
       selectedIcon: Icons.receipt_long_rounded,
       label: 'Sales',
-      permissionPrefixes: ['sales.'],
+      permissionPrefixes: ['invoices.'],
     ),
     AppNavigationDestination(
       id: AppNavigationId.products,
@@ -66,14 +60,13 @@ class AppNavigationConfig {
       icon: Icons.people_outline_rounded,
       selectedIcon: Icons.people_rounded,
       label: 'Customers',
-      permissionPrefixes: ['customers.', 'crm.'],
+      permissionPrefixes: ['customers.'],
     ),
     AppNavigationDestination(
       id: AppNavigationId.more,
       icon: Icons.more_horiz_rounded,
       selectedIcon: Icons.tune_rounded,
       label: 'More',
-      requiresRole: true,
     ),
   ];
 
