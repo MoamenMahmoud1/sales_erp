@@ -101,14 +101,14 @@ class DemoDataSeeder {
 
         var subtotal = 0.0;
         final chosen = <int>[];
+        final quantities = <int, int>{};
         for (var j = 0; j < itemCount; j++) {
           final pid = productIds[_random.nextInt(productIds.length)];
           if (chosen.contains(pid)) continue;
           chosen.add(pid);
-        }
-        for (var k = 0; k < chosen.length; k++) {
           final qty = 1 + _random.nextInt(20);
-          subtotal += _productPrice(chosen[k], products) * qty;
+          quantities[pid] = qty;
+          subtotal += _productPrice(pid, products) * qty;
         }
 
         final discount = _random.nextDouble() < 0.3
@@ -126,11 +126,10 @@ class DemoDataSeeder {
         });
 
         for (final pid in chosen) {
-          final qty = 1 + _random.nextInt(20);
           await txn.insert('invoice_items', {
             'invoice_id': invoiceId,
             'product_id': pid,
-            'quantity': qty,
+            'quantity': quantities[pid]!,
             'unit_price': _productPrice(pid, products),
           });
         }
