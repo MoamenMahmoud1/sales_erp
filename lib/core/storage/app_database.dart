@@ -1,10 +1,9 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
+import 'app_latest_migrations.dart';
 import 'app_migrations.dart';
 import 'app_schema.dart';
-import 'car_return_value_migration.dart';
-import 'payment_date_migration.dart';
 
 /// The application's single SQLite database.
 class AppDatabase {
@@ -45,36 +44,13 @@ class AppDatabase {
       onCreate: (db, _) => createAppSchema(db),
       onUpgrade: (db, oldVersion, _) async {
         await runAppMigrations(db, oldVersion);
-        await runPaymentDateMigration(db, oldVersion);
+        await runLatestMigrations(db, oldVersion);
       },
     );
 
-    // Version 16 adds product categories. Keep this tiny compatibility step
-    // here so databases upgraded from any previous schema get the new column
-    // even though older installations may have skipped intermediate versions.
-    await _ensureProductCategoryColumn(database);
-    await ensureCarReturnedValueColumns(database);
     _database = database;
     await _cleanupExpiredInvoiceChanges(database);
     return database;
-  }
-
-  static Future<void> _ensureProductCategoryColumn(Database db) async {
-    final rows = await db.rawQuery('PRAGMA table_info(products)');
-    final columns = {for (final row in rows) row['name'] as String};
-    if (columns.contains('category')) return;
-
-    await db.transaction((txn) async {
-      await txn.execute(
-        "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'General'",
-      );
-      await txn.execute(
-        "UPDATE products SET category = 'General' WHERE TRIM(COALESCE(category, '')) = ''",
-      );
-      await txn.execute(
-        'CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)',
-      );
-    });
   }
 
   static Future<void> _cleanupExpiredInvoiceChanges(Database db) async {
