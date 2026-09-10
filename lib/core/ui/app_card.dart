@@ -28,6 +28,19 @@ class AppCard extends StatelessWidget {
     this.margin,
   });
 
+  Color _withLightness(Color color, double delta) {
+    final hsl = HSLColor.fromColor(color);
+    final lightness = (hsl.lightness + delta).clamp(0.05, 0.94).toDouble();
+    return hsl.withLightness(lightness).toColor();
+  }
+
+  List<Color> _featuredColors(BuildContext context) {
+    final primary = AppColors.of(context).primary;
+    final deepColor = _withLightness(primary, -0.18);
+    final brightColor = _withLightness(primary, 0.18);
+    return [deepColor, primary, brightColor];
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
@@ -37,33 +50,30 @@ class AppCard extends StatelessWidget {
     final isFeatured =
         scope?.enabled == true && color == theme.colorScheme.secondaryContainer;
     final surfaceColor = color ?? (filled ? colors.surface : Colors.transparent);
+    final featuredColors = isFeatured ? _featuredColors(context) : const <Color>[];
 
     final decoration = BoxDecoration(
       color: isFeatured ? null : surfaceColor,
       gradient: isFeatured
           ? LinearGradient(
-              begin: Alignment.bottomLeft,
-              end: Alignment.topRight,
-              stops: const [0.0, 0.58, 1.0],
-              colors: [
-                colors.featuredStart,
-                colors.featuredMiddle,
-                colors.featuredEnd,
-              ],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              stops: const [0.0, 0.5, 1.0],
+              colors: featuredColors,
             )
           : null,
       borderRadius: radius,
       border: filled
           ? Border.all(
               color: isFeatured
-                  ? colors.featuredHighlight.withValues(alpha: 0.16)
+                  ? Colors.white.withValues(alpha: 0.14)
                   : colors.divider,
             )
           : null,
       boxShadow: isFeatured
           ? [
               BoxShadow(
-                color: colors.featuredStart.withValues(alpha: 0.24),
+                color: featuredColors.first.withValues(alpha: 0.22),
                 blurRadius: 18,
                 offset: const Offset(0, 8),
               ),
@@ -74,9 +84,9 @@ class AppCard extends StatelessWidget {
     Widget content = child;
     if (isFeatured) {
       final featuredScheme = theme.colorScheme.copyWith(
-        secondary: colors.featuredMiddle,
+        secondary: featuredColors[1],
         onSecondary: Colors.white,
-        secondaryContainer: colors.featuredMiddle,
+        secondaryContainer: featuredColors[1],
         onSecondaryContainer: Colors.white,
       );
       content = Theme(
@@ -90,14 +100,14 @@ class AppCard extends StatelessWidget {
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: RadialGradient(
-                        center: const Alignment(0.92, -0.92),
-                        radius: 1.05,
+                        center: const Alignment(-1.02, -0.92),
+                        radius: 1.08,
                         colors: [
-                          colors.featuredHighlight.withValues(alpha: 0.18),
-                          colors.featuredHighlight.withValues(alpha: 0.06),
+                          Colors.white.withValues(alpha: 0.16),
+                          Colors.white.withValues(alpha: 0.05),
                           Colors.transparent,
                         ],
-                        stops: const [0.0, 0.24, 0.64],
+                        stops: const [0.0, 0.20, 0.58],
                       ),
                     ),
                   ),
@@ -133,10 +143,10 @@ class AppCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         splashColor: isFeatured
-            ? colors.featuredHighlight.withValues(alpha: 0.08)
+            ? Colors.white.withValues(alpha: 0.08)
             : colors.primary.withValues(alpha: 0.08),
         highlightColor: isFeatured
-            ? colors.featuredHighlight.withValues(alpha: 0.04)
+            ? Colors.white.withValues(alpha: 0.04)
             : colors.primary.withValues(alpha: 0.04),
         child: card,
       ),
