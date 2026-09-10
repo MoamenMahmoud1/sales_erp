@@ -41,7 +41,6 @@ class CarAppShell extends StatefulWidget {
 
 class _CarAppShellState extends State<CarAppShell> {
   late int _selectedTabIndex;
-  late final List<Widget> _navigationPages;
   late final StreamSubscription<int> _tripDeletions;
   int _contentRevision = 0;
 
@@ -77,13 +76,6 @@ class _CarAppShellState extends State<CarAppShell> {
   void initState() {
     super.initState();
     _selectedTabIndex = 0;
-    _navigationPages = [
-      CarDashboardBootstrapPage(onNavigate: _goToTab),
-      const CarTripsPage(),
-      const CarPaymentsPage(),
-      ProductsPage(carMode: true),
-      const CarReportsPage(),
-    ];
     _tripDeletions =
         AppServices.instance.carTripEvents.deletionStream.listen(_onTripDeleted);
   }
@@ -146,7 +138,24 @@ class _CarAppShellState extends State<CarAppShell> {
     if (confirmed && mounted) Navigator.of(context).pop();
   }
 
-  Widget _dashboardWithFeaturedScope(BuildContext context) {
+  Widget _buildSelectedPage() {
+    switch (_selectedTabIndex) {
+      case 0:
+        return _dashboardWithFeaturedScope();
+      case 1:
+        return const CarTripsPage();
+      case 2:
+        return const CarPaymentsPage();
+      case 3:
+        return ProductsPage(carMode: true);
+      case 4:
+        return const CarReportsPage();
+      default:
+        return _dashboardWithFeaturedScope();
+    }
+  }
+
+  Widget _dashboardWithFeaturedScope() {
     final base = Theme.of(context);
     final extensions = [
       ...base.extensions.values.where(
@@ -157,7 +166,10 @@ class _CarAppShellState extends State<CarAppShell> {
 
     return Theme(
       data: base.copyWith(extensions: extensions),
-      child: _navigationPages.first,
+      child: CarDashboardBootstrapPage(
+        key: ValueKey('car-dashboard-$_contentRevision'),
+        onNavigate: _goToTab,
+      ),
     );
   }
 
@@ -166,7 +178,10 @@ class _CarAppShellState extends State<CarAppShell> {
     final colors = AppColors.of(context);
     final isWide = MediaQuery.sizeOf(context).width >= 840;
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom >= 120;
-    final dashboard = _dashboardWithFeaturedScope(context);
+    final page = KeyedSubtree(
+      key: ValueKey('car-page-$_selectedTabIndex-$_contentRevision'),
+      child: _buildSelectedPage(),
+    );
 
     final content = isWide
         ? Row(
@@ -186,26 +201,10 @@ class _CarAppShellState extends State<CarAppShell> {
                     ),
                 ],
               ),
-              Expanded(
-                child: IndexedStack(
-                  key: ValueKey(_contentRevision),
-                  index: _selectedTabIndex,
-                  children: [
-                    dashboard,
-                    ..._navigationPages.skip(1),
-                  ],
-                ),
-              ),
+              Expanded(child: page),
             ],
           )
-        : IndexedStack(
-            key: ValueKey(_contentRevision),
-            index: _selectedTabIndex,
-            children: [
-              dashboard,
-              ..._navigationPages.skip(1),
-            ],
-          );
+        : page;
 
     return Scaffold(
       appBar: AppBar(
