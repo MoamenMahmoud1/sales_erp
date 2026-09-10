@@ -14,8 +14,8 @@ class FeaturedCardTheme extends ThemeExtension<FeaturedCardTheme> {
       FeaturedCardTheme(enabled: enabled ?? this.enabled);
 
   @override
-  FeaturedCardTheme lerp(ThemeExtension<FeaturedCardTheme>? other, double t) {
-    if (other is! FeaturedCardTheme) return this;
+  FeaturedCardTheme lerp(FeaturedCardTheme? other, double t) {
+    if (other == null) return this;
     return FeaturedCardTheme(enabled: t < 0.5 ? enabled : other.enabled);
   }
 }
