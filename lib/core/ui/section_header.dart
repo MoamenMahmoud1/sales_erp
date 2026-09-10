@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
 
-/// Consistent section header with an optional action.
+/// Consistent section header with optional trailing content and text action.
 class SectionHeader extends StatelessWidget {
   final String title;
   final String? subtitle;
+  final Widget? trailing;
   final String? actionLabel;
   final VoidCallback? onAction;
 
@@ -14,6 +15,7 @@ class SectionHeader extends StatelessWidget {
     super.key,
     required this.title,
     this.subtitle,
+    this.trailing,
     this.actionLabel,
     this.onAction,
   });
@@ -42,6 +44,7 @@ class SectionHeader extends StatelessWidget {
             ],
           ),
         ),
+        if (trailing != null) trailing!,
         if (actionLabel != null && onAction != null)
           TextButton(
             onPressed: onAction,
