@@ -3,11 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/repositories/app_services.dart';
-import '../../../core/storage/app_database.dart';
 import '../../../core/ui/app_bottom_nav.dart';
-import '../../../core/ui/dialogs.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/featured_card_theme.dart';
+import '../../../core/storage/app_database.dart';
+import '../../../core/ui/dialogs.dart';
 import '../../../core/presentation/settings_page.dart';
 import '../../products/presentation/products_page.dart';
 import 'car_daily_dashboard_page.dart';
@@ -140,7 +141,17 @@ class _CarAppShellState extends State<CarAppShell> {
   Widget _buildSelectedPage() {
     switch (_selectedTabIndex) {
       case 0:
-        return CarDailyDashboardPage(onNavigate: _goToTab);
+        return Theme(
+          data: Theme.of(context).copyWith(
+            extensions: [
+              ...Theme.of(context).extensions.values.where(
+                    (extension) => extension is! FeaturedCardTheme,
+                  ),
+              const FeaturedCardTheme(enabled: true),
+            ],
+          ),
+          child: CarDailyDashboardPage(onNavigate: _goToTab),
+        );
       case 1:
         return const CarTripsPage();
       case 2:
