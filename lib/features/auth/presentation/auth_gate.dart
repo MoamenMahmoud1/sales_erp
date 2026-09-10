@@ -9,11 +9,13 @@ import 'login_page.dart';
 class AuthGate extends StatefulWidget {
   final AuthController controller;
   final AppThemeController themeController;
+  final VoidCallback onLock;
 
   const AuthGate({
     super.key,
     required this.controller,
     required this.themeController,
+    required this.onLock,
   });
 
   @override
@@ -62,7 +64,7 @@ class _AuthGateState extends State<AuthGate> {
         return AppShell(
           user: user,
           themeController: widget.themeController,
-          onLock: () {},
+          onLock: widget.onLock,
         );
       case AuthStatus.unauthenticated:
         return LoginPage(controller: widget.controller);
