@@ -12,6 +12,8 @@ void main() {
     final themeController = AppThemeController();
     addTearDown(lockController.dispose);
 
+    await lockController.unlock();
+
     await tester.pumpWidget(
       SalesErpApp(
         lockController: lockController,
