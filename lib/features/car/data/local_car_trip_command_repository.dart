@@ -2,8 +2,11 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../../core/storage/app_database.dart';
 import '../domain/entities/car_load_item.dart';
+import '../domain/entities/car_revision.dart';
 import '../domain/entities/car_trip.dart';
 import '../domain/entities/car_trip_deletion_result.dart';
+import '../domain/entities/car_trip_filter.dart';
+import '../domain/entities/car_trip_summary_view.dart';
 import '../domain/repositories/car_trip_command_repository.dart';
 import '../domain/services/car_calculator.dart';
 import 'car_mappers.dart';
