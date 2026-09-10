@@ -8,10 +8,9 @@ import '../../../core/ui/app_bottom_nav.dart';
 import '../../../core/ui/dialogs.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/theme/featured_card_theme.dart';
 import '../../../core/presentation/settings_page.dart';
 import '../../products/presentation/products_page.dart';
-import 'car_dashboard_bootstrap_page.dart';
+import 'car_daily_dashboard_page.dart';
 import 'car_payments_page.dart';
 import 'car_reports_page.dart';
 import 'car_trips_page.dart';
@@ -92,7 +91,7 @@ class _CarAppShellState extends State<CarAppShell> {
   }
 
   void _goToTab(int index) {
-    if (!mounted) return;
+    if (!mounted || index < 0 || index >= _navigationItems.length) return;
     setState(() => _selectedTabIndex = index);
   }
 
@@ -141,7 +140,7 @@ class _CarAppShellState extends State<CarAppShell> {
   Widget _buildSelectedPage() {
     switch (_selectedTabIndex) {
       case 0:
-        return _dashboardWithFeaturedScope();
+        return CarDailyDashboardPage(onNavigate: _goToTab);
       case 1:
         return const CarTripsPage();
       case 2:
@@ -151,26 +150,8 @@ class _CarAppShellState extends State<CarAppShell> {
       case 4:
         return const CarReportsPage();
       default:
-        return _dashboardWithFeaturedScope();
+        return CarDailyDashboardPage(onNavigate: _goToTab);
     }
-  }
-
-  Widget _dashboardWithFeaturedScope() {
-    final base = Theme.of(context);
-    final extensions = [
-      ...base.extensions.values.where(
-        (extension) => extension is! FeaturedCardTheme,
-      ),
-      const FeaturedCardTheme(enabled: true),
-    ];
-
-    return Theme(
-      data: base.copyWith(extensions: extensions),
-      child: CarDashboardBootstrapPage(
-        key: ValueKey('car-dashboard-$_contentRevision'),
-        onNavigate: _goToTab,
-      ),
-    );
   }
 
   @override
