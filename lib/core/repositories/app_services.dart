@@ -1,4 +1,6 @@
 import '../../app/config/data_mode.dart';
+import '../../features/auth/data/auth_repository.dart';
+import '../../features/auth/domain/repositories/authentication_repository.dart';
 import '../../features/car/data/local_car_catalog_repository.dart';
 import '../../features/car/data/local_car_payment_repository.dart';
 import '../../features/car/data/local_car_report_repository.dart';
@@ -13,6 +15,7 @@ import '../../features/dashboard/data/local_dashboard_repository.dart';
 import '../../features/dashboard/domain/dashboard_repository.dart';
 import '../../features/products/data/local_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
+import '../network/api_client.dart';
 import 'car_trip_event_bus.dart';
 
 class AppServices {
@@ -33,13 +36,19 @@ class AppServices {
   final CarPaymentRepository carPaymentRepository = LocalCarPaymentRepository();
   final CarReportRepository carReportRepository = LocalCarReportRepository();
 
+  late final ApiClient apiClient;
+  late final AuthenticationRepository authRepository;
+
   bool _ready = false;
 
   bool get isReady => _ready;
 
   Future<void> init() async {
     if (_ready) return;
+
     await dataMode.load();
+    apiClient = await ApiClient.create();
+    authRepository = AuthRepository(apiClient);
     _ready = true;
   }
 
