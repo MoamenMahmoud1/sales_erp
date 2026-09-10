@@ -146,19 +146,26 @@ class _CarAppShellState extends State<CarAppShell> {
     if (confirmed && mounted) Navigator.of(context).pop();
   }
 
+  Color _featuredBase(BuildContext context) {
+    final theme = Theme.of(context);
+    if (theme.brightness == Brightness.dark) {
+      return const Color(0xFF08428C);
+    }
+
+    final primary = AppColors.of(context).primary;
+    final primaryHsl = HSLColor.fromColor(primary);
+    return primaryHsl
+        .withLightness((primaryHsl.lightness * 0.72).clamp(0.16, 0.50).toDouble())
+        .toColor();
+  }
+
   ThemeData _dashboardTheme(BuildContext context) {
     final base = Theme.of(context);
-    final colors = AppColors.of(context);
-    final featuredBase = base.brightness == Brightness.dark
-        ? const Color(0xFF08428C)
-        : HSLColor.fromColor(colors.primary)
-            .withLightness((HSLColor.fromColor(colors.primary).lightness * 0.72)
-                .clamp(0.16, 0.50))
-            .toColor();
-
+    final featuredBase = _featuredBase(context);
     final extensions = [
-      ...base.extensions.values.where((extension) =>
-          extension is! FeaturedCardTheme),
+      ...base.extensions.values.where(
+        (extension) => extension is! FeaturedCardTheme,
+      ),
       const FeaturedCardTheme(enabled: true),
     ];
 
