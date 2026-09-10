@@ -11,19 +11,44 @@ import 'local_car_trip_repository.dart';
 
 /// Local write-side repository for Car trips.
 ///
-/// Keeps deletion semantics, revision summary synchronization, and isolated
-/// edit drafts in one canonical repository. Confirmed invoices are never
-/// overwritten by Save as Draft; edits are promoted only on confirmation.
-class LocalCarTripCommandRepository extends LocalCarTripRepository
-    implements CarTripCommandRepository {
+/// Read/persistence primitives stay in LocalCarTripRepository. This class
+/// composes that repository and owns only command-specific lifecycle rules.
+class LocalCarTripCommandRepository implements CarTripCommandRepository {
   LocalCarTripCommandRepository({Future<Database> Function()? database})
       : _database = database ?? (() => AppDatabase.database),
-        super(database: database);
+        _reads = LocalCarTripRepository(database: database);
 
   final Future<Database> Function() _database;
+  final LocalCarTripRepository _reads;
   static const _mappers = CarMappers();
   static const _calculator = CarCalculator();
   static const _draftPrefix = 'DRAFT|';
+
+  @override
+  Future<CarTrip> createTrip(CarTrip trip) => _reads.createTrip(trip);
+
+  @override
+  Future<CarTrip?> getTripById(int tripId) => _reads.getTripById(tripId);
+
+  @override
+  Future<CarTrip?> getTripByDisplayNumber(String displayNumber) =>
+      _reads.getTripByDisplayNumber(displayNumber);
+
+  @override
+  Future<List<CarTrip>> getTrips({CarTripFilter? filter}) =>
+      _reads.getTrips(filter: filter);
+
+  @override
+  Future<List<CarTripSummaryView>> getTripSummaries({CarTripFilter? filter}) =>
+      _reads.getTripSummaries(filter: filter);
+
+  @override
+  Future<List<CarRevision>> getRevisionsForTrip(int tripId) =>
+      _reads.getRevisionsForTrip(tripId);
+
+  @override
+  Future<CarRevision?> getRevision(int revisionId) =>
+      _reads.getRevision(revisionId);
 
   @override
   Future<CarTripDeletionResult> deleteTrip(int tripId) async {
@@ -146,9 +171,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
         final items = <CarLoadItem>[
           for (final itemRow in itemRows) _mappers.itemFromRow(itemRow),
         ];
-        recalculatedTrips.add(
-          _mappers.tripFromRow(row.single, items),
-        );
+        recalculatedTrips.add(_mappers.tripFromRow(row.single, items));
       }
 
       return CarTripDeletionResult(
@@ -161,7 +184,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
 
   @override
   Future<CarTrip> updateDraft(CarTrip trip) async {
-    if (trip.id <= 0) return super.updateDraft(trip);
+    if (trip.id <= 0) return _reads.updateDraft(trip);
 
     final db = await _database();
     final rows = await db.query(
@@ -179,7 +202,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
     if (status == 'closed' && !displayNumber.startsWith(_draftPrefix)) {
       return _saveRevisionDraft(trip, sourceDisplayNumber: displayNumber);
     }
-    return super.updateDraft(trip);
+    return _reads.updateDraft(trip);
   }
 
   Future<CarTrip> _saveRevisionDraft(
@@ -249,7 +272,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
     CarTrip trip, {
     String? triggeredBy,
   }) async {
-    final saved = await super.createAndConfirmTrip(
+    final saved = await _reads.createAndConfirmTrip(
       trip,
       triggeredBy: triggeredBy,
     );
@@ -263,13 +286,13 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
     String? triggeredBy,
   }) async {
     if (trip.status != CarTripStatus.open) {
-      return super.confirmTrip(trip, triggeredBy: triggeredBy);
+      return _reads.confirmTrip(trip, triggeredBy: triggeredBy);
     }
 
     if (trip.displayNumber.startsWith(_draftPrefix)) {
       final sourceDisplayNumber =
           trip.displayNumber.substring(_draftPrefix.length);
-      final source = await getTripByDisplayNumber(sourceDisplayNumber);
+      final source = await _reads.getTripByDisplayNumber(sourceDisplayNumber);
       if (source == null || !source.isClosed) {
         throw StateError('The confirmed source invoice was not found.');
       }
@@ -282,7 +305,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
         closedAt: DateTime.now().toUtc(),
         payment: source.payment,
       );
-      final saved = await super.reviseClosedTrip(
+      final saved = await _reads.reviseClosedTrip(
         finalized,
         triggeredBy: triggeredBy,
       );
@@ -297,7 +320,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
       return saved;
     }
 
-    final saved = await super.confirmTrip(
+    final saved = await _reads.confirmTrip(
       trip.copyWith(closedAt: DateTime.now().toUtc()),
       triggeredBy: triggeredBy,
     );
@@ -310,7 +333,7 @@ class LocalCarTripCommandRepository extends LocalCarTripRepository
     CarTrip trip, {
     String? triggeredBy,
   }) async {
-    final saved = await super.reviseClosedTrip(
+    final saved = await _reads.reviseClosedTrip(
       trip.copyWith(closedAt: DateTime.now().toUtc()),
       triggeredBy: triggeredBy,
     );
