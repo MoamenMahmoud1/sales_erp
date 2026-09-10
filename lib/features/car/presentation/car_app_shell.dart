@@ -146,22 +146,8 @@ class _CarAppShellState extends State<CarAppShell> {
     if (confirmed && mounted) Navigator.of(context).pop();
   }
 
-  Color _featuredBase(BuildContext context) {
-    final theme = Theme.of(context);
-    if (theme.brightness == Brightness.dark) {
-      return const Color(0xFF08428C);
-    }
-
-    final primary = AppColors.of(context).primary;
-    final primaryHsl = HSLColor.fromColor(primary);
-    return primaryHsl
-        .withLightness((primaryHsl.lightness * 0.72).clamp(0.16, 0.50).toDouble())
-        .toColor();
-  }
-
-  ThemeData _dashboardTheme(BuildContext context) {
+  Widget _dashboardWithFeaturedScope(BuildContext context) {
     final base = Theme.of(context);
-    final featuredBase = _featuredBase(context);
     final extensions = [
       ...base.extensions.values.where(
         (extension) => extension is! FeaturedCardTheme,
@@ -169,14 +155,9 @@ class _CarAppShellState extends State<CarAppShell> {
       const FeaturedCardTheme(enabled: true),
     ];
 
-    return base.copyWith(
-      colorScheme: base.colorScheme.copyWith(
-        secondary: featuredBase,
-        onSecondary: Colors.white,
-        secondaryContainer: featuredBase,
-        onSecondaryContainer: Colors.white,
-      ),
-      extensions: extensions,
+    return Theme(
+      data: base.copyWith(extensions: extensions),
+      child: _navigationPages.first,
     );
   }
 
@@ -185,11 +166,7 @@ class _CarAppShellState extends State<CarAppShell> {
     final colors = AppColors.of(context);
     final isWide = MediaQuery.sizeOf(context).width >= 840;
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom >= 120;
-
-    final themedDashboard = Theme(
-      data: _dashboardTheme(context),
-      child: _navigationPages.first,
-    );
+    final dashboard = _dashboardWithFeaturedScope(context);
 
     final content = isWide
         ? Row(
@@ -214,7 +191,7 @@ class _CarAppShellState extends State<CarAppShell> {
                   key: ValueKey(_contentRevision),
                   index: _selectedTabIndex,
                   children: [
-                    themedDashboard,
+                    dashboard,
                     ..._navigationPages.skip(1),
                   ],
                 ),
@@ -225,7 +202,7 @@ class _CarAppShellState extends State<CarAppShell> {
             key: ValueKey(_contentRevision),
             index: _selectedTabIndex,
             children: [
-              themedDashboard,
+              dashboard,
               ..._navigationPages.skip(1),
             ],
           );
