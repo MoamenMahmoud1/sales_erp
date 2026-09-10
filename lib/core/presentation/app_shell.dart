@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../features/auth/domain/entities/auth_user.dart';
-import '../../features/car/presentation/car_app_shell.dart';
 import '../../features/customers/presentation/customers_page.dart';
 import '../../features/dashboard/presentation/dashboard_controller.dart';
 import '../../features/dashboard/presentation/dashboard_page.dart';
 import '../../features/products/presentation/products_page.dart';
+import '../../features/representative/presentation/representative_vehicle_page.dart';
 import '../../features/sales/presentation/invoices_page.dart';
 import '../../app/navigation/app_navigation_config.dart';
 import '../data/demo_data_seeder.dart';
@@ -65,6 +65,7 @@ class _AppShellState extends State<AppShell> {
 
     final homeDestination = _destinationFor(AppNavigationId.home);
     final salesDestination = _destinationFor(AppNavigationId.sales);
+    final vehicleDestination = _destinationFor(AppNavigationId.vehicle);
     final productsDestination = _destinationFor(AppNavigationId.products);
     final customersDestination = _destinationFor(AppNavigationId.customers);
     final moreDestination = _destinationFor(AppNavigationId.more);
@@ -83,6 +84,10 @@ class _AppShellState extends State<AppShell> {
         page: const InvoicesPage(),
       ),
       _NavigationEntry(
+        destination: vehicleDestination,
+        page: const RepresentativeVehiclePage(),
+      ),
+      _NavigationEntry(
         destination: productsDestination,
         page: const ProductsPage(),
       ),
@@ -96,8 +101,7 @@ class _AppShellState extends State<AppShell> {
           themeController: widget.themeController,
           onLock: widget.onLock,
           onReset: _resetDeviceData,
-          onOpenCarApp: _openCarApp,
-          showOperations: _canAccessCarOperations,
+          showOperations: false,
         ),
       ),
     ];
@@ -127,13 +131,6 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _dashboardController.dispose();
     super.dispose();
-  }
-
-  bool get _canAccessCarOperations {
-    return widget.user.hasAnyPermissionWithPrefix(const [
-      'invoices.',
-      'car.',
-    ]);
   }
 
   AppNavigationDestination _destinationFor(AppNavigationId id) {
@@ -168,21 +165,6 @@ class _AppShellState extends State<AppShell> {
     if (index < 0 || index >= _navigationEntries.length) return;
     if (_selectedTabIndex == index) return;
     setState(() => _selectedTabIndex = index);
-  }
-
-  Future<void> _openCarApp() async {
-    if (!_canAccessCarOperations) return;
-
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CarAppShell(
-          themeController: widget.themeController,
-          onLock: widget.onLock,
-          onReset: _resetDeviceData,
-        ),
-      ),
-    );
-    if (mounted) setState(() {});
   }
 
   Future<void> _resetDeviceData() async {
