@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/app_card.dart';
+import '../../../core/ui/quantity_stepper.dart';
 import '../../../core/ui/section_header.dart';
 import '../../../customers/domain/payment_method.dart';
 import '../domain/entities/vehicle_stock_item.dart';
 import 'representative_sale_controller.dart';
-import 'widgets/quantity_stepper.dart';
 
 class RepresentativeSalePage extends StatefulWidget {
   final List<VehicleStockItem> vehicleStock;
@@ -39,8 +39,7 @@ class _RepresentativeSalePageState extends State<RepresentativeSalePage> {
   }
 
   void _setPaymentAmount(String value) {
-    final amount = double.tryParse(value) ?? 0;
-    widget.controller.setPaymentAmount(amount);
+    widget.controller.setPaymentAmount(double.tryParse(value) ?? 0);
   }
 
   Future<void> _submit() async {
@@ -122,11 +121,10 @@ class _RepresentativeSalePageState extends State<RepresentativeSalePage> {
                 onChanged: widget.controller.isSubmitting
                     ? null
                     : (customerId) {
-                        RepresentativeSaleController controller = widget.controller;
                         final customer = customerId == null
                             ? null
-                            : controller.customers.firstWhere((item) => item.id == customerId);
-                        controller.selectCustomer(customer);
+                            : widget.controller.customers.firstWhere((item) => item.id == customerId);
+                        widget.controller.selectCustomer(customer);
                       },
               ),
               const SizedBox(height: AppSpacing.xl),
@@ -167,6 +165,7 @@ class _RepresentativeSalePageState extends State<RepresentativeSalePage> {
                           ),
                           QuantityStepper(
                             value: widget.controller.quantities[product.productId] ?? 0,
+                            max: product.quantity,
                             onChanged: (quantity) => widget.controller.setQuantity(
                               product.productId,
                               quantity,
