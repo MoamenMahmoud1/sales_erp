@@ -1,5 +1,3 @@
-import 'package:dio/dio.dart';
-
 import '../../../core/network/api_client.dart';
 import '../domain/entities/returnable_invoice.dart';
 import '../domain/entities/stock_transfer_request.dart';
@@ -92,27 +90,8 @@ class DioRepresentativeVehicleRepository implements RepresentativeVehicleReposit
   @override
   Future<ReturnableInvoice?> fetchReturnableInvoice({required int invoiceId}) async {
     final response = await client.dio.get('/invoices/$invoiceId/');
-    if (response.data == null) return null;
-
-    final data = Map<String, dynamic>.from(response.data as Map);
-    final items = _readList(data['items']);
-
-    return ReturnableInvoice(
-      id: _readInt(data['id']),
-      customerName: _readString(data['customer_name']),
-      status: _readString(data['status']),
-      items: [
-        for (final item in items)
-          ReturnableInvoiceItem(
-            invoiceItemId: _readInt(item['id']),
-            productId: _readInt(item['product']),
-            productName: _readString(item['product_name']),
-            soldQuantity: _readInt(item['quantity']),
-            returnedQuantity: _readInt(item['returned_quantity']),
-            unitPrice: _readString(item['unit_price']),
-          ),
-      ],
-    );
+    final row = Map<String, dynamic>.from(response.data as Map);
+    return ReturnableInvoice.fromJson(row);
   }
 
   @override
