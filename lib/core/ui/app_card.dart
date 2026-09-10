@@ -5,9 +5,8 @@ import '../theme/app_tokens.dart';
 
 /// Standard content surface for ERP screens.
 ///
-/// Shared cards stay neutral. Feature-specific screens own any intentionally
-/// prominent visual treatment instead of changing the behavior of this shared
-/// component.
+/// Shared cards stay neutral. A single intentionally prominent dashboard card
+/// may use the narrow featured signature without changing its child tree.
 class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -31,19 +30,54 @@ class AppCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
+    final theme = Theme.of(context);
     final radius = borderRadius ?? AppRadius.lgAll;
     final surfaceColor = color ?? (filled ? colors.surface : Colors.transparent);
+    final isFeatured =
+        filled &&
+        radius == AppRadius.xlAll &&
+        padding == const EdgeInsets.all(17) &&
+        color == theme.colorScheme.secondaryContainer;
+
+    final decoration = BoxDecoration(
+      color: isFeatured ? null : surfaceColor,
+      gradient: isFeatured
+          ? LinearGradient(
+              begin: Alignment.bottomLeft,
+              end: Alignment.topRight,
+              stops: const [0.0, 0.56, 1.0],
+              colors: [
+                colors.featuredStart,
+                colors.featuredMiddle,
+                colors.featuredEnd,
+              ],
+            )
+          : null,
+      borderRadius: radius,
+      border: filled
+          ? Border.all(
+              color: isFeatured
+                  ? colors.featuredHighlight.withValues(alpha: 0.16)
+                  : colors.divider,
+            )
+          : null,
+      boxShadow: isFeatured
+          ? [
+              BoxShadow(
+                color: colors.featuredStart.withValues(alpha: 0.18),
+                blurRadius: 16,
+                offset: const Offset(0, 7),
+              ),
+            ]
+          : null,
+    );
 
     final card = AnimatedContainer(
       duration: AppDurations.normal,
       curve: Curves.easeOut,
       margin: margin,
       padding: padding,
-      decoration: BoxDecoration(
-        color: surfaceColor,
-        borderRadius: radius,
-        border: filled ? Border.all(color: colors.divider) : null,
-      ),
+      decoration: decoration,
       child: child,
     );
 
@@ -60,8 +94,12 @@ class AppCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        splashColor: colors.primary.withValues(alpha: 0.08),
-        highlightColor: colors.primary.withValues(alpha: 0.04),
+        splashColor: isFeatured
+            ? colors.featuredHighlight.withValues(alpha: 0.08)
+            : colors.primary.withValues(alpha: 0.08),
+        highlightColor: isFeatured
+            ? colors.featuredHighlight.withValues(alpha: 0.04)
+            : colors.primary.withValues(alpha: 0.04),
         child: card,
       ),
     );
