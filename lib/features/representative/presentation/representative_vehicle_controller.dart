@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../domain/entities/returnable_invoice.dart';
 import '../domain/entities/stock_transfer_request.dart';
 import '../domain/entities/vehicle_stock_item.dart';
 import '../domain/entities/warehouse_manager.dart';
@@ -73,6 +74,10 @@ class RepresentativeVehicleController extends ChangeNotifier {
     }
   }
 
+  Future<ReturnableInvoice?> fetchReturnableInvoice({required int invoiceId}) {
+    return repository.fetchReturnableInvoice(invoiceId: invoiceId);
+  }
+
   Future<bool> createLoadingRequest({
     required int warehouseId,
     required int warehouseManagerId,
@@ -87,6 +92,36 @@ class RepresentativeVehicleController extends ChangeNotifier {
       final request = await repository.createLoadingRequest(
         warehouseId: warehouseId,
         warehouseManagerId: warehouseManagerId,
+        items: items,
+        reference: reference,
+      );
+      _transferRequests = [request, ..._transferRequests];
+      return true;
+    } catch (error) {
+      _errorMessage = error.toString();
+      return false;
+    } finally {
+      _isSubmittingRequest = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> createReturnRequest({
+    required int warehouseId,
+    required int warehouseManagerId,
+    required int invoiceId,
+    required List<StockTransferRequestItem> items,
+    String reference = '',
+  }) async {
+    _isSubmittingRequest = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final request = await repository.createReturnRequest(
+        warehouseId: warehouseId,
+        warehouseManagerId: warehouseManagerId,
+        invoiceId: invoiceId,
         items: items,
         reference: reference,
       );
