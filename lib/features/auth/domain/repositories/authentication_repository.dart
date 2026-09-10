@@ -1,6 +1,8 @@
 import '../entities/auth_user.dart';
 
 abstract interface class AuthenticationRepository {
+  Future<bool> hasActiveSession();
+
   Future<AuthUser> login({
     required String identifier,
     required String password,
@@ -11,4 +13,6 @@ abstract interface class AuthenticationRepository {
   Future<void> refresh();
 
   Future<void> logout();
+
+  Future<void> clearSession();
 }
