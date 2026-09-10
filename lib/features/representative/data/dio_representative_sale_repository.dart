@@ -75,6 +75,7 @@ class DioRepresentativeSaleRepository implements RepresentativeSaleRepository {
         ),
         data: {
           'customer': customerId,
+          'invoice': invoiceId,
           'cash_amount': paymentMethod == PaymentMethod.cash ? paymentAmount : 0,
           'transfer_amount': paymentMethod == PaymentMethod.transfer ? paymentAmount : 0,
         },
