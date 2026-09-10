@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-import '../../../customers/domain/payment_method.dart';
+import '../../customers/domain/payment_method.dart';
 import '../domain/entities/representative_customer.dart';
 import '../domain/entities/vehicle_stock_item.dart';
 import '../domain/repositories/representative_sale_repository.dart';
