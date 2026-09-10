@@ -10,11 +10,7 @@ void main() {
   ) async {
     final lockController = AppLockController();
     final themeController = AppThemeController();
-    addTearDown(() {
-      lockController.lock();
-      lockController.dispose();
-      themeController.dispose();
-    });
+    addTearDown(lockController.dispose);
 
     await lockController.unlock();
 
@@ -34,5 +30,8 @@ void main() {
       tester.widget<MaterialApp>(find.byType(MaterialApp)).title,
       'Sales ERP',
     );
+
+    lockController.lock();
+    await tester.pumpWidget(const SizedBox());
   });
 }
