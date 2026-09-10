@@ -10,6 +10,11 @@ class AuthRepository implements AuthenticationRepository {
   const AuthRepository(this.client);
 
   @override
+  Future<bool> hasActiveSession() {
+    return client.hasAccessToken();
+  }
+
+  @override
   Future<AuthUser> login({
     required String identifier,
     required String password,
@@ -70,6 +75,11 @@ class AuthRepository implements AuthenticationRepository {
     } finally {
       await client.clearSession();
     }
+  }
+
+  @override
+  Future<void> clearSession() {
+    return client.clearSession();
   }
 
   Future<void> requestPasswordReset(String email) {
