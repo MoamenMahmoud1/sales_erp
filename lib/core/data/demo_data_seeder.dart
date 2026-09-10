@@ -20,15 +20,17 @@ class DemoDataSeeder {
       : _storage = storage ?? const FlutterSecureStorage(),
         _random = random ?? Random(42);
 
-  /// Seeds demo data if the database is brand new. No-op otherwise.
-  Future<void> seedIfNeeded() async {
-    bool alreadySeeded = false;
-    try {
-      alreadySeeded = await _storage.read(key: _seedFlagKey) == 'true';
-    } catch (_) {
-      alreadySeeded = false;
+  /// Seeds the database once unless [force] is used by the reset flow.
+  Future<void> seedIfNeeded({bool force = false}) async {
+    if (!force) {
+      bool alreadySeeded = false;
+      try {
+        alreadySeeded = await _storage.read(key: _seedFlagKey) == 'true';
+      } catch (_) {
+        alreadySeeded = false;
+      }
+      if (alreadySeeded) return;
     }
-    if (alreadySeeded) return;
 
     final database = await AppDatabase.database;
     final hasProducts = await database.query('products', limit: 1);
