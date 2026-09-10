@@ -10,7 +10,11 @@ void main() {
   ) async {
     final lockController = AppLockController();
     final themeController = AppThemeController();
-    addTearDown(lockController.dispose);
+    addTearDown(() {
+      lockController.lock();
+      lockController.dispose();
+      themeController.dispose();
+    });
 
     await lockController.unlock();
 
