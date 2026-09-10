@@ -1,7 +1,6 @@
 import 'package:flutter/widgets.dart';
 
 import 'app/app.dart';
-import 'core/data/car_demo_data_seeder.dart';
 import 'core/data/demo_data_seeder.dart';
 import 'core/presentation/app_shell.dart';
 import 'core/repositories/app_services.dart';
@@ -17,7 +16,6 @@ Future<void> main() async {
 
   await AppServices.instance.init();
   await DemoDataSeeder().seedIfNeeded();
-  await CarDemoDataSeeder().seedIfNeeded();
 
   final lockController = AppLockController();
   await lockController.init();
