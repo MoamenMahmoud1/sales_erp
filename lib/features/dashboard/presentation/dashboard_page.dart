@@ -14,11 +14,13 @@ import 'widgets/revenue_summary_card.dart';
 
 class DashboardPage extends StatefulWidget {
   final ValueChanged<int> onNavigateTo;
+  final bool Function(int)? canNavigateTo;
   final DashboardController controller;
 
   const DashboardPage({
     super.key,
     required this.onNavigateTo,
+    this.canNavigateTo,
     required this.controller,
   });
 
@@ -149,8 +151,8 @@ class _DashboardPageState extends State<DashboardPage> {
           const SizedBox(height: AppSpacing.xl),
           SectionHeader(
             title: 'Recent sales',
-            actionLabel: 'View all',
-            onAction: () => widget.onNavigateTo(1),
+            actionLabel: _canNavigateTo(1) ? 'View all' : null,
+            onAction: _canNavigateTo(1) ? () => widget.onNavigateTo(1) : null,
           ),
           const SizedBox(height: AppSpacing.md),
           _buildRecentSales(snapshot),
@@ -191,23 +193,30 @@ class _DashboardPageState extends State<DashboardPage> {
       spacing: AppSpacing.sm,
       runSpacing: AppSpacing.sm,
       children: [
-        OutlinedButton.icon(
-          onPressed: () => widget.onNavigateTo(1),
-          icon: const Icon(Icons.add_shopping_cart_outlined),
-          label: const Text('New sale'),
-        ),
-        OutlinedButton.icon(
-          onPressed: () => widget.onNavigateTo(2),
-          icon: const Icon(Icons.inventory_2_outlined),
-          label: const Text('Products'),
-        ),
-        OutlinedButton.icon(
-          onPressed: () => widget.onNavigateTo(3),
-          icon: const Icon(Icons.person_add_alt_1_outlined),
-          label: const Text('Customers'),
-        ),
+        if (_canNavigateTo(1))
+          OutlinedButton.icon(
+            onPressed: () => widget.onNavigateTo(1),
+            icon: const Icon(Icons.add_shopping_cart_outlined),
+            label: const Text('New sale'),
+          ),
+        if (_canNavigateTo(2))
+          OutlinedButton.icon(
+            onPressed: () => widget.onNavigateTo(2),
+            icon: const Icon(Icons.inventory_2_outlined),
+            label: const Text('Products'),
+          ),
+        if (_canNavigateTo(3))
+          OutlinedButton.icon(
+            onPressed: () => widget.onNavigateTo(3),
+            icon: const Icon(Icons.person_add_alt_1_outlined),
+            label: const Text('Customers'),
+          ),
       ],
     );
+  }
+
+  bool _canNavigateTo(int legacyIndex) {
+    return widget.canNavigateTo?.call(legacyIndex) ?? true;
   }
 
   Widget _buildOverdueNotice(
