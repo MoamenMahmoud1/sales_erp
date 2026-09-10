@@ -7,6 +7,8 @@ import '../../../core/ui/app_card.dart';
 import '../../../core/ui/section_header.dart';
 import '../../../core/ui/status_badge.dart';
 import '../domain/entities/stock_transfer_request.dart';
+import 'representative_sale_controller.dart';
+import 'representative_sale_page.dart';
 import 'representative_vehicle_controller.dart';
 import 'widgets/create_loading_request_sheet.dart';
 import 'widgets/create_return_request_sheet.dart';
@@ -69,6 +71,32 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
     if (created == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Return request sent for warehouse approval.')),
+      );
+    }
+  }
+
+  Future<void> _openSale() async {
+    final vehicle = _controller.vehicle;
+    if (vehicle == null || _controller.vehicleStock.isEmpty) return;
+
+    final saleController = RepresentativeSaleController(
+      repository: AppServices.instance.representativeSaleRepository,
+    );
+    final invoiceId = await Navigator.of(context).push<int>(
+      MaterialPageRoute(
+        builder: (_) => RepresentativeSalePage(
+          vehicleStock: _controller.vehicleStock,
+          controller: saleController,
+        ),
+      ),
+    );
+    saleController.dispose();
+
+    if (invoiceId != null && mounted) {
+      await _controller.load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Invoice #$invoiceId created from vehicle stock.')),
       );
     }
   }
@@ -174,6 +202,15 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
                       VehicleStockCard(items: _controller.vehicleStock),
                       const SizedBox(height: AppSpacing.md),
                       if (_controller.vehicle != null && _controller.vehicle!.vehicleId > 0) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: _controller.vehicleStock.isEmpty ? null : _openSale,
+                            icon: const Icon(Icons.point_of_sale_rounded),
+                            label: const Text('New sale'),
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.icon(
