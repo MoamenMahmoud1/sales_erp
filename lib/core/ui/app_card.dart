@@ -38,7 +38,6 @@ class AppCard extends StatelessWidget {
     final primary = AppColors.of(context).primary;
     final deepColor = _withLightness(primary, -0.18);
     final brightColor = _withLightness(primary, 0.18);
-
     return [deepColor, primary, brightColor];
   }
 
@@ -47,10 +46,11 @@ class AppCard extends StatelessWidget {
     final colors = AppColors.of(context);
     final theme = Theme.of(context);
     final radius = borderRadius ?? AppRadius.lgAll;
+    final scope = theme.extension<FeaturedCardTheme>();
     final isFeatured =
-        theme.extension<FeaturedCardTheme>()?.enabled == true && color != null;
-    final featuredColors = isFeatured ? _featuredColors(context) : const <Color>[];
+        scope?.enabled == true && color == theme.colorScheme.secondaryContainer;
     final surfaceColor = color ?? (filled ? colors.surface : Colors.transparent);
+    final featuredColors = isFeatured ? _featuredColors(context) : const <Color>[];
 
     final decoration = BoxDecoration(
       color: isFeatured ? null : surfaceColor,
@@ -81,34 +81,44 @@ class AppCard extends StatelessWidget {
           : null,
     );
 
-    final content = isFeatured
-        ? ClipRRect(
-            borderRadius: radius,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: RadialGradient(
-                          center: const Alignment(-1.02, -0.92),
-                          radius: 1.08,
-                          colors: [
-                            Colors.white.withValues(alpha: 0.16),
-                            Colors.white.withValues(alpha: 0.05),
-                            Colors.transparent,
-                          ],
-                          stops: const [0.0, 0.20, 0.58],
-                        ),
+    Widget content = child;
+    if (isFeatured) {
+      final featuredScheme = theme.colorScheme.copyWith(
+        secondary: featuredColors[1],
+        onSecondary: Colors.white,
+        secondaryContainer: featuredColors[1],
+        onSecondaryContainer: Colors.white,
+      );
+      content = Theme(
+        data: theme.copyWith(colorScheme: featuredScheme),
+        child: ClipRRect(
+          borderRadius: radius,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        center: const Alignment(-1.02, -0.92),
+                        radius: 1.08,
+                        colors: [
+                          Colors.white.withValues(alpha: 0.16),
+                          Colors.white.withValues(alpha: 0.05),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.20, 0.58],
                       ),
                     ),
                   ),
                 ),
-                Positioned.fill(child: child),
-              ],
-            ),
-          )
-        : child;
+              ),
+              Positioned.fill(child: child),
+            ],
+          ),
+        ),
+      );
+    }
 
     final card = AnimatedContainer(
       duration: AppDurations.normal,
