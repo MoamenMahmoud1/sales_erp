@@ -11,7 +11,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/featured_card_theme.dart';
 import '../../../core/presentation/settings_page.dart';
 import '../../products/presentation/products_page.dart';
-import 'car_daily_dashboard_page.dart';
+import 'car_dashboard_bootstrap_page.dart';
 import 'car_payments_page.dart';
 import 'car_reports_page.dart';
 import 'car_trips_page.dart';
@@ -78,7 +78,7 @@ class _CarAppShellState extends State<CarAppShell> {
     super.initState();
     _selectedTabIndex = 0;
     _navigationPages = [
-      CarDailyDashboardPage(onNavigate: _goToTab),
+      CarDashboardBootstrapPage(onNavigate: _goToTab),
       const CarTripsPage(),
       const CarPaymentsPage(),
       ProductsPage(carMode: true),
