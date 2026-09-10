@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_tokens.dart';
-import '../theme/featured_card_theme.dart';
 
 /// Standard content surface for ERP screens.
 ///
-/// Shared cards are neutral by default. A screen may explicitly enable the
-/// featured-card scope when one surface needs stronger visual emphasis.
+/// Shared cards are neutral by default. A card becomes featured only when a
+/// screen explicitly gives it the semantic featured-middle color.
 class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -28,37 +27,26 @@ class AppCard extends StatelessWidget {
     this.margin,
   });
 
-  Color _withLightness(Color color, double delta) {
-    final hsl = HSLColor.fromColor(color);
-    final lightness = (hsl.lightness + delta).clamp(0.05, 0.94).toDouble();
-    return hsl.withLightness(lightness).toColor();
-  }
-
-  List<Color> _featuredColors(BuildContext context) {
-    final primary = AppColors.of(context).primary;
-    final deepColor = _withLightness(primary, -0.18);
-    final brightColor = _withLightness(primary, 0.18);
-    return [deepColor, primary, brightColor];
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
     final theme = Theme.of(context);
     final radius = borderRadius ?? AppRadius.lgAll;
-    final scope = theme.extension<FeaturedCardTheme>();
-    final isFeatured =
-        scope?.enabled == true && color == theme.colorScheme.secondaryContainer;
+    final isFeatured = filled && color == colors.featuredMiddle;
     final surfaceColor = color ?? (filled ? colors.surface : Colors.transparent);
-    final featuredColors = isFeatured ? _featuredColors(context) : const <Color>[];
+    final featuredColors = <Color>[
+      colors.featuredStart,
+      colors.featuredMiddle,
+      colors.featuredEnd,
+    ];
 
     final decoration = BoxDecoration(
       color: isFeatured ? null : surfaceColor,
       gradient: isFeatured
           ? LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              stops: const [0.0, 0.5, 1.0],
+              begin: Alignment.bottomLeft,
+              end: Alignment.topRight,
+              stops: const [0.0, 0.58, 1.0],
               colors: featuredColors,
             )
           : null,
@@ -66,14 +54,14 @@ class AppCard extends StatelessWidget {
       border: filled
           ? Border.all(
               color: isFeatured
-                  ? Colors.white.withValues(alpha: 0.14)
+                  ? colors.featuredHighlight.withValues(alpha: 0.16)
                   : colors.divider,
             )
           : null,
       boxShadow: isFeatured
           ? [
               BoxShadow(
-                color: featuredColors.first.withValues(alpha: 0.22),
+                color: colors.featuredStart.withValues(alpha: 0.20),
                 blurRadius: 18,
                 offset: const Offset(0, 8),
               ),
@@ -84,10 +72,10 @@ class AppCard extends StatelessWidget {
     Widget content = child;
     if (isFeatured) {
       final featuredScheme = theme.colorScheme.copyWith(
-        secondary: featuredColors[1],
-        onSecondary: Colors.white,
-        secondaryContainer: featuredColors[1],
-        onSecondaryContainer: Colors.white,
+        secondary: colors.featuredMiddle,
+        onSecondary: colors.featuredHighlight,
+        secondaryContainer: colors.featuredMiddle,
+        onSecondaryContainer: colors.featuredHighlight,
       );
       content = Theme(
         data: theme.copyWith(colorScheme: featuredScheme),
@@ -100,14 +88,14 @@ class AppCard extends StatelessWidget {
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: RadialGradient(
-                        center: const Alignment(-1.02, -0.92),
-                        radius: 1.08,
+                        center: const Alignment(0.92, -0.92),
+                        radius: 1.05,
                         colors: [
-                          Colors.white.withValues(alpha: 0.16),
-                          Colors.white.withValues(alpha: 0.05),
+                          colors.featuredHighlight.withValues(alpha: 0.18),
+                          colors.featuredHighlight.withValues(alpha: 0.06),
                           Colors.transparent,
                         ],
-                        stops: const [0.0, 0.20, 0.58],
+                        stops: const [0.0, 0.24, 0.64],
                       ),
                     ),
                   ),
@@ -143,10 +131,10 @@ class AppCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         splashColor: isFeatured
-            ? Colors.white.withValues(alpha: 0.08)
+            ? colors.featuredHighlight.withValues(alpha: 0.08)
             : colors.primary.withValues(alpha: 0.08),
         highlightColor: isFeatured
-            ? Colors.white.withValues(alpha: 0.04)
+            ? colors.featuredHighlight.withValues(alpha: 0.04)
             : colors.primary.withValues(alpha: 0.04),
         child: card,
       ),
