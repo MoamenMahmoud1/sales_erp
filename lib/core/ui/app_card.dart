@@ -30,9 +30,8 @@ class AppCard extends StatelessWidget {
 
   Color _withLightness(Color color, double delta) {
     final hsl = HSLColor.fromColor(color);
-    return hsl
-        .withLightness((hsl.lightness + delta).clamp(0.04, 0.96))
-        .toColor();
+    final lightness = (hsl.lightness + delta).clamp(0.04, 0.96).toDouble();
+    return hsl.withLightness(lightness).toColor();
   }
 
   List<Color> _featuredColors(BuildContext context) {
