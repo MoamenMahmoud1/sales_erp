@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
-import '../data/auth_repository.dart';
+import '../domain/entities/auth_user.dart';
+import '../domain/repositories/authentication_repository.dart';
 
 enum AuthStatus {
   checking,
@@ -9,19 +10,16 @@ enum AuthStatus {
 }
 
 class AuthController extends ChangeNotifier {
-  final AuthRepository repository;
+  final AuthenticationRepository repository;
 
-  /// دالة بترجّع هل يسمح الوضع الحالي بالدخول من غير سيرفر؟ (local / hybrid).
-  ///
-  /// بتتقييم لحظيًا من الـ DataMode الحالي عشان لو اتبدل الوضع
-  /// وقت التشغيل تفضل القرارات صحيحة.
+  /// Determines whether the current application mode permits offline access.
   final bool Function() offlineAllowed;
 
-  /// بيتنادى لما الوضع (local / hybrid / api) يتغير عشان نقدر
-  /// نعمل اللي محتاجينه زي مسح الجلسة لو المطلوب دخل بـ token.
+  /// Called when the operational data mode changes.
   final Future<void> Function()? onModeChanged;
 
   AuthStatus status = AuthStatus.checking;
+  AuthUser? currentUser;
 
   AuthController(
     this.repository, {
@@ -33,52 +31,69 @@ class AuthController extends ChangeNotifier {
 
   Future<void> restoreSession() async {
     status = AuthStatus.checking;
+    currentUser = null;
     notifyListeners();
 
     if (canAccessOffline) {
-      // في الوضع المحلي / الهايبرد بنسمح بالدخول فورًا
-      // والبيانات كلها من القاعدة المحلية.
+      currentUser = AuthUser.localDevelopmentUser();
       status = AuthStatus.authenticated;
       notifyListeners();
       return;
     }
 
     try {
-      if (!await repository.client.hasAccessToken()) {
+      if (!await repository.hasActiveSession()) {
         status = AuthStatus.unauthenticated;
         notifyListeners();
         return;
       }
+
       await repository.refresh();
+      currentUser = await repository.fetchCurrentUser();
       status = AuthStatus.authenticated;
     } catch (_) {
-      await repository.client.clearSession();
+      await repository.clearSession();
+      currentUser = null;
       status = AuthStatus.unauthenticated;
     }
+
     notifyListeners();
   }
 
-  void markAuthenticated() {
+  Future<void> login({
+    required String identifier,
+    required String password,
+  }) async {
+    currentUser = await repository.login(
+      identifier: identifier,
+      password: password,
+    );
+    status = AuthStatus.authenticated;
+    notifyListeners();
+  }
+
+  void markAuthenticated({AuthUser? user}) {
+    currentUser = user ?? AuthUser.localDevelopmentUser();
     status = AuthStatus.authenticated;
     notifyListeners();
   }
 
   Future<void> logout() async {
-    if (!canAccessOffline) {
+    if (canAccessOffline) {
+      await repository.clearSession();
+    } else {
       try {
         await repository.logout();
       } catch (_) {
-        await repository.client.clearSession();
+        await repository.clearSession();
       }
-    } else {
-      // من غير سيرفر نمسح الجلسة المحلية بس.
-      await repository.client.clearSession();
     }
+
+    currentUser = null;
     status = AuthStatus.unauthenticated;
     notifyListeners();
   }
 
-  /// بيستدعي الكولباك بتاع تغيير الوضع لو موجود.
   Future<void> handleModeChanged() async {
     await onModeChanged?.call();
   }
