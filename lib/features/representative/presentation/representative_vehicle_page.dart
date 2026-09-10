@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/repositories/app_services.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/app_card.dart';
 import '../../../core/ui/section_header.dart';
 import '../../../core/ui/status_badge.dart';
-import '../../../core/repositories/app_services.dart';
 import '../domain/entities/stock_transfer_request.dart';
 import 'representative_vehicle_controller.dart';
 import 'widgets/create_loading_request_sheet.dart';
+import 'widgets/create_return_request_sheet.dart';
 import 'widgets/stock_transfer_requests_card.dart';
 import 'widgets/vehicle_stock_card.dart';
 
@@ -54,6 +55,20 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
     if (created == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Stock request sent for warehouse approval.')),
+      );
+    }
+  }
+
+  Future<void> _openReturnRequest() async {
+    final created = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => CreateReturnRequestSheet(controller: _controller),
+    );
+    if (created == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Return request sent for warehouse approval.')),
       );
     }
   }
@@ -158,7 +173,7 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
                       const SizedBox(height: AppSpacing.md),
                       VehicleStockCard(items: _controller.vehicleStock),
                       const SizedBox(height: AppSpacing.md),
-                      if (_controller.vehicle != null && _controller.vehicle!.vehicleId > 0)
+                      if (_controller.vehicle != null && _controller.vehicle!.vehicleId > 0) ...[
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.icon(
@@ -167,6 +182,16 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
                             label: const Text('Request goods from warehouse'),
                           ),
                         ),
+                        const SizedBox(height: AppSpacing.sm),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _controller.isSubmittingRequest ? null : _openReturnRequest,
+                            icon: const Icon(Icons.undo_rounded),
+                            label: const Text('Request a return to warehouse'),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: AppSpacing.xl),
                       StockTransferRequestsCard(requests: _controller.transferRequests),
                       const SizedBox(height: AppSpacing.xxl),
