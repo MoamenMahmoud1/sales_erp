@@ -16,10 +16,12 @@ import 'widgets/vehicle_stock_card.dart';
 
 class RepresentativeVehiclePage extends StatefulWidget {
   final RepresentativeVehicleController? controller;
+  final bool canSell;
 
   const RepresentativeVehiclePage({
     super.key,
     this.controller,
+    this.canSell = false,
   });
 
   @override
@@ -76,7 +78,7 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
 
   Future<void> _openSale() async {
     final vehicle = _controller.vehicle;
-    if (vehicle == null || _controller.vehicleStock.isEmpty) return;
+    if (!widget.canSell || vehicle == null || _controller.vehicleStock.isEmpty) return;
 
     final saleController = RepresentativeSaleController(
       repository: AppServices.instance.representativeSaleRepository,
@@ -201,15 +203,17 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
                       VehicleStockCard(items: _controller.vehicleStock),
                       const SizedBox(height: AppSpacing.md),
                       if (_controller.vehicle != null && _controller.vehicle!.vehicleId > 0) ...[
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _controller.vehicleStock.isEmpty ? null : _openSale,
-                            icon: const Icon(Icons.point_of_sale_rounded),
-                            label: const Text('New sale'),
+                        if (widget.canSell) ...[
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _controller.vehicleStock.isEmpty ? null : _openSale,
+                              icon: const Icon(Icons.point_of_sale_rounded),
+                              label: const Text('New sale'),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
+                          const SizedBox(height: AppSpacing.sm),
+                        ],
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.icon(
