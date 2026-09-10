@@ -97,6 +97,7 @@ class _AppShellState extends State<AppShell> {
           onLock: widget.onLock,
           onReset: _resetDeviceData,
           onOpenCarApp: _openCarApp,
+          showOperations: _canAccessCarOperations,
         ),
       ),
     ];
@@ -126,6 +127,13 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _dashboardController.dispose();
     super.dispose();
+  }
+
+  bool get _canAccessCarOperations {
+    return widget.user.hasAnyPermissionWithPrefix(const [
+      'invoices.',
+      'car.',
+    ]);
   }
 
   AppNavigationDestination _destinationFor(AppNavigationId id) {
@@ -163,6 +171,8 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _openCarApp() async {
+    if (!_canAccessCarOperations) return;
+
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => CarAppShell(
