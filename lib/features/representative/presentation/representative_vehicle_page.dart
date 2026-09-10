@@ -6,7 +6,6 @@ import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/app_card.dart';
 import '../../../core/ui/section_header.dart';
 import '../../../core/ui/status_badge.dart';
-import '../domain/entities/stock_transfer_request.dart';
 import 'representative_sale_controller.dart';
 import 'representative_sale_page.dart';
 import 'representative_vehicle_controller.dart';
@@ -143,7 +142,7 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
                         ),
                       SectionHeader(
                         title: 'Current vehicle',
-                        action: _controller.vehicle == null
+                        trailing: _controller.vehicle == null
                             ? null
                             : StatusBadge(
                                 type: _vehicleStatusType(true),
