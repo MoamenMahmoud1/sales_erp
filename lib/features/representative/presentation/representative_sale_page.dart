@@ -5,7 +5,7 @@ import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/app_card.dart';
 import '../../../core/ui/quantity_stepper.dart';
 import '../../../core/ui/section_header.dart';
-import '../../../customers/domain/payment_method.dart';
+import '../../customers/domain/payment_method.dart';
 import '../domain/entities/vehicle_stock_item.dart';
 import 'representative_sale_controller.dart';
 
