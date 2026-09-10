@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../../../core/network/api_client.dart';
-import '../../../customers/domain/payment_method.dart';
+import '../../customers/domain/payment_method.dart';
 import '../domain/entities/representative_customer.dart';
 import '../domain/repositories/representative_sale_repository.dart';
 
