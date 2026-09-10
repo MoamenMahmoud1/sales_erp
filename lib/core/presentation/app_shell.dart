@@ -110,9 +110,12 @@ class _AppShellState extends State<AppShell> {
         if (visibleIds.contains(entry.destination.id)) entry,
     ];
 
-    final initialDestination = AppNavigationId.values[
-      widget.initialIndex.clamp(0, AppNavigationId.values.length - 1),
-    ];
+    final boundedInitialIndex = widget.initialIndex < 0
+        ? 0
+        : widget.initialIndex >= AppNavigationId.values.length
+            ? AppNavigationId.values.length - 1
+            : widget.initialIndex;
+    final initialDestination = AppNavigationId.values[boundedInitialIndex];
     final initialVisibleIndex = _navigationEntries.indexWhere(
       (entry) => entry.destination.id == initialDestination,
     );
