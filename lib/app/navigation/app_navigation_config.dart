@@ -1,10 +1,12 @@
+import 'package:flutter/material.dart';
+
 import '../../features/auth/domain/entities/auth_user.dart';
 
 class AppNavigationDestination {
   final AppNavigationId id;
   final String label;
-  final Object icon;
-  final Object selectedIcon;
+  final IconData icon;
+  final IconData selectedIcon;
   final List<String> permissionPrefixes;
   final bool requiresRole;
 
@@ -40,36 +42,36 @@ class AppNavigationConfig {
   static const destinations = [
     AppNavigationDestination(
       id: AppNavigationId.home,
-      icon: 'space_dashboard_outlined',
-      selectedIcon: 'space_dashboard_rounded',
+      icon: Icons.space_dashboard_outlined,
+      selectedIcon: Icons.space_dashboard_rounded,
       label: 'Home',
       requiresRole: true,
     ),
     AppNavigationDestination(
       id: AppNavigationId.sales,
-      icon: 'receipt_long_outlined',
-      selectedIcon: 'receipt_long_rounded',
+      icon: Icons.receipt_long_outlined,
+      selectedIcon: Icons.receipt_long_rounded,
       label: 'Sales',
       permissionPrefixes: ['sales.'],
     ),
     AppNavigationDestination(
       id: AppNavigationId.products,
-      icon: 'inventory_2_outlined',
-      selectedIcon: 'inventory_2_rounded',
+      icon: Icons.inventory_2_outlined,
+      selectedIcon: Icons.inventory_2_rounded,
       label: 'Products',
       permissionPrefixes: ['products.', 'inventory.'],
     ),
     AppNavigationDestination(
       id: AppNavigationId.customers,
-      icon: 'people_outline_rounded',
-      selectedIcon: 'people_rounded',
+      icon: Icons.people_outline_rounded,
+      selectedIcon: Icons.people_rounded,
       label: 'Customers',
       permissionPrefixes: ['customers.', 'crm.'],
     ),
     AppNavigationDestination(
       id: AppNavigationId.more,
-      icon: 'more_horiz_rounded',
-      selectedIcon: 'tune_rounded',
+      icon: Icons.more_horiz_rounded,
+      selectedIcon: Icons.tune_rounded,
       label: 'More',
       requiresRole: true,
     ),
