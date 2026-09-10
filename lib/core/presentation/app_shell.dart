@@ -85,7 +85,9 @@ class _AppShellState extends State<AppShell> {
       ),
       _NavigationEntry(
         destination: vehicleDestination,
-        page: const RepresentativeVehiclePage(),
+        page: RepresentativeVehiclePage(
+          canSell: widget.user.hasPermission('invoices.confirm_invoice'),
+        ),
       ),
       _NavigationEntry(
         destination: productsDestination,
