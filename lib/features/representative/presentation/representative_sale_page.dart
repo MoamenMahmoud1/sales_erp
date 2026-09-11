@@ -43,19 +43,31 @@ class _RepresentativeSalePageState extends State<RepresentativeSalePage> {
   }
 
   Future<void> _submit() async {
-    final invoiceId = await widget.controller.submit();
+    final submission = await widget.controller.submit();
     if (!mounted) return;
 
-    if (invoiceId != null) {
-      Navigator.of(context).pop(invoiceId);
+    if (submission == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.controller.errorMessage ?? 'Failed to create sale.'),
+        ),
+      );
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(widget.controller.errorMessage ?? 'Failed to create sale.'),
-      ),
-    );
+    if (submission.queued) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Sale saved locally. It will be sent automatically when the connection returns.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    Navigator.of(context).pop(submission.invoiceId);
   }
 
   String _money(String value) {
@@ -256,7 +268,7 @@ class _RepresentativeSalePageState extends State<RepresentativeSalePage> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.check_rounded),
-                  label: Text(widget.controller.isSubmitting ? 'Saving...' : 'Create sale'),
+                  label: Text(widget.controller.isSubmitting ? 'Sending...' : 'Create sale'),
                 ),
               ),
             ],
