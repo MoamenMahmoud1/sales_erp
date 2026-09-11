@@ -280,11 +280,12 @@ class ReliableCommandClient {
             await refreshSession!.call();
             continue;
           } catch (_) {
-            // Authentication failures are surfaced below; only transport
-            // failures are moved into the local outbox.
+            // Preserve the command below so it can replay after the user
+            // restores the same authenticated session.
           }
         }
-        if (!_isTransientNetworkError(error)) rethrow;
+
+        if (!_isTransientNetworkOrServerError(error)) rethrow;
 
         final ownerUserId = await client.currentUserId;
         if (ownerUserId == null) rethrow;
@@ -305,13 +306,15 @@ class ReliableCommandClient {
     }
   }
 
-  bool _isTransientNetworkError(DioException error) {
-    return switch (error.type) {
-      DioExceptionType.connectionTimeout ||
-      DioExceptionType.sendTimeout ||
-      DioExceptionType.receiveTimeout ||
-      DioExceptionType.connectionError => true,
-      _ => error.response == null,
-    };
+  bool _isTransientNetworkOrServerError(DioException error) {
+    if (error.response == null) return true;
+    final status = error.response?.statusCode ?? 0;
+    return status == 408 ||
+        status == 425 ||
+        status == 429 ||
+        status == 500 ||
+        status == 502 ||
+        status == 503 ||
+        status == 504;
   }
 }
