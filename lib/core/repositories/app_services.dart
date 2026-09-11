@@ -7,7 +7,6 @@ import '../../features/customers/data/local_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
 import '../../features/dashboard/data/local_dashboard_repository.dart';
 import '../../features/dashboard/domain/dashboard_repository.dart';
-import '../../features/dashboard/domain/dashboard_repository.dart';
 import '../../features/notifications/data/dio_notification_repository.dart';
 import '../../features/notifications/data/firebase_push_notification_repository.dart';
 import '../../features/notifications/domain/repositories/notification_repository.dart';
