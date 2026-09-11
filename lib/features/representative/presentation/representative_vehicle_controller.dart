@@ -166,14 +166,9 @@ class RepresentativeVehicleController extends ChangeNotifier {
         reason: reason,
       );
       _lastVehicleMutationQueued = result.queued;
-      if (!result.queued) {
-        _vehicle = RepresentativeVehicle(
-          shiftId: vehicle.shiftId,
-          vehicleId: vehicle.vehicleId,
-          vehicleName: name,
-          businessDate: vehicle.businessDate,
-        );
-      }
+      // Creating the approval request does not mean the mutation was approved.
+      // The current vehicle stays unchanged until a later reload observes the
+      // approved server state.
       return true;
     } catch (error) {
       _errorMessage = error.toString();
@@ -198,9 +193,7 @@ class RepresentativeVehicleController extends ChangeNotifier {
         reason: reason,
       );
       _lastVehicleMutationQueued = result.queued;
-      if (!result.queued) {
-        await load();
-      }
+      // A pending approval must not deactivate the local vehicle optimistically.
       return true;
     } catch (error) {
       _errorMessage = error.toString();
