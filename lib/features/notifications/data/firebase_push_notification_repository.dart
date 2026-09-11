@@ -52,32 +52,40 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
   Future<void> initialize() async {
     if (_initialized || !FirebaseConfig.isConfigured) return;
 
-    await Firebase.initializeApp(options: FirebaseConfig.currentPlatform);
+    try {
+      await Firebase.initializeApp(options: FirebaseConfig.currentPlatform);
 
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    await _initializeLocalNotifications();
-    await _configureForegroundPresentation();
+      await _initializeLocalNotifications();
+      await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+        alert: false,
+        badge: false,
+        sound: false,
+      );
 
-    _foregroundSubscription = FirebaseMessaging.onMessage.listen(
-      _showForegroundNotification,
-    );
-    _openedSubscription = FirebaseMessaging.onMessageOpenedApp.listen(
-      _publishOpenedNotification,
-    );
-    _installationIdSubscription =
-        FirebaseInstallations.instance.onIdChange.listen((installationId) {
-      if (_authenticated) {
-        unawaited(_registerInstallation(installationId));
+      _foregroundSubscription = FirebaseMessaging.onMessage.listen(
+        _showForegroundNotification,
+      );
+      _openedSubscription = FirebaseMessaging.onMessageOpenedApp.listen(
+        _publishOpenedNotification,
+      );
+      _installationIdSubscription =
+          FirebaseInstallations.instance.onIdChange.listen((installationId) {
+        if (_authenticated) {
+          unawaited(_registerInstallation(installationId));
+        }
+      });
+
+      final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+      if (initialMessage != null) {
+        _publishOpenedNotification(initialMessage);
       }
-    });
 
-    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
-    if (initialMessage != null) {
-      _publishOpenedNotification(initialMessage);
+      _initialized = true;
+    } catch (error) {
+      debugPrint('Firebase push initialization failed: $error');
     }
-
-    _initialized = true;
   }
 
   @override
@@ -94,7 +102,24 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
     }
 
     _authenticated = true;
-    await _registerCurrentInstallation();
+    await _requestPermissionAndRegister();
+  }
+
+  Future<void> _requestPermissionAndRegister() async {
+    try {
+      final settings = await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
+      debugPrint('Push notification permission: ${settings.authorizationStatus}');
+
+      if (settings.authorizationStatus == AuthorizationStatus.denied) return;
+      await _registerCurrentInstallation();
+    } catch (error) {
+      debugPrint('Push notification permission failed: $error');
+    }
   }
 
   Future<void> _initializeLocalNotifications() async {
@@ -139,23 +164,6 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
     );
   }
 
-  Future<void> _configureForegroundPresentation() async {
-    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-      alert: false,
-      badge: false,
-      sound: false,
-    );
-
-    final settings = await FirebaseMessaging.instance.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      provisional: false,
-    );
-
-    debugPrint('Push notification permission: ${settings.authorizationStatus}');
-  }
-
   Future<void> _showForegroundNotification(RemoteMessage message) async {
     final remoteNotification = message.notification;
     if (remoteNotification == null) return;
@@ -173,7 +181,7 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
       _notificationId(message),
       remoteNotification.title,
       remoteNotification.body,
-      const NotificationDetails(
+      NotificationDetails(
         android: androidDetails,
         iOS: iosDetails,
       ),
