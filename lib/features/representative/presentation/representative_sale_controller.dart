@@ -18,7 +18,9 @@ class RepresentativeSaleController extends ChangeNotifier {
   double _paymentAmount = 0;
   bool _isLoading = false;
   bool _isSubmitting = false;
+  bool _lastSubmissionQueued = false;
   String? _errorMessage;
+  String? _lastOperationKey;
 
   List<RepresentativeCustomer> get customers => _customers;
   List<VehicleStockItem> get vehicleStock => _vehicleStock;
@@ -27,14 +29,18 @@ class RepresentativeSaleController extends ChangeNotifier {
   double get paymentAmount => _paymentAmount;
   bool get isLoading => _isLoading;
   bool get isSubmitting => _isSubmitting;
+  bool get lastSubmissionQueued => _lastSubmissionQueued;
   String? get errorMessage => _errorMessage;
+  String? get lastOperationKey => _lastOperationKey;
 
   Map<int, int> get quantities => Map.unmodifiable(_quantities);
 
   double get totalAmount {
     return _vehicleStock.fold<double>(
       0,
-      (total, item) => total + (double.tryParse(item.sellingPrice) ?? 0) * (_quantities[item.productId] ?? 0),
+      (total, item) => total +
+          (double.tryParse(item.sellingPrice) ?? 0) *
+              (_quantities[item.productId] ?? 0),
     );
   }
 
@@ -44,7 +50,9 @@ class RepresentativeSaleController extends ChangeNotifier {
   }
 
   bool get canSubmit {
-    if (_selectedCustomer == null || _quantities.isEmpty || _isSubmitting) return false;
+    if (_selectedCustomer == null || _quantities.isEmpty || _isSubmitting) {
+      return false;
+    }
     if (!_paymentAmount.isFinite || _paymentAmount < 0) return false;
     return _paymentAmount <= totalAmount;
   }
@@ -52,6 +60,7 @@ class RepresentativeSaleController extends ChangeNotifier {
   Future<void> load({required List<VehicleStockItem> vehicleStock}) async {
     _isLoading = true;
     _errorMessage = null;
+    _lastSubmissionQueued = false;
     _vehicleStock = List.unmodifiable(vehicleStock);
     _quantities.clear();
     notifyListeners();
@@ -102,20 +111,24 @@ class RepresentativeSaleController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<int?> submit() async {
+  Future<RepresentativeSaleSubmission?> submit() async {
     if (!canSubmit) return null;
 
     _isSubmitting = true;
     _errorMessage = null;
+    _lastSubmissionQueued = false;
     notifyListeners();
 
     try {
-      return await repository.createAndConfirmSale(
+      final result = await repository.createAndConfirmSale(
         customerId: _selectedCustomer!.id,
         quantities: Map.of(_quantities),
         paymentMethod: _paymentMethod,
         paymentAmount: _paymentAmount,
       );
+      _lastOperationKey = result.operationKey;
+      _lastSubmissionQueued = result.queued;
+      return result;
     } catch (error) {
       _errorMessage = error.toString();
       return null;
