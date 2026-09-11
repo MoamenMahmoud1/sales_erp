@@ -13,13 +13,9 @@ import '../domain/repositories/push_notification_repository.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  if (!FirebaseConfig.isConfigured) return;
-
-  try {
-    await Firebase.initializeApp(options: FirebaseConfig.currentPlatform);
-  } catch (_) {
-    // Firebase may already be initialized by the host process.
-  }
+  // Notifications containing a visible notification payload are displayed by
+  // the operating system while the application is backgrounded or terminated.
+  // This handler remains available for future data-only message processing.
 }
 
 class FirebasePushNotificationRepository implements PushNotificationRepository {
@@ -30,8 +26,12 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
   final ApiClient _apiClient;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
-  final StreamController<Map<String, String>> _openedNotificationController =
-      StreamController<Map<String, String>>.broadcast();
+  final List<Map<String, String>> _pendingOpenedNotifications = [];
+  late final StreamController<Map<String, String>> _openedNotificationController =
+      StreamController<Map<String, String>>.broadcast(
+        onListen: _flushPendingOpenedNotifications,
+        onCancel: () {},
+      );
 
   StreamSubscription<RemoteMessage>? _foregroundSubscription;
   StreamSubscription<RemoteMessage>? _openedSubscription;
@@ -40,6 +40,7 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
   bool _initialized = false;
   bool _authenticated = false;
   bool _registrationInProgress = false;
+  bool _hasOpenedNotificationListeners = false;
   String? _registeredInstallationId;
 
   FirebasePushNotificationRepository(this._apiClient);
@@ -82,6 +83,9 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
         _publishOpenedNotification(initialMessage);
       }
 
+      _openedNotificationController.onListen = null;
+      _hasOpenedNotificationListeners = true;
+      _flushPendingOpenedNotifications();
       _initialized = true;
     } catch (error) {
       debugPrint('Firebase push initialization failed: $error');
@@ -141,7 +145,7 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
         try {
           final decoded = jsonDecode(payload);
           if (decoded is Map<String, dynamic>) {
-            _openedNotificationController.add(
+            _publishOpenedPayload(
               decoded.map((key, value) => MapEntry(key, value.toString())),
             );
           }
@@ -205,11 +209,29 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
   }
 
   void _publishOpenedNotification(RemoteMessage message) {
-    final payload = <String, String>{
+    _publishOpenedPayload({
       ..._notificationPayload(message),
       ...message.data.map((key, value) => MapEntry(key, value.toString())),
-    };
-    _openedNotificationController.add(payload);
+    });
+  }
+
+  void _publishOpenedPayload(Map<String, String> payload) {
+    if (_hasOpenedNotificationListeners) {
+      _openedNotificationController.add(payload);
+    } else {
+      _pendingOpenedNotifications.add(payload);
+    }
+  }
+
+  void _flushPendingOpenedNotifications() {
+    _hasOpenedNotificationListeners = true;
+    if (_pendingOpenedNotifications.isEmpty) return;
+
+    final pending = List<Map<String, String>>.from(_pendingOpenedNotifications);
+    _pendingOpenedNotifications.clear();
+    for (final payload in pending) {
+      _openedNotificationController.add(payload);
+    }
   }
 
   Future<void> _registerCurrentInstallation() async {
