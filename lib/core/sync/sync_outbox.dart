@@ -31,10 +31,11 @@ class SyncOutboxEntry {
   });
 
   factory SyncOutboxEntry.fromRow(Map<String, Object?> row) {
+    final ownerValue = row['owner_user_id'];
     return SyncOutboxEntry(
       id: (row['id'] as num).toInt(),
       operationKey: row['operation_key'] as String,
-      ownerUserId: (row['owner_user_id'] as num).toInt(),
+      ownerUserId: ownerValue is num ? ownerValue.toInt() : 0,
       method: row['method'] as String,
       path: row['path'] as String,
       body: Map<String, dynamic>.from(jsonDecode(row['body'] as String) as Map),
