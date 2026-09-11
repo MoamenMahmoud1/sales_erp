@@ -1,5 +1,3 @@
-import 'package:dio/dio.dart';
-
 import '../../../core/network/api_client.dart';
 import '../../../core/repositories/app_services.dart';
 import '../../../core/sync/sync_outbox.dart';
