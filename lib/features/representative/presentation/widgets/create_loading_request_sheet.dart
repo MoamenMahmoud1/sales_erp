@@ -123,7 +123,7 @@ class _CreateLoadingRequestSheetState extends State<CreateLoadingRequestSheet> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 DropdownButtonFormField<int>(
-                  value: _selectedWarehouseId,
+                  initialValue: _selectedWarehouseId,
                   decoration: const InputDecoration(
                     labelText: 'Warehouse',
                     border: OutlineInputBorder(),
@@ -148,7 +148,7 @@ class _CreateLoadingRequestSheetState extends State<CreateLoadingRequestSheet> {
                 ),
                 const SizedBox(height: AppSpacing.md),
                 DropdownButtonFormField<int>(
-                  value: _selectedManagerId,
+                  initialValue: _selectedManagerId,
                   decoration: const InputDecoration(
                     labelText: 'Warehouse manager',
                     border: OutlineInputBorder(),
@@ -177,7 +177,7 @@ class _CreateLoadingRequestSheetState extends State<CreateLoadingRequestSheet> {
                       child: ListView.separated(
                         shrinkWrap: true,
                         itemCount: widget.controller.selectedWarehouseStock.length,
-                        separatorBuilder: (_, __) => const Divider(height: 16),
+                        separatorBuilder: (_, _) => const Divider(height: 16),
                         itemBuilder: (context, index) {
                           final item = widget.controller.selectedWarehouseStock[index];
                           final quantityController = _quantityController(item.productId);
