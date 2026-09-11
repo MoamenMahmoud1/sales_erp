@@ -1,7 +1,5 @@
 import 'package:sqflite/sqflite.dart';
 
-import 'car_tables.dart';
-
 /// Fresh-install schema for the single application database.
 Future<void> createAppSchema(DatabaseExecutor db) async {
   await db.execute('''
@@ -155,8 +153,6 @@ Future<void> createAppSchema(DatabaseExecutor db) async {
     )
   ''');
   await db.execute('CREATE INDEX idx_sync_outbox_due ON sync_outbox(status, next_attempt_at)');
-
-  await createCarTables(db);
 }
 
 Future<void> _createInvoiceRevisionSchema(DatabaseExecutor db) async {
