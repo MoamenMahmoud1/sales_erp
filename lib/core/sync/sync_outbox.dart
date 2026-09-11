@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:dio/dio.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../network/api_client.dart';
@@ -58,7 +59,6 @@ class SyncOutbox {
     final key = operationKey ?? newOperationKey();
     final now = DateTime.now().toUtc().toIso8601String();
     final db = await AppDatabase.database;
-
     await db.insert(
       'sync_outbox',
       {
@@ -116,7 +116,11 @@ class SyncOutbox {
         where: 'id = ?',
         whereArgs: [id],
       );
-      return SyncOutboxEntry.fromRow({...row, 'status': 'processing', 'lease_until': leaseString});
+      return SyncOutboxEntry.fromRow({
+        ...row,
+        'status': 'processing',
+        'lease_until': leaseString,
+      });
     });
   }
 
@@ -143,7 +147,7 @@ class SyncOutbox {
   }) async {
     final db = await AppDatabase.database;
     final attempt = entry.attemptCount + 1;
-    final seconds = min(3600, 2 << min(attempt, 10));
+    final seconds = min(3600, 2 * (1 << min(attempt, 10)));
     final nextAttempt = DateTime.now().toUtc().add(Duration(seconds: seconds));
     await db.update(
       'sync_outbox',
@@ -221,6 +225,19 @@ class ReliableCommandResult {
   });
 }
 
+class QueuedOperationException implements Exception {
+  final String operationKey;
+  final String message;
+
+  const QueuedOperationException(
+    this.operationKey, [
+    this.message = 'Operation saved locally and queued for synchronization.',
+  ]);
+
+  @override
+  String toString() => message;
+}
+
 class ReliableCommandClient {
   final ApiClient client;
   final SyncOutbox outbox;
@@ -245,9 +262,7 @@ class ReliableCommandClient {
         final response = await client.dio.post(
           path,
           data: body,
-          options: Options(
-            headers: {'Idempotency-Key': key},
-          ),
+          options: Options(headers: {'Idempotency-Key': key}),
         );
         final payload = response.data is Map
             ? Map<String, dynamic>.from(response.data as Map)
@@ -265,12 +280,12 @@ class ReliableCommandClient {
             await refreshSession!.call();
             continue;
           } catch (_) {
-            // Fall through and preserve the command locally. The original user
-            // must authenticate again before the outbox can replay it.
+            // Authentication failures are surfaced below; only transport
+            // failures are moved into the local outbox.
           }
         }
-
         if (!_isTransientNetworkError(error)) rethrow;
+
         final ownerUserId = await client.currentUserId;
         if (ownerUserId == null) rethrow;
         await outbox.enqueue(
