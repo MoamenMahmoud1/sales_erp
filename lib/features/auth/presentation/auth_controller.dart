@@ -18,6 +18,12 @@ class AuthController extends ChangeNotifier {
   /// Called when the operational data mode changes.
   final Future<void> Function()? onModeChanged;
 
+  /// Called after a user has been authenticated against the application session.
+  final Future<void> Function()? onAuthenticated;
+
+  /// Called before logout while the authenticated session is still available.
+  final Future<void> Function()? onBeforeLogout;
+
   AuthStatus status = AuthStatus.checking;
   AuthUser? currentUser;
 
@@ -25,6 +31,8 @@ class AuthController extends ChangeNotifier {
     this.repository, {
     required this.offlineAllowed,
     this.onModeChanged,
+    this.onAuthenticated,
+    this.onBeforeLogout,
   });
 
   bool get canAccessOffline => offlineAllowed();
@@ -51,6 +59,7 @@ class AuthController extends ChangeNotifier {
       await repository.refresh();
       currentUser = await repository.fetchCurrentUser();
       status = AuthStatus.authenticated;
+      await onAuthenticated?.call();
     } catch (_) {
       await repository.clearSession();
       currentUser = null;
@@ -69,6 +78,7 @@ class AuthController extends ChangeNotifier {
       password: password,
     );
     status = AuthStatus.authenticated;
+    await onAuthenticated?.call();
     notifyListeners();
   }
 
@@ -79,6 +89,12 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    try {
+      await onBeforeLogout?.call();
+    } catch (_) {
+      // Push device cleanup must never prevent an authenticated user from logging out.
+    }
+
     if (canAccessOffline) {
       await repository.clearSession();
     } else {
