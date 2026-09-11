@@ -13,7 +13,10 @@ class SettingsPage extends StatelessWidget {
   final VoidCallback? onLock;
   final VoidCallback? onReset;
   final VoidCallback? onOpenCarApp;
+  final VoidCallback? onOpenNotifications;
+  final VoidCallback? onOpenApprovals;
   final bool showOperations;
+  final bool showApprovalCenter;
   final String resetSubtitle;
 
   const SettingsPage({
@@ -22,7 +25,10 @@ class SettingsPage extends StatelessWidget {
     this.onLock,
     this.onReset,
     this.onOpenCarApp,
+    this.onOpenNotifications,
+    this.onOpenApprovals,
     this.showOperations = true,
+    this.showApprovalCenter = false,
     this.resetSubtitle = 'Clear local database and re-seed demo data',
   });
 
@@ -47,6 +53,30 @@ class SettingsPage extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.xl),
           ],
+          const SectionHeader(title: 'Workspace'),
+          const SizedBox(height: AppSpacing.md),
+          AppCard(
+            child: Column(
+              children: [
+                _ActionRow(
+                  icon: Icons.notifications_none_rounded,
+                  title: 'Notifications',
+                  subtitle: 'View updates, approvals and request results',
+                  onTap: onOpenNotifications,
+                ),
+                if (showApprovalCenter) ...[
+                  const Divider(height: 24),
+                  _ActionRow(
+                    icon: Icons.fact_check_outlined,
+                    title: 'Approval Center',
+                    subtitle: 'Review pending requests from your team',
+                    onTap: onOpenApprovals,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
           const SectionHeader(title: 'Appearance'),
           const SizedBox(height: AppSpacing.md),
           Row(
@@ -92,16 +122,16 @@ class SettingsPage extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Local mode', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                      Text('API mode', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                       SizedBox(height: 2),
-                      Text('100% on-device. No server required.', style: TextStyle(fontSize: 13)),
+                      Text('Server-backed ERP with offline command queue.', style: TextStyle(fontSize: 13)),
                     ],
                   ),
                 ),
                 const StatusBadge(
                   type: StatusType.success,
-                  label: 'Local',
-                  icon: Icons.offline_pin_rounded,
+                  label: 'API',
+                  icon: Icons.cloud_done_rounded,
                 ),
               ],
             ),
