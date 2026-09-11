@@ -1,4 +1,8 @@
+import 'package:dio/dio.dart';
+
 import '../../../core/network/api_client.dart';
+import '../../../core/repositories/app_services.dart';
+import '../../../core/sync/sync_outbox.dart';
 import '../domain/entities/returnable_invoice.dart';
 import '../domain/entities/stock_transfer_request.dart';
 import '../domain/entities/vehicle_stock_item.dart';
@@ -9,6 +13,12 @@ class DioRepresentativeVehicleRepository implements RepresentativeVehicleReposit
   final ApiClient client;
 
   const DioRepresentativeVehicleRepository(this.client);
+
+  ReliableCommandClient get _commands => ReliableCommandClient(
+        client: client,
+        outbox: SyncOutbox(),
+        refreshSession: AppServices.instance.authRepository.refresh,
+      );
 
   @override
   Future<RepresentativeVehicle?> fetchCurrentVehicle() async {
@@ -83,7 +93,6 @@ class DioRepresentativeVehicleRepository implements RepresentativeVehicleReposit
   Future<List<StockTransferRequest>> fetchStockTransferRequests() async {
     final response = await client.dio.get('/inventory/transfer-requests/');
     final rows = _readResults(response.data);
-
     return [for (final row in rows) _mapRequest(row)];
   }
 
@@ -101,23 +110,21 @@ class DioRepresentativeVehicleRepository implements RepresentativeVehicleReposit
     required List<StockTransferRequestItem> items,
     String reference = '',
   }) async {
-    final response = await client.dio.post(
+    final result = await _commands.post(
       '/inventory/transfer-requests/',
-      data: {
+      {
         'request_type': 'WAREHOUSE_TO_VEHICLE',
         'warehouse': warehouseId,
         'warehouse_manager': warehouseManagerId,
         'reference': reference,
         'items': [
           for (final item in items)
-            {
-              'product': item.productId,
-              'quantity': item.quantity,
-            },
+            {'product': item.productId, 'quantity': item.quantity},
         ],
       },
     );
-    return _mapRequest(Map<String, dynamic>.from(response.data as Map));
+    if (result.queued) throw QueuedOperationException(result.operationKey);
+    return _mapRequest(result.response!);
   }
 
   @override
@@ -128,9 +135,9 @@ class DioRepresentativeVehicleRepository implements RepresentativeVehicleReposit
     required List<StockTransferRequestItem> items,
     String reference = '',
   }) async {
-    final response = await client.dio.post(
+    final result = await _commands.post(
       '/inventory/transfer-requests/',
-      data: {
+      {
         'request_type': 'VEHICLE_TO_WAREHOUSE',
         'warehouse': warehouseId,
         'warehouse_manager': warehouseManagerId,
@@ -146,13 +153,58 @@ class DioRepresentativeVehicleRepository implements RepresentativeVehicleReposit
         ],
       },
     );
-    return _mapRequest(Map<String, dynamic>.from(response.data as Map));
+    if (result.queued) throw QueuedOperationException(result.operationKey);
+    return _mapRequest(result.response!);
+  }
+
+  @override
+  Future<VehicleMutationSubmission> requestVehicleUpdate({
+    required int vehicleId,
+    required String name,
+    String reason = '',
+  }) async {
+    final result = await _commands.post(
+      '/approvals/',
+      {
+        'target_type': 'vehicle',
+        'target_id': vehicleId,
+        'operation': 'update',
+        'payload': {'name': name},
+        'reason': reason,
+      },
+    );
+    return VehicleMutationSubmission(
+      queued: result.queued,
+      operationKey: result.operationKey,
+      response: result.response,
+    );
+  }
+
+  @override
+  Future<VehicleMutationSubmission> requestVehicleDelete({
+    required int vehicleId,
+    String reason = '',
+  }) async {
+    final result = await _commands.post(
+      '/approvals/',
+      {
+        'target_type': 'vehicle',
+        'target_id': vehicleId,
+        'operation': 'delete',
+        'payload': const {},
+        'reason': reason,
+      },
+    );
+    return VehicleMutationSubmission(
+      queued: result.queued,
+      operationKey: result.operationKey,
+      response: result.response,
+    );
   }
 
   StockTransferRequest _mapRequest(Map<String, dynamic> row) {
     final requestType = _readString(row['request_type']);
     final status = _readString(row['status']);
-    final rawItems = _readList(row['items']);
 
     return StockTransferRequest(
       id: _readInt(row['id']),
@@ -170,7 +222,7 @@ class DioRepresentativeVehicleRepository implements RepresentativeVehicleReposit
       warehouseManagerId: _readInt(row['warehouse_manager']),
       warehouseManagerName: _readString(row['warehouse_manager_name']),
       items: [
-        for (final item in rawItems)
+        for (final item in _readList(row['items']))
           StockTransferRequestItem(
             productId: _readInt(item['product']),
             productName: _readString(item['product_name']),
