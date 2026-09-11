@@ -1,3 +1,4 @@
+import '../../../core/sync/sync_outbox.dart';
 import '../entities/returnable_invoice.dart';
 import '../entities/stock_transfer_request.dart';
 import '../entities/vehicle_stock_item.dart';
@@ -14,6 +15,18 @@ class RepresentativeVehicle {
     required this.vehicleId,
     required this.vehicleName,
     required this.businessDate,
+  });
+}
+
+class VehicleMutationSubmission {
+  final bool queued;
+  final String operationKey;
+  final Map<String, dynamic>? response;
+
+  const VehicleMutationSubmission({
+    required this.queued,
+    required this.operationKey,
+    required this.response,
   });
 }
 
@@ -43,6 +56,17 @@ abstract interface class RepresentativeVehicleRepository {
     required int invoiceId,
     required List<StockTransferRequestItem> items,
     String reference = '',
+  });
+
+  Future<VehicleMutationSubmission> requestVehicleUpdate({
+    required int vehicleId,
+    required String name,
+    String reason = '',
+  });
+
+  Future<VehicleMutationSubmission> requestVehicleDelete({
+    required int vehicleId,
+    String reason = '',
   });
 }
 
