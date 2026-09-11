@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/navigation/app_navigation_config.dart';
@@ -61,6 +63,7 @@ class _AppShellState extends State<AppShell> {
   late final NotificationsController _notificationsController;
   late final ApprovalCenterController _approvalCenterController;
   late final List<_NavigationEntry> _navigationEntries;
+  late final StreamSubscription<Map<String, String>> _pushOpenedSubscription;
 
   bool get _canOpenApprovalCenter {
     return widget.user.isSuperuser ||
@@ -81,6 +84,17 @@ class _AppShellState extends State<AppShell> {
     _approvalCenterController = ApprovalCenterController(
       repository: AppServices.instance.approvalRepository,
     );
+
+    _pushOpenedSubscription = AppServices
+        .instance
+        .pushNotificationRepository
+        .openedNotifications
+        .listen((_) {
+      unawaited(_notificationsController.load());
+      if (mounted) {
+        _openNotifications();
+      }
+    });
 
     final homeDestination = _destinationFor(AppNavigationId.home);
     final salesDestination = _destinationFor(AppNavigationId.sales);
@@ -154,6 +168,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _pushOpenedSubscription.cancel();
     _dashboardController.dispose();
     _notificationsController.dispose();
     _approvalCenterController.dispose();
@@ -195,6 +210,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _openNotifications() async {
+    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => NotificationsPage(controller: _notificationsController),
@@ -203,7 +219,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _openApprovalCenter() async {
-    if (!_canOpenApprovalCenter) return;
+    if (!_canOpenApprovalCenter || !mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ApprovalCenterPage(controller: _approvalCenterController),
