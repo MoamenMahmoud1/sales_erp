@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../app/navigation/app_navigation_config.dart';
+import '../../features/approvals/presentation/approval_center_controller.dart';
+import '../../features/approvals/presentation/approval_center_page.dart';
 import '../../features/auth/domain/entities/auth_user.dart';
 import '../../features/customers/presentation/customers_page.dart';
 import '../../features/dashboard/presentation/dashboard_controller.dart';
 import '../../features/dashboard/presentation/dashboard_page.dart';
+import '../../features/notifications/presentation/notifications_controller.dart';
+import '../../features/notifications/presentation/notifications_page.dart';
 import '../../features/products/presentation/products_page.dart';
 import '../../features/representative/presentation/representative_vehicle_page.dart';
 import '../../features/sales/presentation/invoices_page.dart';
@@ -54,13 +58,28 @@ class _NavigationEntry {
 class _AppShellState extends State<AppShell> {
   late int _selectedTabIndex;
   late final DashboardController _dashboardController;
+  late final NotificationsController _notificationsController;
+  late final ApprovalCenterController _approvalCenterController;
   late final List<_NavigationEntry> _navigationEntries;
+
+  bool get _canOpenApprovalCenter {
+    return widget.user.isSuperuser ||
+        widget.user.hasPermission('inventory.approve_stock_transfer') ||
+        widget.user.hasPermission('invoices.change_invoice') ||
+        widget.user.hasPermission('invoices.delete_invoice');
+  }
 
   @override
   void initState() {
     super.initState();
     _dashboardController = DashboardController(
       repository: AppServices.instance.dashboardRepository,
+    );
+    _notificationsController = NotificationsController(
+      repository: AppServices.instance.notificationRepository,
+    );
+    _approvalCenterController = ApprovalCenterController(
+      repository: AppServices.instance.approvalRepository,
     );
 
     final homeDestination = _destinationFor(AppNavigationId.home);
@@ -104,7 +123,10 @@ class _AppShellState extends State<AppShell> {
           themeController: widget.themeController,
           onLock: widget.onLock,
           onReset: _resetDeviceData,
+          onOpenNotifications: _openNotifications,
+          onOpenApprovals: _canOpenApprovalCenter ? _openApprovalCenter : null,
           showOperations: false,
+          showApprovalCenter: _canOpenApprovalCenter,
         ),
       ),
     ];
@@ -133,6 +155,8 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _dashboardController.dispose();
+    _notificationsController.dispose();
+    _approvalCenterController.dispose();
     super.dispose();
   }
 
@@ -168,6 +192,23 @@ class _AppShellState extends State<AppShell> {
     if (index < 0 || index >= _navigationEntries.length) return;
     if (_selectedTabIndex == index) return;
     setState(() => _selectedTabIndex = index);
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NotificationsPage(controller: _notificationsController),
+      ),
+    );
+  }
+
+  Future<void> _openApprovalCenter() async {
+    if (!_canOpenApprovalCenter) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ApprovalCenterPage(controller: _approvalCenterController),
+      ),
+    );
   }
 
   Future<void> _resetDeviceData() async {
