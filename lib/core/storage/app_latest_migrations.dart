@@ -7,6 +7,7 @@ import 'package:sqflite/sqflite.dart';
 Future<void> runLatestMigrations(Database db, int oldVersion) async {
   if (oldVersion < 16) await _migrateToVersion16(db);
   if (oldVersion < 17) await _migrateToVersion17(db);
+  if (oldVersion < 18) await _migrateToVersion18(db);
 }
 
 Future<void> _migrateToVersion16(Database db) async {
@@ -23,6 +24,30 @@ Future<void> _migrateToVersion17(Database db) async {
     await _ensureProductCategoryColumn(txn);
     await _ensureCarReturnedValueColumns(txn);
     await _ensurePaymentDateColumns(txn);
+  });
+}
+
+Future<void> _migrateToVersion18(Database db) async {
+  await db.transaction((txn) async {
+    await txn.execute('''
+      CREATE TABLE IF NOT EXISTS sync_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation_key TEXT NOT NULL UNIQUE,
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT NOT NULL,
+        last_error TEXT,
+        response_body TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await txn.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sync_outbox_due ON sync_outbox(status, next_attempt_at)',
+    );
   });
 }
 
