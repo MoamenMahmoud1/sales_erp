@@ -1,4 +1,6 @@
 import '../../app/config/data_mode.dart';
+import '../../features/approvals/data/dio_approval_repository.dart';
+import '../../features/approvals/domain/repositories/approval_repository.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/domain/repositories/authentication_repository.dart';
 import '../../features/car/data/local_car_catalog_repository.dart';
@@ -13,6 +15,8 @@ import '../../features/customers/data/local_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
 import '../../features/dashboard/data/local_dashboard_repository.dart';
 import '../../features/dashboard/domain/dashboard_repository.dart';
+import '../../features/notifications/data/dio_notification_repository.dart';
+import '../../features/notifications/domain/repositories/notification_repository.dart';
 import '../../features/products/data/local_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
 import '../../features/representative/data/dio_representative_sale_repository.dart';
@@ -43,6 +47,8 @@ class AppServices {
   late final AuthenticationRepository authRepository;
   late final RepresentativeVehicleRepository representativeVehicleRepository;
   late final RepresentativeSaleRepository representativeSaleRepository;
+  late final NotificationRepository notificationRepository;
+  late final ApprovalRepository approvalRepository;
 
   bool _ready = false;
 
@@ -56,6 +62,8 @@ class AppServices {
     authRepository = AuthRepository(apiClient);
     representativeVehicleRepository = DioRepresentativeVehicleRepository(apiClient);
     representativeSaleRepository = DioRepresentativeSaleRepository(apiClient);
+    notificationRepository = DioNotificationRepository(apiClient);
+    approvalRepository = DioApprovalRepository(apiClient);
     _ready = true;
   }
 
