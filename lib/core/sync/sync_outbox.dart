@@ -82,6 +82,57 @@ class SyncOutbox {
     return key;
   }
 
+  Future<SyncOutboxEntry?> findByOperationKey({required String operationKey}) async {
+    final db = await AppDatabase.database;
+    final rows = await db.query(
+      'sync_outbox',
+      where: 'operation_key = ?',
+      whereArgs: [operationKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return SyncOutboxEntry.fromRow(rows.first);
+  }
+
+  Future<void> markSucceededByOperationKey(
+    String operationKey, {
+    String? responseBody,
+  }) async {
+    final db = await AppDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.update(
+      'sync_outbox',
+      {
+        'status': 'completed',
+        'lease_until': null,
+        'last_error': null,
+        'response_body': responseBody,
+        'updated_at': now,
+      },
+      where: 'operation_key = ?',
+      whereArgs: [operationKey],
+    );
+  }
+
+  Future<void> markFailedByOperationKey(
+    String operationKey, {
+    required String error,
+  }) async {
+    final db = await AppDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.update(
+      'sync_outbox',
+      {
+        'status': 'failed',
+        'lease_until': null,
+        'last_error': error.length > 1000 ? error.substring(0, 1000) : error,
+        'updated_at': now,
+      },
+      where: 'operation_key = ?',
+      whereArgs: [operationKey],
+    );
+  }
+
   Future<SyncOutboxEntry?> claimNext({
     required int ownerUserId,
     Duration leaseDuration = const Duration(minutes: 2),
@@ -169,18 +220,7 @@ class SyncOutbox {
     SyncOutboxEntry entry, {
     required String error,
   }) async {
-    final db = await AppDatabase.database;
-    await db.update(
-      'sync_outbox',
-      {
-        'status': 'failed',
-        'lease_until': null,
-        'last_error': error.length > 1000 ? error.substring(0, 1000) : error,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      },
-      where: 'id = ?',
-      whereArgs: [entry.id],
-    );
+    await markFailedByOperationKey(entry.operationKey, error: error);
   }
 
   Future<void> cleanupCompleted({Duration retention = const Duration(days: 14)}) async {
@@ -256,6 +296,22 @@ class ReliableCommandClient {
     String? operationKey,
   }) async {
     final key = operationKey ?? SyncOutbox.newOperationKey();
+    final ownerUserId = await client.currentUserId;
+    if (ownerUserId == null || ownerUserId <= 0) {
+      throw StateError('A signed-in user is required for a reliable command.');
+    }
+
+    // Persist the intent before the socket opens. If the app dies after the
+    // server receives the command but before the response is processed, the
+    // exact same idempotency key can be replayed later without duplication.
+    await outbox.enqueue(
+      method: 'POST',
+      path: path,
+      body: body,
+      ownerUserId: ownerUserId,
+      operationKey: key,
+    );
+
     var refreshed = false;
 
     while (true) {
@@ -268,6 +324,10 @@ class ReliableCommandClient {
         final payload = response.data is Map
             ? Map<String, dynamic>.from(response.data as Map)
             : <String, dynamic>{};
+        await outbox.markSucceededByOperationKey(
+          key,
+          responseBody: jsonEncode(payload),
+        );
         return ReliableCommandResult(
           completed: true,
           queued: false,
@@ -281,41 +341,38 @@ class ReliableCommandClient {
             await refreshSession!.call();
             continue;
           } catch (_) {
-            final ownerUserId = await client.currentUserId;
-            if (ownerUserId != null) {
-              await outbox.enqueue(
-                method: 'POST',
-                path: path,
-                body: body,
-                ownerUserId: ownerUserId,
-                operationKey: key,
-                lastError: 'Authentication refresh failed; operation is waiting for the owning user session.',
-              );
-              return ReliableCommandResult(
-                completed: false,
-                queued: true,
-                operationKey: key,
-                response: null,
-              );
-            }
+            await _leavePending(
+              key,
+              'Authentication refresh failed; operation is waiting for the owning user session.',
+            );
+            return ReliableCommandResult(
+              completed: false,
+              queued: true,
+              operationKey: key,
+              response: null,
+            );
           }
         }
 
         if (error.response?.statusCode == 401) {
+          await _leavePending(
+            key,
+            'Authentication is required before the operation can be synchronized.',
+          );
+          return ReliableCommandResult(
+            completed: false,
+            queued: true,
+            operationKey: key,
+            response: null,
+          );
+        }
+
+        if (!_isTransientNetworkOrServerError(error)) {
+          await outbox.markFailedByOperationKey(key, error: _describe(error));
           rethrow;
         }
-        if (!_isTransientNetworkOrServerError(error)) rethrow;
 
-        final ownerUserId = await client.currentUserId;
-        if (ownerUserId == null) rethrow;
-        await outbox.enqueue(
-          method: 'POST',
-          path: path,
-          body: body,
-          ownerUserId: ownerUserId,
-          operationKey: key,
-          lastError: error.message,
-        );
+        await _leavePending(key, _describe(error));
         return ReliableCommandResult(
           completed: false,
           queued: true,
@@ -324,6 +381,12 @@ class ReliableCommandClient {
         );
       }
     }
+  }
+
+  Future<void> _leavePending(String key, String error) async {
+    final entry = await outbox.findByOperationKey(operationKey: key);
+    if (entry == null) return;
+    await outbox.markRetry(entry, error: error);
   }
 
   bool _isTransientNetworkOrServerError(DioException error) {
@@ -336,5 +399,18 @@ class ReliableCommandClient {
         status == 502 ||
         status == 503 ||
         status == 504;
+  }
+
+  String _describe(DioException error) {
+    final status = error.response?.statusCode;
+    final detail = error.response?.data;
+    if (detail is Map && detail['detail'] != null) {
+      return status == null
+          ? detail['detail'].toString()
+          : 'HTTP $status: ${detail['detail']}';
+    }
+    return status == null
+        ? (error.message ?? error.type.name)
+        : 'HTTP $status';
   }
 }
