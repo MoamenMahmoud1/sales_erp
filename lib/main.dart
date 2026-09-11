@@ -30,6 +30,8 @@ Future<void> main() async {
   final authController = AuthController(
     AppServices.instance.authRepository,
     offlineAllowed: () => AppServices.instance.offlineAllowed,
+    onModeChanged: () =>
+        AppServices.instance.pushNotificationRepository.setAuthenticated(false),
     onAuthenticated: () =>
         AppServices.instance.pushNotificationRepository.setAuthenticated(true),
     onBeforeLogout: () =>
