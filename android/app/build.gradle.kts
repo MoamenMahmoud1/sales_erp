@@ -22,18 +22,13 @@ android {
         versionName = flutter.versionName
     }
 
-    flavorDimensions += "app"
-
     productFlavors {
         create("full") {
             dimension = "app"
         }
-
-        create("car") {
-            dimension = "app"
-            applicationIdSuffix = ".car"
-        }
     }
+
+    flavorDimensions += "app"
 
     buildTypes {
         release {
