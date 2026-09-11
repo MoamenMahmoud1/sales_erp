@@ -101,7 +101,6 @@ Future<void> createAppSchema(DatabaseExecutor db) async {
     )
   ''');
   await db.execute('CREATE INDEX idx_customer_coupons_customer_id ON customer_coupons(customer_id)');
-  await db.execute('CREATE INDEX idx_customer_coupons_coupon_id ON customer_coupons(coupon_id)');
 
   await db.execute('''
     CREATE TABLE invoice_coupons (
@@ -136,6 +135,24 @@ Future<void> createAppSchema(DatabaseExecutor db) async {
   await db.execute('CREATE INDEX idx_payments_customer_id ON payments(customer_id)');
   await db.execute('CREATE INDEX idx_payments_invoice_id ON payments(invoice_id)');
   await db.execute('CREATE INDEX idx_payments_status ON payments(status)');
+
+  await db.execute('''
+    CREATE TABLE sync_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      operation_key TEXT NOT NULL UNIQUE,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      last_error TEXT,
+      response_body TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  ''');
+  await db.execute('CREATE INDEX idx_sync_outbox_due ON sync_outbox(status, next_attempt_at)');
 
   await createCarTables(db);
 }
