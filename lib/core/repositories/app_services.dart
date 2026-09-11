@@ -7,8 +7,11 @@ import '../../features/customers/data/local_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
 import '../../features/dashboard/data/local_dashboard_repository.dart';
 import '../../features/dashboard/domain/dashboard_repository.dart';
+import '../../features/dashboard/domain/dashboard_repository.dart';
 import '../../features/notifications/data/dio_notification_repository.dart';
+import '../../features/notifications/data/firebase_push_notification_repository.dart';
 import '../../features/notifications/domain/repositories/notification_repository.dart';
+import '../../features/notifications/domain/repositories/push_notification_repository.dart';
 import '../../features/products/data/local_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
 import '../../features/representative/data/dio_representative_sale_repository.dart';
@@ -34,6 +37,7 @@ class AppServices {
   late final RepresentativeSaleRepository representativeSaleRepository;
   late final NotificationRepository notificationRepository;
   late final ApprovalRepository approvalRepository;
+  late final PushNotificationRepository pushNotificationRepository;
 
   bool _ready = false;
 
@@ -49,6 +53,7 @@ class AppServices {
     representativeSaleRepository = DioRepresentativeSaleRepository(apiClient);
     notificationRepository = DioNotificationRepository(apiClient);
     approvalRepository = DioApprovalRepository(apiClient);
+    pushNotificationRepository = FirebasePushNotificationRepository(apiClient);
     _ready = true;
   }
 
