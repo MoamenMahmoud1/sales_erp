@@ -19,8 +19,6 @@ Future<void> _migrateToVersion16(Database db) async {
 
 Future<void> _migrateToVersion17(Database db) async {
   await db.transaction((txn) async {
-    // Idempotent by design so a database created by an intermediate build is
-    // repaired while moving to the current version.
     await _ensureProductCategoryColumn(txn);
     await _ensureCarReturnedValueColumns(txn);
     await _ensurePaymentDateColumns(txn);
@@ -33,18 +31,22 @@ Future<void> _migrateToVersion18(Database db) async {
       CREATE TABLE IF NOT EXISTS sync_outbox (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         operation_key TEXT NOT NULL UNIQUE,
+        owner_user_id INTEGER,
         method TEXT NOT NULL,
         path TEXT NOT NULL,
         body TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         attempt_count INTEGER NOT NULL DEFAULT 0,
         next_attempt_at TEXT NOT NULL,
+        lease_until TEXT,
         last_error TEXT,
         response_body TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
     ''');
+    await _ensureColumn(txn, 'sync_outbox', 'owner_user_id', 'INTEGER');
+    await _ensureColumn(txn, 'sync_outbox', 'lease_until', 'TEXT');
     await txn.execute(
       'CREATE INDEX IF NOT EXISTS idx_sync_outbox_due ON sync_outbox(status, next_attempt_at)',
     );
@@ -55,7 +57,6 @@ Future<void> _ensureProductCategoryColumn(DatabaseExecutor db) async {
   if (!await _tableExists(db, 'products')) return;
   final columns = await _columns(db, 'products');
   if (columns.contains('category')) return;
-
   await db.execute(
     "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'General'",
   );
