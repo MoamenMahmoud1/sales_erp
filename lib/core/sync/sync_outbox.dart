@@ -51,6 +51,7 @@ class SyncOutbox {
     required Map<String, dynamic> body,
     required int ownerUserId,
     String? operationKey,
+    String? lastError,
   }) async {
     if (ownerUserId <= 0) {
       throw StateError('A signed-in user is required to queue an operation.');
@@ -71,7 +72,7 @@ class SyncOutbox {
         'attempt_count': 0,
         'next_attempt_at': now,
         'lease_until': null,
-        'last_error': null,
+        'last_error': lastError,
         'response_body': null,
         'created_at': now,
         'updated_at': now,
@@ -280,11 +281,29 @@ class ReliableCommandClient {
             await refreshSession!.call();
             continue;
           } catch (_) {
-            // Preserve the command below so it can replay after the user
-            // restores the same authenticated session.
+            final ownerUserId = await client.currentUserId;
+            if (ownerUserId != null) {
+              await outbox.enqueue(
+                method: 'POST',
+                path: path,
+                body: body,
+                ownerUserId: ownerUserId,
+                operationKey: key,
+                lastError: 'Authentication refresh failed; operation is waiting for the owning user session.',
+              );
+              return ReliableCommandResult(
+                completed: false,
+                queued: true,
+                operationKey: key,
+                response: null,
+              );
+            }
           }
         }
 
+        if (error.response?.statusCode == 401) {
+          rethrow;
+        }
         if (!_isTransientNetworkOrServerError(error)) rethrow;
 
         final ownerUserId = await client.currentUserId;
@@ -295,6 +314,7 @@ class ReliableCommandClient {
           body: body,
           ownerUserId: ownerUserId,
           operationKey: key,
+          lastError: error.message,
         );
         return ReliableCommandResult(
           completed: false,
