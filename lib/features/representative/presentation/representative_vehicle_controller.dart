@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../../core/sync/sync_outbox.dart';
 import '../domain/entities/returnable_invoice.dart';
 import '../domain/entities/stock_transfer_request.dart';
 import '../domain/entities/vehicle_stock_item.dart';
@@ -20,6 +21,9 @@ class RepresentativeVehicleController extends ChangeNotifier {
 
   bool _isLoading = false;
   bool _isSubmittingRequest = false;
+  bool _isSubmittingVehicleMutation = false;
+  bool _lastRequestQueued = false;
+  bool _lastVehicleMutationQueued = false;
   String? _errorMessage;
   int? _selectedWarehouseId;
 
@@ -31,6 +35,9 @@ class RepresentativeVehicleController extends ChangeNotifier {
   List<VehicleStockItem> get selectedWarehouseStock => _selectedWarehouseStock;
   bool get isLoading => _isLoading;
   bool get isSubmittingRequest => _isSubmittingRequest;
+  bool get isSubmittingVehicleMutation => _isSubmittingVehicleMutation;
+  bool get lastRequestQueued => _lastRequestQueued;
+  bool get lastVehicleMutationQueued => _lastVehicleMutationQueued;
   String? get errorMessage => _errorMessage;
   int? get selectedWarehouseId => _selectedWarehouseId;
 
@@ -85,6 +92,7 @@ class RepresentativeVehicleController extends ChangeNotifier {
     String reference = '',
   }) async {
     _isSubmittingRequest = true;
+    _lastRequestQueued = false;
     _errorMessage = null;
     notifyListeners();
 
@@ -96,6 +104,9 @@ class RepresentativeVehicleController extends ChangeNotifier {
         reference: reference,
       );
       _transferRequests = [request, ..._transferRequests];
+      return true;
+    } on QueuedOperationException {
+      _lastRequestQueued = true;
       return true;
     } catch (error) {
       _errorMessage = error.toString();
@@ -114,6 +125,7 @@ class RepresentativeVehicleController extends ChangeNotifier {
     String reference = '',
   }) async {
     _isSubmittingRequest = true;
+    _lastRequestQueued = false;
     _errorMessage = null;
     notifyListeners();
 
@@ -127,11 +139,74 @@ class RepresentativeVehicleController extends ChangeNotifier {
       );
       _transferRequests = [request, ..._transferRequests];
       return true;
+    } on QueuedOperationException {
+      _lastRequestQueued = true;
+      return true;
     } catch (error) {
       _errorMessage = error.toString();
       return false;
     } finally {
       _isSubmittingRequest = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> requestVehicleUpdate({required String name, String reason = ''}) async {
+    final vehicle = _vehicle;
+    if (vehicle == null) return false;
+
+    _isSubmittingVehicleMutation = true;
+    _lastVehicleMutationQueued = false;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final result = await repository.requestVehicleUpdate(
+        vehicleId: vehicle.vehicleId,
+        name: name,
+        reason: reason,
+      );
+      _lastVehicleMutationQueued = result.queued;
+      if (!result.queued) {
+        _vehicle = RepresentativeVehicle(
+          shiftId: vehicle.shiftId,
+          vehicleId: vehicle.vehicleId,
+          vehicleName: name,
+          businessDate: vehicle.businessDate,
+        );
+      }
+      return true;
+    } catch (error) {
+      _errorMessage = error.toString();
+      return false;
+    } finally {
+      _isSubmittingVehicleMutation = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> requestVehicleDelete({String reason = ''}) async {
+    final vehicle = _vehicle;
+    if (vehicle == null) return false;
+
+    _isSubmittingVehicleMutation = true;
+    _lastVehicleMutationQueued = false;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final result = await repository.requestVehicleDelete(
+        vehicleId: vehicle.vehicleId,
+        reason: reason,
+      );
+      _lastVehicleMutationQueued = result.queued;
+      if (!result.queued) {
+        await load();
+      }
+      return true;
+    } catch (error) {
+      _errorMessage = error.toString();
+      return false;
+    } finally {
+      _isSubmittingVehicleMutation = false;
       notifyListeners();
     }
   }
