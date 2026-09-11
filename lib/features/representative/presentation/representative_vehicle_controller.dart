@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../core/sync/sync_outbox.dart';
+import '../../../core/sync/sync_outbox_events.dart';
 import '../domain/entities/returnable_invoice.dart';
 import '../domain/entities/stock_transfer_request.dart';
 import '../domain/entities/vehicle_stock_item.dart';
@@ -10,7 +11,10 @@ import '../domain/repositories/representative_vehicle_repository.dart';
 class RepresentativeVehicleController extends ChangeNotifier {
   final RepresentativeVehicleRepository repository;
 
-  RepresentativeVehicleController({required this.repository});
+  RepresentativeVehicleController({required this.repository}) {
+    _lastHandledSyncKey = SyncOutboxEventBus.instance.lastSuccess?.operationKey;
+    SyncOutboxEventBus.instance.addListener(_onSyncCompleted);
+  }
 
   RepresentativeVehicle? _vehicle;
   List<VehicleStockItem> _vehicleStock = const [];
@@ -26,6 +30,8 @@ class RepresentativeVehicleController extends ChangeNotifier {
   bool _lastVehicleMutationQueued = false;
   String? _errorMessage;
   int? _selectedWarehouseId;
+  String? _lastHandledSyncKey;
+  bool _disposed = false;
 
   RepresentativeVehicle? get vehicle => _vehicle;
   List<VehicleStockItem> get vehicleStock => _vehicleStock;
@@ -41,7 +47,25 @@ class RepresentativeVehicleController extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   int? get selectedWarehouseId => _selectedWarehouseId;
 
+  void _onSyncCompleted() {
+    if (_disposed) return;
+    final event = SyncOutboxEventBus.instance.lastSuccess;
+    if (event == null || event.operationKey == _lastHandledSyncKey) return;
+
+    _lastHandledSyncKey = event.operationKey;
+    if (_isVehicleRelevantPath(event.path)) {
+      load();
+    }
+  }
+
+  bool _isVehicleRelevantPath(String path) {
+    return path.startsWith('/invoices/representative-sale/') ||
+        path.startsWith('/inventory/transfer-requests/') ||
+        path.startsWith('/approvals/');
+  }
+
   Future<void> load() async {
+    if (_disposed) return;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -56,6 +80,7 @@ class RepresentativeVehicleController extends ChangeNotifier {
     } catch (error) {
       _errorMessage = error.toString();
     } finally {
+      if (_disposed) return;
       _isLoading = false;
       notifyListeners();
     }
@@ -167,8 +192,7 @@ class RepresentativeVehicleController extends ChangeNotifier {
       );
       _lastVehicleMutationQueued = result.queued;
       // Creating the approval request does not mean the mutation was approved.
-      // The current vehicle stays unchanged until a later reload observes the
-      // approved server state.
+      // The current vehicle stays unchanged until the server state changes.
       return true;
     } catch (error) {
       _errorMessage = error.toString();
@@ -202,5 +226,12 @@ class RepresentativeVehicleController extends ChangeNotifier {
       _isSubmittingVehicleMutation = false;
       notifyListeners();
     }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    SyncOutboxEventBus.instance.removeListener(_onSyncCompleted);
+    super.dispose();
   }
 }
