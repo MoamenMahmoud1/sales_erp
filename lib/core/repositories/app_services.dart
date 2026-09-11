@@ -3,14 +3,6 @@ import '../../features/approvals/data/dio_approval_repository.dart';
 import '../../features/approvals/domain/repositories/approval_repository.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/domain/repositories/authentication_repository.dart';
-import '../../features/car/data/local_car_catalog_repository.dart';
-import '../../features/car/data/local_car_payment_repository.dart';
-import '../../features/car/data/local_car_report_repository.dart';
-import '../../features/car/data/local_car_trip_command_repository.dart';
-import '../../features/car/domain/repositories/car_catalog_repository.dart';
-import '../../features/car/domain/repositories/car_payment_repository.dart';
-import '../../features/car/domain/repositories/car_report_repository.dart';
-import '../../features/car/domain/repositories/car_trip_command_repository.dart';
 import '../../features/customers/data/local_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
 import '../../features/dashboard/data/local_dashboard_repository.dart';
@@ -24,7 +16,6 @@ import '../../features/representative/data/dio_representative_vehicle_repository
 import '../../features/representative/domain/repositories/representative_sale_repository.dart';
 import '../../features/representative/domain/repositories/representative_vehicle_repository.dart';
 import '../network/api_client.dart';
-import 'car_trip_event_bus.dart';
 
 class AppServices {
   AppServices._();
@@ -32,16 +23,10 @@ class AppServices {
   static final AppServices instance = AppServices._();
 
   final DataModeController dataMode = DataModeController();
-  final CarTripEventBus carTripEvents = CarTripEventBus();
 
   final CustomerRepository customerRepository = LocalCustomerRepository();
   final ProductRepository productRepository = LocalProductRepository();
   final DashboardRepository dashboardRepository = LocalDashboardRepository();
-
-  final CarCatalogRepository carCatalogRepository = LocalCarCatalogRepository();
-  final CarTripCommandRepository carTripRepository = LocalCarTripCommandRepository();
-  final CarPaymentRepository carPaymentRepository = LocalCarPaymentRepository();
-  final CarReportRepository carReportRepository = LocalCarReportRepository();
 
   late final ApiClient apiClient;
   late final AuthenticationRepository authRepository;
