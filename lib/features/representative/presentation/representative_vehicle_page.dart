@@ -6,6 +6,7 @@ import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/app_card.dart';
 import '../../../core/ui/section_header.dart';
 import '../../../core/ui/status_badge.dart';
+import '../domain/repositories/representative_sale_repository.dart';
 import 'representative_sale_controller.dart';
 import 'representative_sale_page.dart';
 import 'representative_vehicle_controller.dart';
@@ -114,265 +115,154 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
     );
   }
 
-  Future<void> _requestVehicleRename() async {
+  Future<void> _openVehicleActions() async {
     final vehicle = _controller.vehicle;
     if (vehicle == null) return;
 
-    final nameController = TextEditingController(text: vehicle.vehicleName);
-    final name = await showDialog<String>(
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Request vehicle rename'),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          maxLength: 150,
-          decoration: const InputDecoration(
-            labelText: 'Vehicle name',
-            border: OutlineInputBorder(),
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final nameController = TextEditingController(text: vehicle.vehicleName);
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            MediaQuery.viewInsetsOf(sheetContext).bottom + AppSpacing.lg,
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Vehicle name'),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              FilledButton(
+                onPressed: () async {
+                  final result = await _controller.requestVehicleUpdate(
+                    nameController.text.trim(),
+                  );
+                  if (!sheetContext.mounted) return;
+                  Navigator.of(sheetContext).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        result.queued
+                            ? 'Vehicle update saved locally and waiting for manager approval.'
+                            : 'Vehicle update request submitted for manager approval.',
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Request name change'),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              OutlinedButton(
+                onPressed: () async {
+                  final result = await _controller.requestVehicleDelete();
+                  if (!sheetContext.mounted) return;
+                  Navigator.of(sheetContext).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        result.queued
+                            ? 'Vehicle deletion saved locally and waiting for manager approval.'
+                            : 'Vehicle deletion request submitted for manager approval.',
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Request vehicle deletion'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(nameController.text.trim()),
-            child: const Text('Send request'),
-          ),
-        ],
-      ),
-    );
-    nameController.dispose();
-    if (!mounted || name == null || name.isEmpty || name == vehicle.vehicleName) return;
-
-    final sent = await _controller.requestVehicleUpdate(
-      name: name,
-      reason: 'Vehicle rename requested from representative app.',
-    );
-    if (!mounted || !sent) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_controller.errorMessage ?? 'Could not send the request.')),
         );
-      }
-      return;
-    }
-
-    final message = _controller.lastVehicleMutationQueued
-        ? 'Rename request saved locally. It will be sent when the connection returns.'
-        : 'Rename request sent to the manager for approval.';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Future<void> _requestVehicleDelete() async {
-    final vehicle = _controller.vehicle;
-    if (vehicle == null) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Request vehicle deactivation'),
-        content: Text(
-          'This will ask the manager to deactivate ${vehicle.vehicleName}. The vehicle will not change until the request is approved.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Send request'),
-          ),
-        ],
-      ),
+      },
     );
-    if (confirmed != true || !mounted) return;
-
-    final sent = await _controller.requestVehicleDelete(
-      reason: 'Vehicle deactivation requested from representative app.',
-    );
-    if (!mounted || !sent) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_controller.errorMessage ?? 'Could not send the request.')),
-        );
-      }
-      return;
-    }
-
-    final message = _controller.lastVehicleMutationQueued
-        ? 'Deactivation request saved locally. It will be sent when the connection returns.'
-        : 'Deactivation request sent to the manager for approval.';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  StatusType _vehicleStatusType(bool available) {
-    return available ? StatusType.success : StatusType.warning;
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
 
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('Vehicle'),
-            actions: [
-              IconButton(
-                tooltip: 'Refresh',
-                icon: const Icon(Icons.refresh_rounded),
-                onPressed: _controller.isLoading ? null : _controller.load,
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_controller.vehicle?.vehicleName ?? 'My vehicle'),
+        actions: [
+          if (_controller.vehicle != null)
+            IconButton(
+              onPressed: _openVehicleActions,
+              tooltip: 'Vehicle actions',
+              icon: const Icon(Icons.more_horiz_rounded),
+            ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _controller.load,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.lg,
+            120,
+          ),
+          children: [
+            if (_controller.isLoading && _controller.vehicle == null)
+              const LinearProgressIndicator(),
+            if (_controller.errorMessage != null) ...[
+              AppCard(
+                child: Text(
+                  _controller.errorMessage!,
+                  style: TextStyle(color: colors.error),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+            ],
+            SectionHeader(
+              title: 'Vehicle stock',
+              subtitle: _controller.vehicle == null
+                  ? 'No active shift vehicle is assigned.'
+                  : 'Current stock and selling prices.',
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            VehicleStockCard(items: _controller.vehicleStock),
+            if (widget.canSell && _controller.vehicleStock.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.md),
+              FilledButton.icon(
+                onPressed: _openSale,
+                icon: const Icon(Icons.point_of_sale_rounded),
+                label: const Text('New sale'),
               ),
             ],
-          ),
-          body: _controller.isLoading && _controller.vehicle == null
-              ? const Center(child: CircularProgressIndicator())
-              : RefreshIndicator(
-                  onRefresh: _controller.load,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(AppSpacing.lg),
-                    children: [
-                      if (_controller.errorMessage != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                          child: AppCard(
-                            child: Text(
-                              _controller.errorMessage!,
-                              style: TextStyle(color: colors.error, fontSize: 13),
-                            ),
-                          ),
-                        ),
-                      SectionHeader(
-                        title: 'Current vehicle',
-                        trailing: _controller.vehicle == null
-                            ? null
-                            : StatusBadge(
-                                type: _vehicleStatusType(true),
-                                label: 'Open shift',
-                                icon: Icons.play_circle_outline_rounded,
-                              ),
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      AppCard(
-                        child: _controller.vehicle == null
-                            ? Row(
-                                children: [
-                                  Icon(Icons.local_shipping_outlined, color: colors.textSecondary),
-                                  const SizedBox(width: AppSpacing.md),
-                                  Expanded(
-                                    child: Text(
-                                      'No vehicle is assigned to the current shift.',
-                                      style: TextStyle(color: colors.textSecondary, fontSize: 13),
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(10),
-                                    decoration: BoxDecoration(
-                                      color: colors.primaryContainer,
-                                      borderRadius: AppRadius.mdAll,
-                                    ),
-                                    child: Icon(Icons.local_shipping_rounded, color: colors.primary),
-                                  ),
-                                  const SizedBox(width: AppSpacing.md),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          _controller.vehicle!.vehicleName,
-                                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          'Shift #${_controller.vehicle!.shiftId} · ${_controller.vehicle!.businessDate}',
-                                          style: TextStyle(color: colors.textSecondary, fontSize: 12),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                      ),
-                      if (_controller.vehicle != null) ...[
-                        const SizedBox(height: AppSpacing.sm),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: _controller.isSubmittingVehicleMutation
-                                    ? null
-                                    : _requestVehicleRename,
-                                icon: const Icon(Icons.edit_rounded),
-                                label: const Text('Request rename'),
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.sm),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: _controller.isSubmittingVehicleMutation
-                                    ? null
-                                    : _requestVehicleDelete,
-                                icon: const Icon(Icons.remove_circle_outline_rounded),
-                                label: const Text('Request deactivate'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      const SizedBox(height: AppSpacing.xl),
-                      const SectionHeader(title: 'Vehicle stock'),
-                      const SizedBox(height: AppSpacing.md),
-                      VehicleStockCard(items: _controller.vehicleStock),
-                      const SizedBox(height: AppSpacing.md),
-                      if (_controller.vehicle != null && _controller.vehicle!.vehicleId > 0) ...[
-                        if (widget.canSell) ...[
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: _controller.vehicleStock.isEmpty ? null : _openSale,
-                              icon: const Icon(Icons.point_of_sale_rounded),
-                              label: const Text('New sale'),
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                        ],
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _controller.isSubmittingRequest ? null : _openLoadingRequest,
-                            icon: const Icon(Icons.add_box_rounded),
-                            label: const Text('Request goods from warehouse'),
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed: _controller.isSubmittingRequest ? null : _openReturnRequest,
-                            icon: const Icon(Icons.undo_rounded),
-                            label: const Text('Request a return to warehouse'),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: AppSpacing.xl),
-                      StockTransferRequestsCard(requests: _controller.transferRequests),
-                      const SizedBox(height: AppSpacing.xxl),
-                    ],
-                  ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionHeader(
+              title: 'Stock requests',
+              subtitle: 'Loading and return requests with warehouse approval status.',
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            StockTransferRequestsCard(requests: _controller.requests),
+            const SizedBox(height: AppSpacing.md),
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _openLoadingRequest,
+                  icon: const Icon(Icons.local_shipping_rounded),
+                  label: const Text('Request goods'),
                 ),
-        );
-      },
+                OutlinedButton.icon(
+                  onPressed: _openReturnRequest,
+                  icon: const Icon(Icons.keyboard_return_rounded),
+                  label: const Text('Return goods'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
