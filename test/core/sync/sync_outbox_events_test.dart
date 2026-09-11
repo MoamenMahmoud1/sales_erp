@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-
-import '../../../lib/core/sync/sync_outbox_events.dart';
+import 'package:sales_erp/core/sync/sync_outbox_events.dart';
 
 void main() {
   test('decodes a valid conflict response', () {
