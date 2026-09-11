@@ -134,7 +134,7 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
     );
 
     await _localNotifications.initialize(
-      const InitializationSettings(
+      settings: const InitializationSettings(
         android: androidSettings,
         iOS: iosSettings,
       ),
@@ -181,10 +181,10 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
     const iosDetails = DarwinNotificationDetails();
 
     await _localNotifications.show(
-      _notificationId(message),
-      remoteNotification.title,
-      remoteNotification.body,
-      NotificationDetails(
+      id: _notificationId(message),
+      title: remoteNotification.title,
+      body: remoteNotification.body,
+      notificationDetails: NotificationDetails(
         android: androidDetails,
         iOS: iosDetails,
       ),
