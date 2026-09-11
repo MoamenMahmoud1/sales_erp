@@ -38,8 +38,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
     final controller = widget.controller;
+    final colors = AppColors.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -55,9 +55,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
       body: RefreshIndicator(
         onRefresh: controller.load,
         child: controller.isLoading && controller.notifications.isEmpty
-            ? const ListView(children: [SizedBox(height: 240), Center(child: CircularProgressIndicator())])
+            ? ListView(children: const [SizedBox(height: 240)])
             : controller.notifications.isEmpty
-                ? const ListView(children: [SizedBox(height: 240), Center(child: Text('No notifications yet.'))])
+                ? ListView(children: const [SizedBox(height: 240), Center(child: Text('No notifications yet.'))])
                 : ListView.separated(
                     padding: const EdgeInsets.all(AppSpacing.lg),
                     itemCount: controller.notifications.length,
@@ -89,73 +89,43 @@ class _NotificationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
     return AppCard(
-      child: InkWell(
-        borderRadius: AppRadius.lgAll,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: notification.isRead ? colors.surfaceMuted : colors.primaryContainer,
-                  borderRadius: AppRadius.mdAll,
-                ),
-                child: Icon(
-                  notification.notificationType == 'approval_approved'
-                      ? Icons.check_circle_outline_rounded
-                      : notification.notificationType == 'approval_rejected'
-                          ? Icons.cancel_outlined
-                          : Icons.notifications_none_rounded,
-                  color: notification.isRead ? muted : colors.primary,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      notification.title,
-                      style: TextStyle(
-                        fontWeight: notification.isRead ? FontWeight.w600 : FontWeight.w800,
-                        fontSize: 15,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(notification.body, style: const TextStyle(fontSize: 13)),
-                    const SizedBox(height: 6),
-                    Text(
-                      _formatCreatedAt(notification.createdAt),
-                      style: TextStyle(fontSize: 11, color: muted),
-                    ),
-                  ],
-                ),
-              ),
-              if (!notification.isRead)
-                Container(
-                  width: 8,
-                  height: 8,
-                  margin: const EdgeInsets.only(top: 6),
-                  decoration: BoxDecoration(
-                    color: colors.primary,
-                    shape: BoxShape.circle,
+      onTap: onTap,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            notification.isRead ? Icons.notifications_none_rounded : Icons.notifications_active_rounded,
+            color: notification.isRead ? muted : null,
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  notification.title,
+                  style: TextStyle(
+                    fontWeight: notification.isRead ? FontWeight.w600 : FontWeight.w800,
                   ),
                 ),
-            ],
+                const SizedBox(height: AppSpacing.xs),
+                Text(notification.body),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  _formatDate(notification.createdAt),
+                  style: TextStyle(color: muted, fontSize: 12),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  String _formatCreatedAt(DateTime value) {
+  String _formatDate(DateTime value) {
     final local = value.toLocal();
-    final minute = local.minute.toString().padLeft(2, '0');
-    return '${local.day}/${local.month}/${local.year} ${local.hour}:$minute';
+    return '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   }
 }
