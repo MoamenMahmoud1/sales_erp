@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/navigation/app_navigation_config.dart';
 import '../../features/auth/domain/entities/auth_user.dart';
 import '../../features/customers/presentation/customers_page.dart';
 import '../../features/dashboard/presentation/dashboard_controller.dart';
@@ -7,7 +8,6 @@ import '../../features/dashboard/presentation/dashboard_page.dart';
 import '../../features/products/presentation/products_page.dart';
 import '../../features/representative/presentation/representative_vehicle_page.dart';
 import '../../features/sales/presentation/invoices_page.dart';
-import '../../app/navigation/app_navigation_config.dart';
 import '../data/demo_data_seeder.dart';
 import '../repositories/app_services.dart';
 import '../storage/app_database.dart';
@@ -86,7 +86,8 @@ class _AppShellState extends State<AppShell> {
       _NavigationEntry(
         destination: vehicleDestination,
         page: RepresentativeVehiclePage(
-          canSell: widget.user.hasPermission('invoices.confirm_invoice'),
+          canSell: widget.user.hasPermission('invoices.add_invoice') &&
+              widget.user.hasPermission('invoices.confirm_invoice'),
         ),
       ),
       _NavigationEntry(
