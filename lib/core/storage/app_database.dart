@@ -10,7 +10,7 @@ class AppDatabase {
   AppDatabase._();
 
   static const databaseName = 'sales_erp.db';
-  static const version = 17;
+  static const version = 18;
 
   static Database? _database;
   static Future<Database>? _opening;
