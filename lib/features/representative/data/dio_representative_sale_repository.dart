@@ -1,6 +1,9 @@
 import 'package:dio/dio.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/repositories/app_services.dart';
+import '../../../core/sync/sync_outbox.dart';
+import '../../../core/sync/sync_outbox_scheduler.dart';
 import '../../customers/domain/payment_method.dart';
 import '../domain/entities/representative_customer.dart';
 import '../domain/repositories/representative_sale_repository.dart';
@@ -32,7 +35,7 @@ class DioRepresentativeSaleRepository implements RepresentativeSaleRepository {
   }
 
   @override
-  Future<int> createAndConfirmSale({
+  Future<RepresentativeSaleSubmission> createAndConfirmSale({
     required int customerId,
     required Map<int, int> quantities,
     required PaymentMethod paymentMethod,
@@ -45,44 +48,36 @@ class DioRepresentativeSaleRepository implements RepresentativeSaleRepository {
       throw ArgumentError('Payment amount must be zero or greater.');
     }
 
-    final createResponse = await client.dio.post(
-      '/invoices/',
-      data: {
-        'customer': customerId,
-        'items': [
-          for (final entry in quantities.entries)
-            {
-              'product': entry.key,
-              'quantity': entry.value,
-            },
-        ],
-      },
-    );
+    final body = <String, dynamic>{
+      'customer': customerId,
+      'items': [
+        for (final entry in quantities.entries)
+          {'product': entry.key, 'quantity': entry.value},
+      ],
+      'payment_method': paymentMethod.value,
+      'payment_amount': paymentAmount,
+    };
 
-    final invoice = Map<String, dynamic>.from(createResponse.data as Map);
-    final invoiceId = _readInt(invoice['id']);
+    final result = await ReliableCommandClient(
+      client: client,
+      outbox: SyncOutbox(),
+      refreshSession: AppServices.instance.authRepository.refresh,
+    ).post('/invoices/representative-sale/', body);
+
+    if (result.queued) {
+      return RepresentativeSaleSubmission.queued(result.operationKey);
+    }
+
+    final invoice = result.response?['invoice'];
+    final invoiceId = invoice is Map ? _readInt(invoice['id']) : 0;
     if (invoiceId <= 0) {
       throw StateError('The server did not return a valid invoice id.');
     }
 
-    await client.dio.post('/invoices/$invoiceId/confirm/');
-
-    if (paymentAmount > 0) {
-      await client.dio.post(
-        '/payments/collections/',
-        options: Options(
-          headers: {'Idempotency-Key': 'rep-sale-payment-$invoiceId'},
-        ),
-        data: {
-          'customer': customerId,
-          'invoice': invoiceId,
-          'cash_amount': paymentMethod == PaymentMethod.cash ? paymentAmount : 0,
-          'transfer_amount': paymentMethod == PaymentMethod.transfer ? paymentAmount : 0,
-        },
-      );
-    }
-
-    return invoiceId;
+    return RepresentativeSaleSubmission.completed(
+      invoiceId,
+      result.operationKey,
+    );
   }
 
   List<Map<String, dynamic>> _readResults(dynamic payload) {
