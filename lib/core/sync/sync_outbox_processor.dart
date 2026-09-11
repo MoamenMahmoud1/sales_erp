@@ -27,10 +27,7 @@ class SyncOutboxProcessor {
       final result = await _send(entry);
       switch (result.kind) {
         case _SendKind.success:
-          await outbox.markSucceeded(
-            entry.id,
-            responseBody: result.responseBody,
-          );
+          await outbox.markSucceeded(entry.id, responseBody: result.responseBody);
         case _SendKind.retry:
           await outbox.markRetry(
             entry,
@@ -59,9 +56,7 @@ class SyncOutboxProcessor {
           data: entry.body,
           options: Options(
             method: entry.method,
-            headers: {
-              'Idempotency-Key': entry.operationKey,
-            },
+            headers: {'Idempotency-Key': entry.operationKey},
           ),
         );
         return _SendResult.success(
@@ -76,7 +71,9 @@ class SyncOutboxProcessor {
             await refreshSession!.call();
             continue;
           } catch (_) {
-            return _SendResult.retry('Authentication refresh failed; will retry after the user session is restored.');
+            return _SendResult.retry(
+              'Authentication refresh failed; waiting for the owning user session.',
+            );
           }
         }
 
@@ -84,9 +81,7 @@ class SyncOutboxProcessor {
           return _SendResult.retry(_describe(error));
         }
 
-        return _SendResult.permanent(
-          _describe(error),
-        );
+        return _SendResult.permanent(_describe(error));
       } catch (error) {
         return _SendResult.retry('$error');
       }
@@ -94,13 +89,15 @@ class SyncOutboxProcessor {
   }
 
   bool _isTransient(DioException error) {
-    return switch (error.type) {
-      DioExceptionType.connectionTimeout ||
-      DioExceptionType.sendTimeout ||
-      DioExceptionType.receiveTimeout ||
-      DioExceptionType.connectionError => true,
-      _ => error.response == null,
-    };
+    if (error.response == null) return true;
+    final status = error.response?.statusCode ?? 0;
+    return status == 408 ||
+        status == 425 ||
+        status == 429 ||
+        status == 500 ||
+        status == 502 ||
+        status == 503 ||
+        status == 504;
   }
 
   String _describe(DioException error) {
