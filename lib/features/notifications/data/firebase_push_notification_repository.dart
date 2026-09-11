@@ -29,8 +29,8 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
   final List<Map<String, String>> _pendingOpenedNotifications = [];
   late final StreamController<Map<String, String>> _openedNotificationController =
       StreamController<Map<String, String>>.broadcast(
-        onListen: _flushPendingOpenedNotifications,
-        onCancel: () {},
+        onListen: _handleOpenedListenerAttached,
+        onCancel: _handleOpenedListenerDetached,
       );
 
   StreamSubscription<RemoteMessage>? _foregroundSubscription;
@@ -83,9 +83,6 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
         _publishOpenedNotification(initialMessage);
       }
 
-      _openedNotificationController.onListen = null;
-      _hasOpenedNotificationListeners = true;
-      _flushPendingOpenedNotifications();
       _initialized = true;
     } catch (error) {
       debugPrint('Firebase push initialization failed: $error');
@@ -223,7 +220,7 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
     }
   }
 
-  void _flushPendingOpenedNotifications() {
+  void _handleOpenedListenerAttached() {
     _hasOpenedNotificationListeners = true;
     if (_pendingOpenedNotifications.isEmpty) return;
 
@@ -232,6 +229,10 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
     for (final payload in pending) {
       _openedNotificationController.add(payload);
     }
+  }
+
+  void _handleOpenedListenerDetached() {
+    _hasOpenedNotificationListeners = false;
   }
 
   Future<void> _registerCurrentInstallation() async {
