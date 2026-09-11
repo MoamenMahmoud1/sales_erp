@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../network/api_client.dart';
 import 'sync_outbox.dart';
+import 'sync_outbox_events.dart';
 
 class SyncOutboxProcessor {
   final ApiClient client;
@@ -28,6 +29,7 @@ class SyncOutboxProcessor {
       switch (result.kind) {
         case _SendKind.success:
           await outbox.markSucceeded(entry.id, responseBody: result.responseBody);
+          _emitSuccess(entry, result.responseBody);
         case _SendKind.retry:
           await outbox.markRetry(
             entry,
@@ -44,6 +46,23 @@ class SyncOutboxProcessor {
     }
 
     await outbox.cleanupCompleted();
+  }
+
+  void _emitSuccess(SyncOutboxEntry entry, String? responseBody) {
+    try {
+      SyncOutboxEventBus.instance.emitSuccess(
+        SyncOutboxSuccessEvent.fromResponse(
+          outboxId: entry.id,
+          operationKey: entry.operationKey,
+          method: entry.method,
+          path: entry.path,
+          responseBody: responseBody,
+        ),
+      );
+    } catch (_) {
+      // Sync completion must never fail because an event consumer cannot parse
+      // an optional response payload.
+    }
   }
 
   Future<_SendResult> _send(SyncOutboxEntry entry) async {
@@ -91,7 +110,8 @@ class SyncOutboxProcessor {
   bool _isTransient(DioException error) {
     if (error.response == null) return true;
     final status = error.response?.statusCode ?? 0;
-    return status == 408 ||
+    return status == 401 ||
+        status == 408 ||
         status == 425 ||
         status == 429 ||
         status == 500 ||
