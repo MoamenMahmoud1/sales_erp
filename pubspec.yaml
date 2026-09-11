@@ -2,7 +2,7 @@ name: sales_erp
 description: "Flutter mobile client for the Sales ERP platform."
 publish_to: 'none'
 
-version: 0.123.0+123
+version: 0.124.0+124
 
 environment:
   sdk: ^3.13.1
@@ -15,7 +15,11 @@ dependencies:
   cookie_jar: ^4.0.8
   dio: ^5.9.0
   dio_cookie_manager: ^3.3.0
+  firebase_app_installations: ^0.4.3
+  firebase_core: ^4.14.0
+  firebase_messaging: ^16.6.0
   flutter_dotenv: ^6.0.1
+  flutter_local_notifications: ^22.3.0
   flutter_secure_storage: ^9.2.4
   local_auth: ^3.0.2
   path: ^1.9.1
