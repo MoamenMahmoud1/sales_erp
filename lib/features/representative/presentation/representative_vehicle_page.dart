@@ -56,9 +56,10 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
       builder: (_) => CreateLoadingRequestSheet(controller: _controller),
     );
     if (created == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Stock request sent for warehouse approval.')),
-      );
+      final message = _controller.lastRequestQueued
+          ? 'Request saved locally. It will be sent when the connection returns.'
+          : 'Stock request sent for warehouse approval.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -70,9 +71,10 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
       builder: (_) => CreateReturnRequestSheet(controller: _controller),
     );
     if (created == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Return request sent for warehouse approval.')),
-      );
+      final message = _controller.lastRequestQueued
+          ? 'Return request saved locally. It will be sent when the connection returns.'
+          : 'Return request sent for warehouse approval.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -83,7 +85,7 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
     final saleController = RepresentativeSaleController(
       repository: AppServices.instance.representativeSaleRepository,
     );
-    final invoiceId = await Navigator.of(context).push<int>(
+    final submission = await Navigator.of(context).push<RepresentativeSaleSubmission>(
       MaterialPageRoute(
         builder: (_) => RepresentativeSalePage(
           vehicleStock: _controller.vehicleStock,
@@ -93,13 +95,118 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
     );
     saleController.dispose();
 
-    if (invoiceId != null && mounted) {
-      await _controller.load();
-      if (!mounted) return;
+    if (!mounted || submission == null) return;
+    if (submission.queued) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Invoice #$invoiceId created from vehicle stock.')),
+        const SnackBar(
+          content: Text(
+            'Sale saved locally. It will be submitted automatically when the connection returns.',
+          ),
+        ),
       );
+      return;
     }
+
+    await _controller.load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Invoice #${submission.invoiceId} created from vehicle stock.')),
+    );
+  }
+
+  Future<void> _requestVehicleRename() async {
+    final vehicle = _controller.vehicle;
+    if (vehicle == null) return;
+
+    final nameController = TextEditingController(text: vehicle.vehicleName);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Request vehicle rename'),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          maxLength: 150,
+          decoration: const InputDecoration(
+            labelText: 'Vehicle name',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(nameController.text.trim()),
+            child: const Text('Send request'),
+          ),
+        ],
+      ),
+    );
+    nameController.dispose();
+    if (!mounted || name == null || name.isEmpty || name == vehicle.vehicleName) return;
+
+    final sent = await _controller.requestVehicleUpdate(
+      name: name,
+      reason: 'Vehicle rename requested from representative app.',
+    );
+    if (!mounted || !sent) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_controller.errorMessage ?? 'Could not send the request.')),
+        );
+      }
+      return;
+    }
+
+    final message = _controller.lastVehicleMutationQueued
+        ? 'Rename request saved locally. It will be sent when the connection returns.'
+        : 'Rename request sent to the manager for approval.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _requestVehicleDelete() async {
+    final vehicle = _controller.vehicle;
+    if (vehicle == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Request vehicle deactivation'),
+        content: Text(
+          'This will ask the manager to deactivate ${vehicle.vehicleName}. The vehicle will not change until the request is approved.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Send request'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final sent = await _controller.requestVehicleDelete(
+      reason: 'Vehicle deactivation requested from representative app.',
+    );
+    if (!mounted || !sent) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_controller.errorMessage ?? 'Could not send the request.')),
+        );
+      }
+      return;
+    }
+
+    final message = _controller.lastVehicleMutationQueued
+        ? 'Deactivation request saved locally. It will be sent when the connection returns.'
+        : 'Deactivation request sent to the manager for approval.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   StatusType _vehicleStatusType(bool available) {
@@ -197,6 +304,32 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
                                 ],
                               ),
                       ),
+                      if (_controller.vehicle != null) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _controller.isSubmittingVehicleMutation
+                                    ? null
+                                    : _requestVehicleRename,
+                                icon: const Icon(Icons.edit_rounded),
+                                label: const Text('Request rename'),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _controller.isSubmittingVehicleMutation
+                                    ? null
+                                    : _requestVehicleDelete,
+                                icon: const Icon(Icons.remove_circle_outline_rounded),
+                                label: const Text('Request deactivate'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: AppSpacing.xl),
                       const SectionHeader(title: 'Vehicle stock'),
                       const SizedBox(height: AppSpacing.md),
