@@ -37,10 +37,7 @@ class SyncOutboxScheduler {
 
   static Future<void> initialize() async {
     if (_initialized) return;
-    await Workmanager().initialize(
-      syncOutboxCallbackDispatcher,
-      isInDebugMode: false,
-    );
+    await Workmanager().initialize(syncOutboxCallbackDispatcher);
     await Workmanager().registerPeriodicTask(
       _uniqueTaskName,
       _taskName,
