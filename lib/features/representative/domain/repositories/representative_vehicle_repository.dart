@@ -1,4 +1,4 @@
-import '../../../core/sync/sync_outbox.dart';
+import '../../../../core/sync/sync_outbox.dart';
 import '../entities/returnable_invoice.dart';
 import '../entities/stock_transfer_request.dart';
 import '../entities/vehicle_stock_item.dart';
