@@ -16,6 +16,7 @@ Future<void> main() async {
 
   await dotenv.load(fileName: '.env');
   await AppServices.instance.init();
+  await AppServices.instance.pushNotificationRepository.initialize();
   await SyncOutboxScheduler.initialize();
   await SyncOutboxScheduler.flushNow();
   await DemoDataSeeder().seedIfNeeded();
@@ -29,6 +30,10 @@ Future<void> main() async {
   final authController = AuthController(
     AppServices.instance.authRepository,
     offlineAllowed: () => AppServices.instance.offlineAllowed,
+    onAuthenticated: () =>
+        AppServices.instance.pushNotificationRepository.setAuthenticated(true),
+    onBeforeLogout: () =>
+        AppServices.instance.pushNotificationRepository.setAuthenticated(false),
   );
 
   runApp(
