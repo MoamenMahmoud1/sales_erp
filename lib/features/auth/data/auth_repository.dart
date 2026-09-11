@@ -51,7 +51,9 @@ class AuthRepository implements AuthenticationRepository {
   Future<AuthUser> fetchCurrentUser() async {
     final response = await client.dio.get('/auth/me/');
     final data = Map<String, dynamic>.from(response.data as Map);
-    return AuthUser.fromJson(data);
+    final user = AuthUser.fromJson(data);
+    await client.saveCurrentUserId(user.id);
+    return user;
   }
 
   @override
