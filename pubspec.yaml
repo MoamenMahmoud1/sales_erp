@@ -22,7 +22,7 @@ dependencies:
   path_provider: ^2.1.5
   share_plus: ^12.0.2
   sqflite: ^2.4.3
-  workmanager: ^0.10.9
+  workmanager: ^0.10.10
 
 dev_dependencies:
   flutter_test:
