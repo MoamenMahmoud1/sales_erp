@@ -5,7 +5,6 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/app_card.dart';
 import '../../../core/ui/section_header.dart';
-import '../../../core/ui/status_badge.dart';
 import '../domain/repositories/representative_sale_repository.dart';
 import 'representative_sale_controller.dart';
 import 'representative_sale_page.dart';
@@ -141,17 +140,19 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
               const SizedBox(height: AppSpacing.md),
               FilledButton(
                 onPressed: () async {
-                  final result = await _controller.requestVehicleUpdate(
-                    nameController.text.trim(),
+                  final succeeded = await _controller.requestVehicleUpdate(
+                    name: nameController.text.trim(),
                   );
                   if (!sheetContext.mounted) return;
                   Navigator.of(sheetContext).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        result.queued
-                            ? 'Vehicle update saved locally and waiting for manager approval.'
-                            : 'Vehicle update request submitted for manager approval.',
+                        succeeded
+                            ? _controller.lastVehicleMutationQueued
+                                ? 'Vehicle update saved locally and waiting for manager approval.'
+                                : 'Vehicle update request submitted for manager approval.'
+                            : 'Unable to create vehicle update request.',
                       ),
                     ),
                   );
@@ -161,15 +162,17 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
               const SizedBox(height: AppSpacing.sm),
               OutlinedButton(
                 onPressed: () async {
-                  final result = await _controller.requestVehicleDelete();
+                  final succeeded = await _controller.requestVehicleDelete();
                   if (!sheetContext.mounted) return;
                   Navigator.of(sheetContext).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        result.queued
-                            ? 'Vehicle deletion saved locally and waiting for manager approval.'
-                            : 'Vehicle deletion request submitted for manager approval.',
+                        succeeded
+                            ? _controller.lastVehicleMutationQueued
+                                ? 'Vehicle deletion saved locally and waiting for manager approval.'
+                                : 'Vehicle deletion request submitted for manager approval.'
+                            : 'Unable to create vehicle deletion request.',
                       ),
                     ),
                   );
@@ -242,7 +245,7 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
               subtitle: 'Loading and return requests with warehouse approval status.',
             ),
             const SizedBox(height: AppSpacing.sm),
-            StockTransferRequestsCard(requests: _controller.requests),
+            StockTransferRequestsCard(requests: _controller.transferRequests),
             const SizedBox(height: AppSpacing.md),
             Wrap(
               spacing: AppSpacing.sm,
