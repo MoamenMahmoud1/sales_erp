@@ -54,7 +54,9 @@ class FirebasePushNotificationRepository implements PushNotificationRepository {
     if (_initialized || !FirebaseConfig.isConfigured) return;
 
     try {
-      await Firebase.initializeApp(options: FirebaseConfig.currentPlatform);
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(options: FirebaseConfig.currentPlatform);
+      }
 
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
