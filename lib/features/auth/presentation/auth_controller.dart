@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../domain/entities/auth_user.dart';
@@ -37,6 +39,14 @@ class AuthController extends ChangeNotifier {
 
   bool get canAccessOffline => offlineAllowed();
 
+  Future<void> _notifyAuthenticated() async {
+    try {
+      await onAuthenticated?.call();
+    } catch (_) {
+      // Push registration must never invalidate a valid application session.
+    }
+  }
+
   Future<void> restoreSession() async {
     status = AuthStatus.checking;
     currentUser = null;
@@ -59,7 +69,7 @@ class AuthController extends ChangeNotifier {
       await repository.refresh();
       currentUser = await repository.fetchCurrentUser();
       status = AuthStatus.authenticated;
-      await onAuthenticated?.call();
+      unawaited(_notifyAuthenticated());
     } catch (_) {
       await repository.clearSession();
       currentUser = null;
@@ -78,7 +88,7 @@ class AuthController extends ChangeNotifier {
       password: password,
     );
     status = AuthStatus.authenticated;
-    await onAuthenticated?.call();
+    unawaited(_notifyAuthenticated());
     notifyListeners();
   }
 
