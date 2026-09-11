@@ -52,6 +52,15 @@ class ApiClient {
     return _storage.write(key: 'access_token', value: token);
   }
 
+  Future<void> saveCurrentUserId(int userId) {
+    return _storage.write(key: 'current_user_id', value: userId.toString());
+  }
+
+  Future<int?> get currentUserId async {
+    final value = await _storage.read(key: 'current_user_id');
+    return int.tryParse(value ?? '');
+  }
+
   Future<bool> hasAccessToken() async {
     final token = await _storage.read(key: 'access_token');
     return token != null && token.isNotEmpty;
@@ -59,6 +68,7 @@ class ApiClient {
 
   Future<void> clearSession() async {
     await _storage.delete(key: 'access_token');
+    await _storage.delete(key: 'current_user_id');
     await _cookieJar.deleteAll();
   }
 }
