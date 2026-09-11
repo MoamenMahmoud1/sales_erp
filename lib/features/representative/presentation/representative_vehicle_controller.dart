@@ -80,9 +80,10 @@ class RepresentativeVehicleController extends ChangeNotifier {
     } catch (error) {
       _errorMessage = error.toString();
     } finally {
-      if (_disposed) return;
-      _isLoading = false;
-      notifyListeners();
+      if (!_disposed) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -191,8 +192,6 @@ class RepresentativeVehicleController extends ChangeNotifier {
         reason: reason,
       );
       _lastVehicleMutationQueued = result.queued;
-      // Creating the approval request does not mean the mutation was approved.
-      // The current vehicle stays unchanged until the server state changes.
       return true;
     } catch (error) {
       _errorMessage = error.toString();
@@ -217,7 +216,6 @@ class RepresentativeVehicleController extends ChangeNotifier {
         reason: reason,
       );
       _lastVehicleMutationQueued = result.queued;
-      // A pending approval must not deactivate the local vehicle optimistically.
       return true;
     } catch (error) {
       _errorMessage = error.toString();

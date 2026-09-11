@@ -1,5 +1,4 @@
 import 'package:flutter/widgets.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'app/app.dart';
 import 'core/data/demo_data_seeder.dart';
@@ -14,7 +13,6 @@ import 'features/auth/presentation/auth_gate.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await dotenv.load(fileName: '.env');
   await AppServices.instance.init();
   await AppServices.instance.pushNotificationRepository.initialize();
   await SyncOutboxScheduler.initialize();

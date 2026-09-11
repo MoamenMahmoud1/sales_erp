@@ -102,7 +102,7 @@ class _ApprovalCenterPageState extends State<ApprovalCenterPage> {
                 : ListView.separated(
                     padding: const EdgeInsets.all(AppSpacing.lg),
                     itemCount: controller.requests.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
+                    separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
                     itemBuilder: (context, index) {
                       final request = controller.requests[index];
                       return _ApprovalCard(

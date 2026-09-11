@@ -27,7 +27,7 @@ class DataModeController extends ChangeNotifier {
     return File('${dir.path}/$_fileName');
   }
 
-  /// Loads saved operational mode from storage, defaulting strictly to local.
+  /// Load the persisted mode, defaulting to the configured server-backed mode.
   Future<void> load() async {
     try {
       final file = await _file();
@@ -54,7 +54,7 @@ class DataModeController extends ChangeNotifier {
       final file = await _file();
       await file.writeAsString(mode.name);
     } catch (_) {
-      // Ignore errors when saving file - mode is preserved in memory.
+      // Ignore persistence errors; the selected mode remains active in memory.
     }
   }
 }

@@ -34,10 +34,10 @@ class SectionHeader extends StatelessWidget {
                 title,
                 style: AppTextStyles.title(context).copyWith(fontSize: 17),
               ),
-              if (subtitle != null) ...[
+              if (subtitle case final text?) ...[
                 const SizedBox(height: 2),
                 Text(
-                  subtitle!,
+                  text,
                   style: TextStyle(color: colors.textMuted, fontSize: 13),
                 ),
               ],

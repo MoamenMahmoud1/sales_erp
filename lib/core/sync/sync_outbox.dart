@@ -14,6 +14,7 @@ class SyncOutboxEntry {
   final String method;
   final String path;
   final Map<String, dynamic> body;
+  final String status;
   final int attemptCount;
   final String? lastError;
 
@@ -24,18 +25,21 @@ class SyncOutboxEntry {
     required this.method,
     required this.path,
     required this.body,
+    required this.status,
     required this.attemptCount,
     required this.lastError,
   });
 
   factory SyncOutboxEntry.fromRow(Map<String, Object?> row) {
+    final ownerValue = row['owner_user_id'];
     return SyncOutboxEntry(
       id: (row['id'] as num).toInt(),
       operationKey: row['operation_key'] as String,
-      ownerUserId: (row['owner_user_id'] as num).toInt(),
+      ownerUserId: ownerValue is num ? ownerValue.toInt() : 0,
       method: row['method'] as String,
       path: row['path'] as String,
       body: Map<String, dynamic>.from(jsonDecode(row['body'] as String) as Map),
+      status: row['status'] as String? ?? 'pending',
       attemptCount: (row['attempt_count'] as num).toInt(),
       lastError: row['last_error'] as String?,
     );
@@ -125,7 +129,28 @@ class SyncOutbox {
       {
         'status': 'failed',
         'lease_until': null,
-        'last_error': error.length > 1000 ? error.substring(0, 1000) : error,
+        'last_error': _truncate(error),
+        'updated_at': now,
+      },
+      where: 'operation_key = ?',
+      whereArgs: [operationKey],
+    );
+  }
+
+  Future<void> markConflictByOperationKey(
+    String operationKey, {
+    required String error,
+    String? responseBody,
+  }) async {
+    final db = await AppDatabase.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.update(
+      'sync_outbox',
+      {
+        'status': 'conflict',
+        'lease_until': null,
+        'last_error': _truncate(error),
+        'response_body': responseBody,
         'updated_at': now,
       },
       where: 'operation_key = ?',
@@ -208,7 +233,7 @@ class SyncOutbox {
         'attempt_count': attempt,
         'next_attempt_at': nextAttempt.toIso8601String(),
         'lease_until': null,
-        'last_error': error.length > 1000 ? error.substring(0, 1000) : error,
+        'last_error': _truncate(error),
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       },
       where: 'id = ?',
@@ -250,17 +275,23 @@ class SyncOutbox {
     final randomPart = _random.nextInt(1 << 32).toRadixString(16);
     return 'flutter-$timestamp-$randomPart';
   }
+
+  static String _truncate(String value) {
+    return value.length > 1000 ? value.substring(0, 1000) : value;
+  }
 }
 
 class ReliableCommandResult {
   final bool completed;
   final bool queued;
+  final bool conflict;
   final String operationKey;
   final Map<String, dynamic>? response;
 
   const ReliableCommandResult({
     required this.completed,
     required this.queued,
+    this.conflict = false,
     required this.operationKey,
     required this.response,
   });
@@ -364,6 +395,24 @@ class ReliableCommandClient {
             queued: true,
             operationKey: key,
             response: null,
+          );
+        }
+
+        if (error.response?.statusCode == 409) {
+          final payload = error.response?.data is Map
+              ? Map<String, dynamic>.from(error.response!.data as Map)
+              : <String, dynamic>{};
+          await outbox.markConflictByOperationKey(
+            key,
+            error: _describe(error),
+            responseBody: jsonEncode(payload),
+          );
+          return ReliableCommandResult(
+            completed: false,
+            queued: false,
+            conflict: true,
+            operationKey: key,
+            response: payload,
           );
         }
 

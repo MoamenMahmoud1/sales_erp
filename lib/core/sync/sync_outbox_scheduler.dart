@@ -1,5 +1,4 @@
 import 'package:flutter/widgets.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:workmanager/workmanager.dart';
 
 import '../repositories/app_services.dart';
@@ -13,20 +12,13 @@ const _uniqueTaskName = 'sales_erp.sync_outbox.periodic';
 void syncOutboxCallbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     WidgetsFlutterBinding.ensureInitialized();
-    try {
-      await dotenv.load(fileName: '.env');
-    } catch (_) {
-      // The environment may already be loaded in a foreground isolate.
-    }
-
     await AppServices.instance.init();
     final services = AppServices.instance;
 
     try {
       await services.authRepository.refresh();
     } catch (_) {
-      // A missing/expired session must not delete business commands. They stay
-      // in the outbox until the owning user restores authentication.
+      // Preserve queued business operations until the owning user restores authentication.
     }
 
     await SyncOutboxProcessor(
@@ -45,10 +37,7 @@ class SyncOutboxScheduler {
 
   static Future<void> initialize() async {
     if (_initialized) return;
-    await Workmanager().initialize(
-      syncOutboxCallbackDispatcher,
-      isInDebugMode: false,
-    );
+    await Workmanager().initialize(syncOutboxCallbackDispatcher);
     await Workmanager().registerPeriodicTask(
       _uniqueTaskName,
       _taskName,

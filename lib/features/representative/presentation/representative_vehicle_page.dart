@@ -143,7 +143,7 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
                   final succeeded = await _controller.requestVehicleUpdate(
                     name: nameController.text.trim(),
                   );
-                  if (!sheetContext.mounted) return;
+                  if (!mounted || !sheetContext.mounted) return;
                   Navigator.of(sheetContext).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -163,7 +163,7 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
               OutlinedButton(
                 onPressed: () async {
                   final succeeded = await _controller.requestVehicleDelete();
-                  if (!sheetContext.mounted) return;
+                  if (!mounted || !sheetContext.mounted) return;
                   Navigator.of(sheetContext).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(

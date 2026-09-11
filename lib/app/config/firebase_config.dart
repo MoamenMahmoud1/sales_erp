@@ -1,26 +1,22 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class FirebaseConfig {
   FirebaseConfig._();
 
-  static String get _projectId => dotenv.get('FIREBASE_PROJECT_ID', fallback: '');
-  static String get _messagingSenderId => dotenv.get('FIREBASE_MESSAGING_SENDER_ID', fallback: '');
+  static const _projectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
+  static const _messagingSenderId = String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
+  static const _androidApiKey = String.fromEnvironment('FIREBASE_ANDROID_API_KEY');
+  static const _iosApiKey = String.fromEnvironment('FIREBASE_IOS_API_KEY');
+  static const _androidAppId = String.fromEnvironment('FIREBASE_ANDROID_APP_ID');
+  static const _iosAppId = String.fromEnvironment('FIREBASE_IOS_APP_ID');
+  static const _storageBucket = String.fromEnvironment('FIREBASE_STORAGE_BUCKET');
 
-  static String get _apiKey {
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      return dotenv.get('FIREBASE_IOS_API_KEY', fallback: '');
-    }
-    return dotenv.get('FIREBASE_ANDROID_API_KEY', fallback: '');
-  }
+  static String get _apiKey =>
+      defaultTargetPlatform == TargetPlatform.iOS ? _iosApiKey : _androidApiKey;
 
-  static String get _appId {
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      return dotenv.get('FIREBASE_IOS_APP_ID', fallback: '');
-    }
-    return dotenv.get('FIREBASE_ANDROID_APP_ID', fallback: '');
-  }
+  static String get _appId =>
+      defaultTargetPlatform == TargetPlatform.iOS ? _iosAppId : _androidAppId;
 
   static bool get isConfigured {
     if (kIsWeb) return false;
@@ -44,7 +40,7 @@ class FirebaseConfig {
       appId: _appId,
       messagingSenderId: _messagingSenderId,
       projectId: _projectId,
-      storageBucket: dotenv.get('FIREBASE_STORAGE_BUCKET', fallback: ''),
+      storageBucket: _storageBucket.isEmpty ? null : _storageBucket,
     );
   }
 }

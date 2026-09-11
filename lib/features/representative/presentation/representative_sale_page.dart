@@ -114,7 +114,7 @@ class _RepresentativeSalePageState extends State<RepresentativeSalePage> {
               const SectionHeader(title: 'Customer'),
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<int>(
-                value: widget.controller.selectedCustomer?.id,
+                initialValue: widget.controller.selectedCustomer?.id,
                 decoration: const InputDecoration(
                   labelText: 'Customer',
                   border: OutlineInputBorder(),
@@ -191,7 +191,7 @@ class _RepresentativeSalePageState extends State<RepresentativeSalePage> {
               const SectionHeader(title: 'Payment'),
               const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<PaymentMethod>(
-                value: widget.controller.paymentMethod,
+                initialValue: widget.controller.paymentMethod,
                 decoration: const InputDecoration(
                   labelText: 'Payment method',
                   border: OutlineInputBorder(),

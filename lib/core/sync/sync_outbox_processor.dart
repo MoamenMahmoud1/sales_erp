@@ -35,6 +35,13 @@ class SyncOutboxProcessor {
             entry,
             error: result.error ?? 'Transient network error.',
           );
+        case _SendKind.conflict:
+          await outbox.markConflictByOperationKey(
+            entry.operationKey,
+            error: result.error ?? 'The operation conflicts with current server state.',
+            responseBody: result.responseBody,
+          );
+          _emitConflict(entry, result.error, result.responseBody);
         case _SendKind.permanent:
           await outbox.markPermanentFailure(
             entry,
@@ -42,7 +49,7 @@ class SyncOutboxProcessor {
           );
       }
 
-      if (result.kind == _SendKind.retry) break;
+      if (result.kind == _SendKind.retry || result.kind == _SendKind.conflict) break;
     }
 
     await outbox.cleanupCompleted();
@@ -60,8 +67,28 @@ class SyncOutboxProcessor {
         ),
       );
     } catch (_) {
-      // Sync completion must never fail because an event consumer cannot parse
-      // an optional response payload.
+      // Sync completion must not fail because an optional response event is malformed.
+    }
+  }
+
+  void _emitConflict(
+    SyncOutboxEntry entry,
+    String? error,
+    String? responseBody,
+  ) {
+    try {
+      SyncOutboxEventBus.instance.emitConflict(
+        SyncOutboxConflictEvent.fromResponse(
+          outboxId: entry.id,
+          operationKey: entry.operationKey,
+          method: entry.method,
+          path: entry.path,
+          message: error ?? 'The server rejected the operation because its state changed.',
+          responseBody: responseBody,
+        ),
+      );
+    } catch (_) {
+      // Conflict state is already persisted; event parsing must not block synchronization.
     }
   }
 
@@ -94,6 +121,14 @@ class SyncOutboxProcessor {
               'Authentication refresh failed; waiting for the owning user session.',
             );
           }
+        }
+
+        if (error.response?.statusCode == 409) {
+          final body = error.response?.data;
+          return _SendResult.conflict(
+            _describe(error),
+            body == null ? null : jsonEncode(body),
+          );
         }
 
         if (_isTransient(error)) {
@@ -134,7 +169,7 @@ class SyncOutboxProcessor {
   }
 }
 
-enum _SendKind { success, retry, permanent }
+enum _SendKind { success, retry, conflict, permanent }
 
 class _SendResult {
   final _SendKind kind;
@@ -148,6 +183,9 @@ class _SendResult {
 
   factory _SendResult.retry(String error) =>
       _SendResult._(_SendKind.retry, null, error);
+
+  factory _SendResult.conflict(String error, String? responseBody) =>
+      _SendResult._(_SendKind.conflict, responseBody, error);
 
   factory _SendResult.permanent(String error) =>
       _SendResult._(_SendKind.permanent, null, error);

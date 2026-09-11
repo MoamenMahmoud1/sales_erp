@@ -185,7 +185,7 @@ class _CreateReturnRequestSheetState extends State<CreateReturnRequestSheet> {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   DropdownButtonFormField<int>(
-                    value: _selectedWarehouseId,
+                    initialValue: _selectedWarehouseId,
                     decoration: const InputDecoration(
                       labelText: 'Return warehouse',
                       border: OutlineInputBorder(),
@@ -208,7 +208,7 @@ class _CreateReturnRequestSheetState extends State<CreateReturnRequestSheet> {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   DropdownButtonFormField<int>(
-                    value: _selectedManagerId,
+                    initialValue: _selectedManagerId,
                     decoration: const InputDecoration(
                       labelText: 'Warehouse manager',
                       border: OutlineInputBorder(),
@@ -234,7 +234,7 @@ class _CreateReturnRequestSheetState extends State<CreateReturnRequestSheet> {
                       child: ListView.separated(
                         shrinkWrap: true,
                         itemCount: _invoice!.items.length,
-                        separatorBuilder: (_, __) => const Divider(height: 16),
+                        separatorBuilder: (_, _) => const Divider(height: 16),
                         itemBuilder: (context, index) {
                           final item = _invoice!.items[index];
                           final remaining = item.remainingQuantity;

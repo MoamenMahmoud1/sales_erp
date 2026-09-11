@@ -12,8 +12,9 @@ The app is the mobile counterpart to the [`erp-api`](https://github.com/MoamenMa
 - Payment collection workflows
 - Sales and inventory operations for warehouse teams
 - Coupons and related sales flows
-- Local data support and background work
+- Local data support and durable offline commands
 - Secure storage and device authentication
+- Durable synchronization with retry, idempotency, and conflict state
 
 ## Architecture
 
@@ -35,6 +36,19 @@ lib/
 
 Networking is handled with **Dio**, with secure session/storage support, local persistence, and background task support where needed.
 
+Write operations that can safely be retried are persisted to the local outbox before the network request. The backend receives the same idempotency key on replay. HTTP 409 business conflicts remain durable in the outbox and are published through the synchronization event bus instead of being retried forever.
+
+## API configuration
+
+The production API URL is provided at build time with Dart defines rather than a tracked environment asset:
+
+```bash
+flutter run --dart-define=API_BASE_URL=https://api.example.com/api/v1
+flutter build apk --release --dart-define=API_BASE_URL=https://api.example.com/api/v1
+```
+
+Debug builds fall back to `http://127.0.0.1:8000/api/v1` for local development. Release builds require an explicit `API_BASE_URL`.
+
 ## Tech Stack
 
 - Flutter / Dart
@@ -51,7 +65,7 @@ Networking is handled with **Dio**, with secure session/storage support, local p
 flutter pub get
 flutter analyze
 flutter test
-flutter run
+flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8000/api/v1
 ```
 
 ## Related Repository
@@ -62,4 +76,4 @@ Together, `sales_erp` and `erp-api` form the mobile and web/API sides of the sam
 
 ## License
 
-This repository is **proprietary**. All rights are reserved by the copyright holder. No permission is granted to use, copy, modify, distribute, publish, sublicense, or create derivative works from this code without prior written permission. See [`LICENSE`](LICENSE).
+This repository is **proprietary**. All rights reserved by the copyright holder. No permission is granted to use, copy, modify, distribute, publish, sublicense, or create derivative works from this code without prior written permission. See [`LICENSE`](LICENSE).

@@ -31,3 +31,6 @@ jobs:
 
       - name: Test
         run: flutter test
+
+      - name: Build release APK
+        run: flutter build apk --release --dart-define=API_BASE_URL=https://example.invalid/api/v1
