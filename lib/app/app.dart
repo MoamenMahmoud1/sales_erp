@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../core/presentation/biometric_lock_screen.dart';
-import '../core/security/app_lock_controller.dart';
-import '../core/security/biometric_auth.dart';
-import '../core/theme/app_theme.dart';
+import '../../core/presentation/biometric_lock_screen.dart';
+import '../../core/security/app_lock_controller.dart';
+import '../../core/security/biometric_auth.dart';
+import '../../core/sync/sync_outbox_scheduler.dart';
+import '../../core/theme/app_theme.dart';
 
 typedef AppHomeBuilder = Widget Function(
   AppThemeController themeController,
@@ -13,9 +14,8 @@ typedef AppHomeBuilder = Widget Function(
 /// Shared application-level root used by both the Full and Car entry points.
 ///
 /// The root owns only global concerns (theme, lock state, startup animation,
-/// and the native biometric gate). It deliberately does not import either
-/// application's feature shell, so each Dart entry point controls its own
-/// feature dependency graph.
+/// the native biometric gate, and foreground sync resume). It deliberately
+/// does not import either application's feature shell.
 class SalesErpApp extends StatefulWidget {
   final AppLockController lockController;
   final AppThemeController themeController;
@@ -34,23 +34,38 @@ class SalesErpApp extends StatefulWidget {
   State<SalesErpApp> createState() => _SalesErpAppState();
 }
 
-class _SalesErpAppState extends State<SalesErpApp> {
+class _SalesErpAppState extends State<SalesErpApp>
+    with WidgetsBindingObserver {
   late final AppThemeController _themeController = widget.themeController;
   late final BiometricAuth _deviceAuth = BiometricAuth();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _themeController.addListener(_onThemeChanged);
     widget.lockController.addListener(_onLockChanged);
+    _flushOutbox();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _themeController.removeListener(_onThemeChanged);
     widget.lockController.removeListener(_onLockChanged);
     _themeController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _flushOutbox();
+    }
+  }
+
+  void _flushOutbox() {
+    SyncOutboxScheduler.flushNow().ignore();
   }
 
   void _onThemeChanged() {
