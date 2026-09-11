@@ -76,4 +76,4 @@ Together, `sales_erp` and `erp-api` form the mobile and web/API sides of the sam
 
 ## License
 
-This repository is **proprietary**. All rights reserved by the copyright holder. No permission is granted to use, copy, modify, distribute, publish, sublicense, and create derivative works from this code without prior written permission. See [`LICENSE`](LICENSE).
+This repository is **proprietary**. All rights reserved by the copyright holder. No permission is granted to use, copy, modify, distribute, publish, sublicense, or create derivative works from this code without prior written permission. See [`LICENSE`](LICENSE).
