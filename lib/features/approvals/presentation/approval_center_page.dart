@@ -96,9 +96,9 @@ class _ApprovalCenterPageState extends State<ApprovalCenterPage> {
       body: RefreshIndicator(
         onRefresh: controller.load,
         child: controller.isLoading && controller.requests.isEmpty
-            ? const ListView(children: [SizedBox(height: 240), Center(child: CircularProgressIndicator())])
+            ? ListView(children: const [SizedBox(height: 240)])
             : controller.requests.isEmpty
-                ? const ListView(children: [SizedBox(height: 240), Center(child: Text('No pending approvals.'))])
+                ? ListView(children: const [SizedBox(height: 240), Center(child: Text('No pending approvals.'))])
                 : ListView.separated(
                     padding: const EdgeInsets.all(AppSpacing.lg),
                     itemCount: controller.requests.length,
