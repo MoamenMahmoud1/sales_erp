@@ -33,4 +33,4 @@ jobs:
         run: flutter test
 
       - name: Build release APK
-        run: flutter build apk --release --dart-define=API_BASE_URL=https://example.invalid/api/v1
+        run: flutter build apk --release --flavor full --dart-define=API_BASE_URL=https://example.invalid/api/v1
