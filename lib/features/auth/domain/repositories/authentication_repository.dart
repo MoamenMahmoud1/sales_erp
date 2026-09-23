@@ -14,5 +14,9 @@ abstract interface class AuthenticationRepository {
 
   Future<void> logout();
 
+  Future<AuthUser?> getCachedUser();
+
+  Future<void> cacheUser(AuthUser user);
+
   Future<void> clearSession();
 }

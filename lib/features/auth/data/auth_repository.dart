@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import '../../../core/network/api_client.dart';
@@ -53,6 +55,7 @@ class AuthRepository implements AuthenticationRepository {
     final data = Map<String, dynamic>.from(response.data as Map);
     final user = AuthUser.fromJson(data);
     await client.saveCurrentUserId(user.id);
+    await cacheUser(user);
     return user;
   }
 
@@ -77,6 +80,24 @@ class AuthRepository implements AuthenticationRepository {
     } finally {
       await client.clearSession();
     }
+  }
+
+  @override
+  Future<AuthUser?> getCachedUser() async {
+    final raw = await client.getCachedUserJson();
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      return AuthUser.fromJson(Map<String, dynamic>.from(decoded as Map));
+    } catch (_) {
+      await client.clearSession();
+      return null;
+    }
+  }
+
+  @override
+  Future<void> cacheUser(AuthUser user) {
+    return client.saveCachedUserJson(jsonEncode(user.toJson()));
   }
 
   @override

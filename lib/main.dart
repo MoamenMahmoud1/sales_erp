@@ -17,7 +17,8 @@ Future<void> main() async {
   await AppServices.instance.pushNotificationRepository.initialize();
   await SyncOutboxScheduler.initialize();
   await SyncOutboxScheduler.flushNow();
-  await DemoDataSeeder().seedIfNeeded();
+  const enableDemoData = bool.fromEnvironment('ENABLE_DEMO_DATA');
+  if (enableDemoData) await DemoDataSeeder().seedIfNeeded();
 
   final lockController = AppLockController();
   await lockController.init();

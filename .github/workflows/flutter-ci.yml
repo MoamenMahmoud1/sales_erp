@@ -32,5 +32,32 @@ jobs:
       - name: Test
         run: flutter test
 
+      - name: Production security guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RIn --include='*.dart' 'localDevelopmentUser' lib; then
+            echo 'Local superuser identity must never exist in production source.'
+            exit 1
+          fi
+          if ! grep -n 'enableDemoData' lib/main.dart >/dev/null; then
+            echo 'Demo data must be compile-time opt-in.'
+            exit 1
+          fi
+
+      - name: Create ephemeral CI release keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -v             -storetype JKS             -keystore "$RUNNER_TEMP/ci-release.jks"             -storepass "$CI_KEYSTORE_PASSWORD"             -keypass "$CI_KEYSTORE_PASSWORD"             -alias ci-release             -keyalg RSA             -keysize 2048             -validity 1             -dname "CN=CI Release,O=Sales ERP,C=EG"
+          {
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/ci-release.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD=$CI_KEYSTORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS=ci-release"
+            echo "ANDROID_KEY_PASSWORD=$CI_KEYSTORE_PASSWORD"
+          } >> "$GITHUB_ENV"
+        env:
+          CI_KEYSTORE_PASSWORD: ci-only-release-password
+
       - name: Build release APK
         run: flutter build apk --release --flavor full --dart-define=API_BASE_URL=https://example.invalid/api/v1

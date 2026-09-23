@@ -24,6 +24,32 @@ android {
         multiDexEnabled = true
     }
 
+    val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    val releaseKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+    val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+    val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+
+    signingConfigs {
+        create("secureRelease") {
+            if (
+                releaseKeystorePath.isNullOrBlank() ||
+                releaseKeystorePassword.isNullOrBlank() ||
+                releaseKeyAlias.isNullOrBlank() ||
+                releaseKeyPassword.isNullOrBlank()
+            ) {
+                throw GradleException(
+                    "Secure release signing is not configured. " +
+                        "Set ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, " +
+                        "ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD."
+                )
+            }
+            storeFile = file(releaseKeystorePath)
+            storePassword = releaseKeystorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+        }
+    }
+
     productFlavors {
         create("full") {
             dimension = "app"
@@ -34,9 +60,13 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("secureRelease")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
