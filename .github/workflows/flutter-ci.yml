@@ -40,19 +40,6 @@ jobs:
             echo 'Local superuser identity must never exist in production source.'
             exit 1
           fi
-          if grep -n 'DemoDataSeeder().seedIfNeeded' lib/main.dart; then
-            echo 'Demo data must be compile-time opt-in.'
-            exit 1
-          fi
-
-      - name: Production security guards
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -RIn --include='*.dart' 'localDevelopmentUser' lib; then
-            echo 'Local superuser identity must never exist in production source.'
-            exit 1
-          fi
           if grep -n 'DemoDataSeeder().seedIfNeeded' lib/main.dart | grep -v 'if (enableDemoData)' >/dev/null; then
             echo 'Demo data must be compile-time opt-in.'
             exit 1
