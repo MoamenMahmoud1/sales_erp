@@ -7,6 +7,7 @@ import 'secure_cookie_storage.dart';
 import '../../app/config/api_config.dart';
 
 class ApiClient {
+  static const _cachedUserKey = 'cached_auth_user_v1';
   final FlutterSecureStorage _storage;
   final PersistCookieJar _cookieJar;
   late final Dio dio;
@@ -53,6 +54,14 @@ class ApiClient {
     return _storage.write(key: 'current_user_id', value: userId.toString());
   }
 
+  Future<void> saveCachedUserJson(String value) {
+    return _storage.write(key: _cachedUserKey, value: value);
+  }
+
+  Future<String?> getCachedUserJson() {
+    return _storage.read(key: _cachedUserKey);
+  }
+
   Future<int?> get currentUserId async {
     final value = await _storage.read(key: 'current_user_id');
     return int.tryParse(value ?? '');
@@ -66,6 +75,7 @@ class ApiClient {
   Future<void> clearSession() async {
     await _storage.delete(key: 'access_token');
     await _storage.delete(key: 'current_user_id');
+    await _storage.delete(key: _cachedUserKey);
     await _cookieJar.deleteAll();
   }
 }
