@@ -148,7 +148,7 @@ class AppDatabase {
     } catch (error) {
       try {
         final encrypted = File(path);
-        if (target != null && target!.isOpen) await target!.close();
+        if (target != null && target.isOpen) await target.close();
         if (await encrypted.exists()) await encrypted.delete();
       } catch (_) {}
       await sourceBackup.rename(path);
@@ -215,7 +215,7 @@ class AppDatabase {
   }
 
   static Future<void> resetDatabase() async {
-    final root = await getDatabasesPath();
+    final root = await legacy_sqflite.getDatabasesPath();
     final path = join(root, databaseName);
     final existing = _database;
 
