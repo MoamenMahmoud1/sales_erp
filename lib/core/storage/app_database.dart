@@ -87,7 +87,7 @@ class AppDatabase {
     final handle = await file.open();
     try {
       final bytes = await handle.read(16);
-      const header = 'SQLite format 3\\u0000';
+      const header = 'SQLite format 3\u0000';
       if (bytes.length != header.length) return false;
       return utf8.decode(bytes, allowMalformed: true) == header;
     } finally {
@@ -188,7 +188,7 @@ class AppDatabase {
     });
   }
 
-  static Future<void> _cleanupExpiredInvoiceChanges(Database db) async {
+  static Future<void> _cleanupExpiredInvoiceChanges(cipher.Database db) async {
     final rows = await db.rawQuery('''
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name = 'invoice_changes'
