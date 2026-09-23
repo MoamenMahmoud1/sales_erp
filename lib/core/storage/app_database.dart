@@ -18,11 +18,11 @@ class AppDatabase {
   static const version = 18;
   static const _keyName = 'sales_erp_sqlcipher_key_v1';
 
-  static Database? _database;
-  static Future<Database>? _opening;
+  static cipher.Database? _database;
+  static Future<cipher.Database>? _opening;
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
-  static Future<Database> get database async {
+  static Future<cipher.Database> get database async {
     final existing = _database;
     if (existing != null && existing.isOpen) return existing;
 
@@ -38,7 +38,7 @@ class AppDatabase {
     }
   }
 
-  static Future<Database> _open() async {
+  static Future<cipher.Database> _open() async {
     final root = await getDatabasesPath();
     final path = join(root, databaseName);
     final key = await _databaseKey();
@@ -60,7 +60,7 @@ class AppDatabase {
     return key;
   }
 
-  static Future<Database> _openEncrypted(String path, String key) async {
+  static Future<cipher.Database> _openEncrypted(String path, String key) async {
     try {
       return await cipher.openDatabase(
         path,
@@ -95,7 +95,7 @@ class AppDatabase {
     }
   }
 
-  static Future<Database> _migratePlaintextDatabase(
+  static Future<cipher.Database> _migratePlaintextDatabase(
     String path,
     String key, {
     required Object originalError,
@@ -150,7 +150,7 @@ class AppDatabase {
 
   static Future<void> _copySharedTables(
     legacy_sqflite.Database source,
-    Database target,
+    cipher.Database target,
   ) async {
     final sourceRows = await source.rawQuery(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -180,7 +180,7 @@ class AppDatabase {
           batch.insert(
             table,
             {for (final column in columns) column: row[column]},
-            conflictAlgorithm: ConflictAlgorithm.replace,
+            conflictAlgorithm: cipher.ConflictAlgorithm.replace,
           );
         }
         await batch.commit(noResult: true);
