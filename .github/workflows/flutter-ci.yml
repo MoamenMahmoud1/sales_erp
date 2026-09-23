@@ -49,16 +49,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          keytool -genkeypair -v             -keystore "$RUNNER_TEMP/ci-release.jks"             -storepass "$CI_KEYSTORE_PASSWORD"             -keypass "$CI_KEY_PASSWORD"             -alias ci-release             -keyalg RSA             -keysize 2048             -validity 1             -dname "CN=CI Release,O=Sales ERP,C=EG"
+          keytool -genkeypair -v             -storetype JKS             -keystore "$RUNNER_TEMP/ci-release.jks"             -storepass "$CI_KEYSTORE_PASSWORD"             -keypass "$CI_KEYSTORE_PASSWORD"             -alias ci-release             -keyalg RSA             -keysize 2048             -validity 1             -dname "CN=CI Release,O=Sales ERP,C=EG"
           {
             echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/ci-release.jks"
             echo "ANDROID_KEYSTORE_PASSWORD=$CI_KEYSTORE_PASSWORD"
             echo "ANDROID_KEY_ALIAS=ci-release"
-            echo "ANDROID_KEY_PASSWORD=$CI_KEY_PASSWORD"
+            echo "ANDROID_KEY_PASSWORD=$CI_KEYSTORE_PASSWORD"
           } >> "$GITHUB_ENV"
         env:
-          CI_KEYSTORE_PASSWORD: ci-only-store-password
-          CI_KEY_PASSWORD: ci-only-key-password
+          CI_KEYSTORE_PASSWORD: ci-only-release-password
 
       - name: Build release APK
         run: flutter build apk --release --flavor full --dart-define=API_BASE_URL=https://example.invalid/api/v1
