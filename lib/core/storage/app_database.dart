@@ -43,6 +43,7 @@ class AppDatabase {
     final path = join(root, databaseName);
     final key = await _databaseKey();
 
+    await _recoverPlaintextMigration(path);
     final database = await _openEncrypted(path, key);
     await _cleanupPlaintextBackup(path);
     _database = database;
@@ -50,9 +51,29 @@ class AppDatabase {
     return database;
   }
 
+  static Future<void> _recoverPlaintextMigration(String path) async {
+    final backup = File('$path.plaintext-migration');
+    if (!await backup.exists()) return;
+
+    final database = File(path);
+    if (!await database.exists()) {
+      // The app may have been terminated after moving the legacy plaintext DB
+      // but before creating the encrypted replacement. Restore it so the
+      // migration can be retried without data loss.
+      await backup.rename(path);
+      return;
+    }
+
+    // Both files exist. Keep the plaintext recovery copy until the encrypted
+    // DB has been opened successfully; _open() removes it only after success.
+  }
+
   static Future<void> _cleanupPlaintextBackup(String path) async {
     final backup = File('$path.plaintext-migration');
-    if (await backup.exists()) await backup.delete();
+    final database = File(path);
+    if (await backup.exists() && await database.exists()) {
+      await backup.delete();
+    }
   }
 
   static Future<String> _databaseKey() async {
