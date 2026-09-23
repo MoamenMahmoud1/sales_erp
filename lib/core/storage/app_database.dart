@@ -44,9 +44,15 @@ class AppDatabase {
     final key = await _databaseKey();
 
     final database = await _openEncrypted(path, key);
+    await _cleanupPlaintextBackup(path);
     _database = database;
     await _cleanupExpiredInvoiceChanges(database);
     return database;
+  }
+
+  static Future<void> _cleanupPlaintextBackup(String path) async {
+    final backup = File('$path.plaintext-migration');
+    if (await backup.exists()) await backup.delete();
   }
 
   static Future<String> _databaseKey() async {
@@ -103,6 +109,7 @@ class AppDatabase {
     final sourcePath = '$path.plaintext-migration';
     final sourceFile = File(path);
     final sourceBackup = File(sourcePath);
+    cipher.Database? target;
     if (await sourceBackup.exists()) {
       throw StateError(
         'A previous plaintext database migration is incomplete. '
@@ -112,7 +119,7 @@ class AppDatabase {
 
     await sourceFile.rename(sourcePath);
     try {
-      final target = await cipher.openDatabase(
+      target = await cipher.openDatabase(
         path,
         password: key,
         version: version,
@@ -141,6 +148,7 @@ class AppDatabase {
     } catch (error) {
       try {
         final encrypted = File(path);
+        if (target != null && target!.isOpen) await target!.close();
         if (await encrypted.exists()) await encrypted.delete();
       } catch (_) {}
       await sourceBackup.rename(path);
