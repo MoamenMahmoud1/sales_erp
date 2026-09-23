@@ -39,7 +39,7 @@ class AppDatabase {
   }
 
   static Future<cipher.Database> _open() async {
-    final root = await getDatabasesPath();
+    final root = await legacy_sqflite.getDatabasesPath();
     final path = join(root, databaseName);
     final key = await _databaseKey();
 
