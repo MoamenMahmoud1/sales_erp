@@ -32,5 +32,18 @@ jobs:
       - name: Test
         run: flutter test
 
+      - name: Production security guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RIn --include='*.dart' 'localDevelopmentUser' lib; then
+            echo 'Local superuser identity must never exist in production source.'
+            exit 1
+          fi
+          if grep -n 'DemoDataSeeder().seedIfNeeded' lib/main.dart; then
+            echo 'Demo data must be compile-time opt-in.'
+            exit 1
+          fi
+
       - name: Build release APK
         run: flutter build apk --release --flavor full --dart-define=API_BASE_URL=https://example.invalid/api/v1
