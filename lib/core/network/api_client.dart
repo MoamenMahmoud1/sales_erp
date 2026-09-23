@@ -2,7 +2,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:path_provider/path_provider.dart';
+import 'secure_cookie_storage.dart';
 
 import '../../app/config/api_config.dart';
 
@@ -32,15 +32,12 @@ class ApiClient {
   static Future<ApiClient> create({
     FlutterSecureStorage? storage,
   }) async {
-    final directory = await getApplicationSupportDirectory();
+    final secureStorage = storage ?? const FlutterSecureStorage();
     final cookieJar = PersistCookieJar(
       ignoreExpires: false,
-      storage: FileStorage('${directory.path}/http_cookies/'),
+      storage: SecureCookieStorage(secureStorage),
     );
-    return ApiClient._(
-      storage ?? const FlutterSecureStorage(),
-      cookieJar,
-    );
+    return ApiClient._(secureStorage, cookieJar);
   }
 
   Future<String> csrfToken() async {
