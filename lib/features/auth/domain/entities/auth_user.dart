@@ -57,31 +57,19 @@ class AuthUser {
 
   bool get hasAnyPermission => isSuperuser || permissions.isNotEmpty;
 
-  static AuthUser localDevelopmentUser() {
-    return const AuthUser(
-      id: 0,
-      username: 'local',
-      email: '',
-      firstName: 'Local',
-      lastName: 'User',
-      isStaff: true,
-      isSuperuser: true,
-      roleLevel: 1000,
-      permissions: {
-        'dashboard.view',
-        'sales.view',
-        'products.view',
-        'customers.view',
-      },
-      role: AuthRole(
-        id: 0,
-        name: 'Local Development',
-        level: 1000,
-        scope: 'company',
-        requiresShift: false,
-        description: 'Local development session.',
-      ),
-    );
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'username': username,
+      'email': email,
+      'first_name': firstName,
+      'last_name': lastName,
+      'is_staff': isStaff,
+      'is_superuser': isSuperuser,
+      'role_level': roleLevel,
+      'permissions': permissions.toList()..sort(),
+      'role': role?.toJson(),
+    };
   }
 
   static String _readString(dynamic value) => value?.toString() ?? '';
@@ -108,6 +96,17 @@ class AuthRole {
     required this.requiresShift,
     required this.description,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'level': level,
+      'scope': scope,
+      'requires_shift': requiresShift,
+      'description': description,
+    };
+  }
 
   factory AuthRole.fromJson(Map<String, dynamic> json) {
     return AuthRole(
