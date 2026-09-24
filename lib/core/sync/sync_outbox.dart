@@ -170,34 +170,40 @@ class SyncOutbox {
 
     return db.transaction((txn) async {
       final rows = await txn.rawQuery('''
-        SELECT * FROM sync_outbox
-        WHERE owner_user_id = ?
+        UPDATE sync_outbox
+        SET status = 'processing',
+            lease_until = ?,
+            updated_at = ?
+        WHERE id = (
+          SELECT id
+          FROM sync_outbox
+          WHERE owner_user_id = ?
+            AND (
+              (status = 'pending' AND next_attempt_at <= ?)
+              OR (status = 'processing' AND (lease_until IS NULL OR lease_until <= ?))
+            )
+          ORDER BY created_at ASC, id ASC
+          LIMIT 1
+        )
+          AND owner_user_id = ?
           AND (
             (status = 'pending' AND next_attempt_at <= ?)
             OR (status = 'processing' AND (lease_until IS NULL OR lease_until <= ?))
           )
-        ORDER BY created_at ASC, id ASC
-        LIMIT 1
-      ''', [ownerUserId, nowString, nowString]);
-      if (rows.isEmpty) return null;
+        RETURNING *
+      ''', [
+        leaseString,
+        nowString,
+        ownerUserId,
+        nowString,
+        nowString,
+        ownerUserId,
+        nowString,
+        nowString,
+      ]);
 
-      final row = rows.first;
-      final id = (row['id'] as num).toInt();
-      await txn.update(
-        'sync_outbox',
-        {
-          'status': 'processing',
-          'lease_until': leaseString,
-          'updated_at': nowString,
-        },
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      return SyncOutboxEntry.fromRow({
-        ...row,
-        'status': 'processing',
-        'lease_until': leaseString,
-      });
+      if (rows.isEmpty) return null;
+      return SyncOutboxEntry.fromRow(rows.first);
     });
   }
 
