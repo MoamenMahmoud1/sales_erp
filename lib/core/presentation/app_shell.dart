@@ -200,10 +200,6 @@ class _AppShellState extends State<AppShell> {
     return visibleIndex >= 0 ? visibleIndex : null;
   }
 
-  bool _canNavigateToLegacyNavigationIndex(int legacyIndex) {
-    return _visibleIndexForLegacyIndex(legacyIndex) != null;
-  }
-
   void _goToLegacyNavigationIndex(int legacyIndex) {
     final visibleIndex = _visibleIndexForLegacyIndex(legacyIndex);
     if (visibleIndex == null) return;
