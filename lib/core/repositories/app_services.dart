@@ -5,7 +5,7 @@ import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/domain/repositories/authentication_repository.dart';
 import '../../features/customers/data/hybrid_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
-import '../../features/dashboard/data/local_dashboard_repository.dart';
+import '../../features/dashboard/data/hybrid_dashboard_repository.dart';
 import '../../features/dashboard/domain/dashboard_repository.dart';
 import '../../features/notifications/data/dio_notification_repository.dart';
 import '../../features/notifications/data/firebase_push_notification_repository.dart';
@@ -28,7 +28,7 @@ class AppServices {
 
   late final CustomerRepository customerRepository;
   late final ProductRepository productRepository;
-  final DashboardRepository dashboardRepository = LocalDashboardRepository();
+  late final DashboardRepository dashboardRepository;
 
   late final ApiClient apiClient;
   late final AuthenticationRepository authRepository;
@@ -49,6 +49,7 @@ class AppServices {
     apiClient = await ApiClient.create();
     customerRepository = HybridCustomerRepository(apiClient);
     productRepository = HybridProductRepository(apiClient);
+    dashboardRepository = HybridDashboardRepository(apiClient);
     authRepository = AuthRepository(apiClient);
     representativeVehicleRepository = DioRepresentativeVehicleRepository(apiClient);
     representativeSaleRepository = DioRepresentativeSaleRepository(apiClient);
