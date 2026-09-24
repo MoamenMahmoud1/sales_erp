@@ -54,15 +54,12 @@ class AuthController extends ChangeNotifier {
 
     if (canAccessOffline) {
       final cachedUser = await repository.getCachedUser();
-      if (cachedUser == null) {
-        status = AuthStatus.unauthenticated;
+      if (cachedUser != null) {
+        currentUser = cachedUser;
+        status = AuthStatus.authenticated;
         notifyListeners();
         return;
       }
-      currentUser = cachedUser;
-      status = AuthStatus.authenticated;
-      notifyListeners();
-      return;
     }
 
     try {
