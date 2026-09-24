@@ -118,6 +118,7 @@ class AuthRepository implements AuthenticationRepository {
       final decoded = jsonDecode(raw);
       final user = AuthUser.fromJson(Map<String, dynamic>.from(decoded as Map));
       await AppDatabase.prepareForUser(user.id);
+      await client.saveCurrentUserId(user.id);
       return user;
     } catch (_) {
       await client.clearSession();

@@ -2,14 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
-/// Application-local lock state.
 enum AppStatus { locked, unlocked }
 
-/// Owns authentication state for one running application process.
-///
-/// A successful device authentication remains valid while the user is active.
-/// After five minutes with no interaction, the app locks again. The user may
-/// also lock it explicitly with "Lock now".
 class AppLockController extends ChangeNotifier with WidgetsBindingObserver {
   static const Duration inactivityTimeout = Duration(minutes: 5);
 
@@ -53,8 +47,7 @@ class AppLockController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  /// Records meaningful app usage and resets the five-minute idle deadline.
-  void recordActivity() {
+    void recordActivity() {
     if (_status != AppStatus.unlocked) return;
     final now = _now();
     _lastActivity = now;
@@ -94,8 +87,7 @@ class AppLockController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  /// Explicitly locks the application for a new authentication cycle.
-  void lock() {
+    void lock() {
     if (_status == AppStatus.locked) return;
     _status = AppStatus.locked;
     _lastActivity = null;
