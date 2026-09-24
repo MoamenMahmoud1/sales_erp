@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../customers/domain/customer.dart';
-import '../data/local_sale_repository.dart';
+import '../data/hybrid_invoice_repository.dart';
+import '../../../core/repositories/app_services.dart';
 import 'widgets/invoice_share_card.dart';
 import 'widgets/invoice_share_page.dart';
 
@@ -21,7 +22,7 @@ class InvoiceDetailsPage extends StatefulWidget {
 }
 
 class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
-  final _repository = LocalSaleRepository();
+  late final HybridInvoiceRepository _repository;
 
   Map<String, Object?>? _invoice;
   bool _loading = true;
@@ -30,6 +31,7 @@ class _InvoiceDetailsPageState extends State<InvoiceDetailsPage> {
   @override
   void initState() {
     super.initState();
+    _repository = AppServices.instance.invoiceRepository;
     _load();
   }
 
