@@ -1,16 +1,13 @@
 import 'package:local_auth/local_auth.dart';
 
-/// The biometric modality the user selected in the app UI.
 enum BiometricMethod { face, fingerprint, generic }
 
-/// Result of a local device authentication attempt.
 enum BiometricResult {
   success,
   unavailable,
   failed,
 }
 
-/// Platform-neutral wrapper around [LocalAuthentication].
 class BiometricAuth {
   final LocalAuthentication _auth;
   Set<BiometricType>? _availableCache;
@@ -42,19 +39,11 @@ class BiometricAuth {
     }
   }
 
-  /// Fully settles a dismissed native prompt before another request is made.
-  ///
-  /// Some OEM implementations finish the Dart Future before their native
-  /// biometric surface has completely torn down. We therefore give the native
-  /// layer a chance to cancel twice, with a short settling window between the
-  /// calls. This is recovery only; it is never run while starting a fresh
-  /// authentication request.
-  Future<void> _settleAfterDismissal() async {
+    Future<void> _settleAfterDismissal() async {
     try {
       await _auth.stopAuthentication();
     } catch (_) {
-      // No active authentication is valid.
-    }
+      }
     await Future<void>.delayed(const Duration(milliseconds: 300));
     try {
       await _auth.stopAuthentication();
@@ -102,11 +91,6 @@ class BiometricAuth {
     );
   }
 
-  /// Runs one user-requested authentication attempt.
-  ///
-  /// User cancellation never auto-retries. The native state is fully settled
-  /// before the UI is allowed to issue a manual retry. Only a stale native
-  /// auth-in-progress race gets one controlled automatic recovery attempt.
   Future<BiometricResult> _authenticateWithRecovery({
     required String localizedReason,
     required bool biometricOnly,
@@ -119,8 +103,6 @@ class BiometricAuth {
 
       if (ok) return BiometricResult.success;
 
-      // Defensive handling for Android/OEM implementations that surface a
-      // cancellation as false instead of LocalAuthException.userCanceled.
       await _settleAfterDismissal();
       return BiometricResult.failed;
     } on LocalAuthException catch (error) {
@@ -165,9 +147,6 @@ class BiometricAuth {
     return _auth.authenticate(
       localizedReason: localizedReason,
       biometricOnly: biometricOnly,
-      // Do not keep an authentication operation sticky. We handle native
-      // dismissal and retry explicitly so the manual Retry button owns the
-      // retry lifecycle.
       persistAcrossBackgrounding: false,
       sensitiveTransaction: false,
     );
