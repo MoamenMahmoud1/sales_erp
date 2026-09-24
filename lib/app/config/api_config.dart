@@ -18,8 +18,9 @@ class ApiConfig {
     return _developmentBaseUrl;
   }
 
-  /// Server-backed mode is the default so authentication and RBAC come from Django.
-  static const DataMode defaultDataMode = DataMode.api;
+  /// Hybrid is the default: Django remains authoritative while cached local data
+  /// and durable offline commands keep the mobile client usable during outages.
+  static const DataMode defaultDataMode = DataMode.hybrid;
 
   const ApiConfig._();
 }
