@@ -23,6 +23,8 @@ import '../ui/app_bottom_nav.dart';
 import '../ui/dialogs.dart';
 import 'settings_page.dart';
 
+const _enableDemoData = bool.fromEnvironment('ENABLE_DEMO_DATA');
+
 /// Primary Sales ERP navigation shell.
 ///
 /// It owns navigation and app-level actions only. Feature screens receive
@@ -143,7 +145,7 @@ class _AppShellState extends State<AppShell> {
         page: SettingsPage(
           themeController: widget.themeController,
           onLock: widget.onLock,
-          onReset: _resetDeviceData,
+          onReset: _enableDemoData ? _resetDeviceData : null,
           onOpenNotifications: _openNotifications,
           onOpenApprovals: _canOpenApprovalCenter ? _openApprovalCenter : null,
           showOperations: false,
@@ -231,6 +233,8 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _resetDeviceData() async {
+    if (!_enableDemoData) return;
+
     final confirmed = await showConfirmDialog(
       context: context,
       title: 'Reset device data?',
