@@ -240,9 +240,9 @@ class LocalSaleRepository {
         'customer_id': customerId,
         'created_at': now,
         'updated_at': now,
-        'subtotal': calculation.subtotal,
-        'coupon_discount': calculation.discount,
-        'total': calculation.total,
+        'subtotal': _money(calculation.subtotal),
+        'coupon_discount': _money(calculation.discount),
+        'total': _money(calculation.total),
       });
 
       await _replaceItems(transaction, invoiceId, products, byId);
@@ -417,18 +417,20 @@ class LocalSaleRepository {
       if (product == null || entry.value <= 0) {
         throw ArgumentError('Invalid invoice product.');
       }
-      subtotal += product.price * entry.value;
+      subtotal = _money(subtotal + _money(product.price * entry.value));
     }
     if (!couponDiscount.isFinite || couponDiscount < 0) {
       throw ArgumentError('Invalid discount.');
     }
-    final discount = couponDiscount.clamp(0, subtotal).toDouble();
+    final discount = _money(couponDiscount.clamp(0, subtotal).toDouble());
     return _InvoiceCalculation(
       subtotal: subtotal,
       discount: discount,
-      total: subtotal - discount,
+      total: _money(subtotal - discount),
     );
   }
+
+  double _money(double value) => (value * 100).round() / 100;
 
   double _normalizePaymentAmount(
     double value,
@@ -441,7 +443,7 @@ class LocalSaleRepository {
     if (value > total) {
       throw ArgumentError('$fieldName cannot exceed the invoice total.');
     }
-    return value;
+    return _money(value);
   }
 
   String _paymentStatus(PaymentMethod method) =>
