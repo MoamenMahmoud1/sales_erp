@@ -16,14 +16,12 @@ import 'widgets/revenue_summary_card.dart';
 class DashboardPage extends StatefulWidget {
   final AuthUser user;
   final ValueChanged<int> onNavigateTo;
-  final bool Function(int)? canNavigateTo;
   final DashboardController controller;
 
   const DashboardPage({
     super.key,
     required this.user,
     required this.onNavigateTo,
-    this.canNavigateTo,
     required this.controller,
   });
 
@@ -216,10 +214,6 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
       ],
     );
-  }
-
-  bool _canNavigateTo(int legacyIndex) {
-    return widget.canNavigateTo?.call(legacyIndex) ?? true;
   }
 
   Widget _buildOverdueNotice(
