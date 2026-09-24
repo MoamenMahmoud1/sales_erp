@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../../auth/domain/entities/auth_user.dart';
 import '../data/local_product_repository.dart';
 import '../domain/product.dart';
 import '../domain/product_repository.dart';
 import 'product_form_page.dart';
 
 class ProductsPage extends StatefulWidget {
+  final AuthUser user;
   final ProductRepository? repository;
   final bool carMode;
 
   const ProductsPage({
     super.key,
+    required this.user,
     this.repository,
     this.carMode = false,
   });
@@ -275,11 +278,13 @@ class _ProductsPageState extends State<ProductsPage> {
           Expanded(child: _buildBody()),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: widget.user.hasPermission('products.add_product')
+          ? FloatingActionButton.extended(
         onPressed: _openProductForm,
         icon: const Icon(Icons.add_box),
         label: const Text('Product'),
-      ),
+      )
+          : null,
     );
   }
 }
