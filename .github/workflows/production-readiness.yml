@@ -127,6 +127,6 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim
           disable-animations: true
           script: >-
-            flutter test integration_test/app_e2e_test.dart -d emulator-5554
+            timeout 300s flutter test integration_test/app_e2e_test.dart -d emulator-5554
             --dart-define=API_BASE_URL=http://10.0.2.2:8000/api/v1
             --dart-define=E2E_PASSWORD=$E2E_PASSWORD
