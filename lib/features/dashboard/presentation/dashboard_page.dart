@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../auth/domain/entities/auth_user.dart';
 import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/app_card.dart';
 import '../../../core/ui/empty_state.dart';
@@ -13,12 +14,14 @@ import 'widgets/recent_sale_tile.dart';
 import 'widgets/revenue_summary_card.dart';
 
 class DashboardPage extends StatefulWidget {
+  final AuthUser user;
   final ValueChanged<int> onNavigateTo;
   final bool Function(int)? canNavigateTo;
   final DashboardController controller;
 
   const DashboardPage({
     super.key,
+    required this.user,
     required this.onNavigateTo,
     this.canNavigateTo,
     required this.controller,
@@ -151,8 +154,8 @@ class _DashboardPageState extends State<DashboardPage> {
           const SizedBox(height: AppSpacing.xl),
           SectionHeader(
             title: 'Recent sales',
-            actionLabel: _canNavigateTo(1) ? 'View all' : null,
-            onAction: _canNavigateTo(1) ? () => widget.onNavigateTo(1) : null,
+            actionLabel: widget.user.hasPermission('invoices.view_invoice') ? 'View all' : null,
+            onAction: widget.user.hasPermission('invoices.view_invoice') ? () => widget.onNavigateTo(1) : null,
           ),
           const SizedBox(height: AppSpacing.md),
           _buildRecentSales(snapshot),
@@ -193,19 +196,19 @@ class _DashboardPageState extends State<DashboardPage> {
       spacing: AppSpacing.sm,
       runSpacing: AppSpacing.sm,
       children: [
-        if (_canNavigateTo(1))
+        if (widget.user.hasPermission('invoices.add_invoice') && widget.user.hasPermission('invoices.confirm_invoice'))
           OutlinedButton.icon(
             onPressed: () => widget.onNavigateTo(1),
             icon: const Icon(Icons.add_shopping_cart_outlined),
             label: const Text('New sale'),
           ),
-        if (_canNavigateTo(2))
+        if (widget.user.hasPermission('products.view_product'))
           OutlinedButton.icon(
             onPressed: () => widget.onNavigateTo(2),
             icon: const Icon(Icons.inventory_2_outlined),
             label: const Text('Products'),
           ),
-        if (_canNavigateTo(3))
+        if (widget.user.hasPermission('customers.view_customer'))
           OutlinedButton.icon(
             onPressed: () => widget.onNavigateTo(3),
             icon: const Icon(Icons.person_add_alt_1_outlined),
