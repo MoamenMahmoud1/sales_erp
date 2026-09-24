@@ -130,7 +130,7 @@ class SettingsPage extends StatelessWidget {
                 ),
                 const StatusBadge(
                   type: StatusType.success,
-                  label: 'API',
+                  label: 'HYBRID',
                   icon: Icons.cloud_done_rounded,
                 ),
               ],
