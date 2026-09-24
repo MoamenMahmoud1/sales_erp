@@ -19,8 +19,18 @@ class ApiProductRepository implements ProductRepository {
 
   @override
   Future<List<Product>> getProducts() async {
-    final response = await client.dio.get('/products/');
-    return _rows(response).map(Product.fromMap).toList(growable: false);
+    var response = await client.dio.get(
+      '/products/',
+      queryParameters: {'page_size': 100},
+    );
+    final products = <Product>[..._rows(response).map(Product.fromMap)];
+
+    while (response.data is Map && response.data['next'] is String && (response.data['next'] as String).isNotEmpty) {
+      response = await client.dio.get(response.data['next'] as String);
+      products.addAll(_rows(response).map(Product.fromMap));
+    }
+
+    return products;
   }
 
   @override
