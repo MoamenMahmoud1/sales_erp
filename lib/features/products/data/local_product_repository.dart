@@ -109,6 +109,45 @@ class LocalProductRepository implements ProductRepository {
     }
   }
 
+  Future<void> cacheProducts(Iterable<Product> products) async {
+    final database = await _database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    await database.transaction((transaction) async {
+      for (final product in products) {
+        final updated = await transaction.update(
+          'products',
+          {
+            'name': product.name,
+            'category': product.category,
+            'price': product.sellingPrice,
+            'purchase_price': product.purchasePrice,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [product.id],
+        );
+
+        if (updated == 0) {
+          await transaction.insert(
+            'products',
+            {
+              'id': product.id,
+              'name': product.name,
+              'category': product.category,
+              'price': product.sellingPrice,
+              'purchase_price': product.purchasePrice,
+              'created_at': now,
+              'updated_at': now,
+            },
+          );
+        }
+      }
+    });
+  }
+
+  Future<void> cacheProduct(Product product) => cacheProducts([product]);
+
   @override
   Future<void> deleteProduct(int id) async {
     final database = await _database;
