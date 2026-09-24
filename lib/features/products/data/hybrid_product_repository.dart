@@ -21,7 +21,11 @@ class HybridProductRepository implements ProductRepository {
 
   ApiProductRepository get _remote => _api ??= ApiProductRepository(client);
 
-  bool _isOffline(Object error) => error is DioException;
+  bool _isOffline(Object error) {
+    if (error is! DioException) return false;
+    final status = error.response?.statusCode;
+    return status == null || status >= 500;
+  }
 
   @override
   Future<List<Product>> getProducts() async {
