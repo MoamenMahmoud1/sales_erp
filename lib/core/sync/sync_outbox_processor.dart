@@ -67,8 +67,7 @@ class SyncOutboxProcessor {
         ),
       );
     } catch (_) {
-      // Sync completion must not fail because an optional response event is malformed.
-    }
+      }
   }
 
   void _emitConflict(
@@ -88,7 +87,6 @@ class SyncOutboxProcessor {
         ),
       );
     } catch (_) {
-      // Conflict state is already persisted; event parsing must not block synchronization.
     }
   }
 
