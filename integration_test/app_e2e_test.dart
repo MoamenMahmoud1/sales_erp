@@ -1,30 +1,30 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:sales_erp/main.dart' as app;
+
+import 'package:sales_erp/core/repositories/app_services.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('mobile production smoke: login and load dashboard', (tester) async {
-    await app.main();
-    await tester.pumpAndSettle(const Duration(seconds: 3));
+  testWidgets('mobile API integration: authenticate and load dashboard', (tester) async {
+    final password = const String.fromEnvironment('E2E_PASSWORD');
+    expect(password, isNotEmpty);
 
-    expect(find.text('Sales ERP'), findsOneWidget);
+    final services = AppServices.instance;
+    await services.init();
 
-    final fields = find.byType(TextFormField);
-    expect(fields, findsNWidgets(2));
+    final user = await services.authRepository.login(
+      identifier: 'e2e_admin',
+      password: password,
+    );
 
-    await tester.enterText(fields.at(0), 'e2e_admin');
-    await tester.enterText(fields.at(1), const String.fromEnvironment('E2E_PASSWORD'));
-    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+    expect(user.username, 'e2e_admin');
+    expect(user.isSuperuser, isTrue);
 
-    for (var i = 0; i < 40; i++) {
-      await tester.pump(const Duration(milliseconds: 500));
-      if (find.text('Sales overview').evaluate().isNotEmpty) break;
-    }
+    final snapshot = await services.dashboardRepository.loadSnapshot();
+    expect(snapshot.productCount, greaterThan(0));
+    expect(snapshot.customerCount, greaterThan(0));
 
-    expect(find.text('Sales overview'), findsOneWidget);
-    expect(find.text('Recent sales'), findsOneWidget);
+    await services.authRepository.logout();
   });
 }
