@@ -174,15 +174,17 @@ class _ProductsPageState extends State<ProductsPage> {
               _deleteProduct(product);
             }
           },
-          itemBuilder: (_) => const [
-            PopupMenuItem(
-              value: 'edit',
-              child: Text('Edit'),
-            ),
-            PopupMenuItem(
-              value: 'delete',
-              child: Text('Delete'),
-            ),
+          itemBuilder: (_) => [
+            if (widget.user.hasPermission('products.change_product'))
+              const PopupMenuItem(
+                value: 'edit',
+                child: Text('Edit'),
+              ),
+            if (widget.user.hasPermission('products.delete_product'))
+              const PopupMenuItem(
+                value: 'delete',
+                child: Text('Delete'),
+              ),
           ],
         ),
       ),
