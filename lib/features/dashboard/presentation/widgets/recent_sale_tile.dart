@@ -21,6 +21,7 @@ class RecentSaleTile extends StatelessWidget {
         'paid' => 'Paid',
         'pending' => 'Pending',
         'overdue' => 'Overdue',
+        'unpaid' => 'Unpaid',
         _ => 'Unknown',
       };
 
