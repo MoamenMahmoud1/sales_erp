@@ -87,9 +87,15 @@ class HybridDashboardRepository implements DashboardRepository {
         weeklyRevenue: weeklyRevenue,
         recentInvoices: _mapRecentInvoices(invoices.take(6)),
       );
-    } on DioException {
-      return local.loadSnapshot();
+    } on DioException catch (error) {
+      if (_canUseLocalFallback(error)) return local.loadSnapshot();
+      rethrow;
     }
+  }
+
+  bool _canUseLocalFallback(DioException error) {
+    final status = error.response?.statusCode;
+    return status == null || status >= 500;
   }
 
   Map<String, dynamic> _map(dynamic value) {
