@@ -43,6 +43,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: MoamenMahmoud1/erp-api
+          ref: production-readiness-e2e
           path: erp-api
 
       - name: Set up Python
