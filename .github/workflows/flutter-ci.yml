@@ -69,7 +69,5 @@ jobs:
             echo "ANDROID_KEY_ALIAS=ci-release"
             echo "ANDROID_KEY_PASSWORD=$CI_KEYSTORE_PASSWORD"
           } >> "$GITHUB_ENV"
-        env:
-
       - name: Build release APK
         run: flutter build apk --release --flavor full --dart-define=API_BASE_URL=https://example.invalid/api/v1
