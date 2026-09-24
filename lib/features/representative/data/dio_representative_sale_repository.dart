@@ -13,7 +13,7 @@ class DioRepresentativeSaleRepository implements RepresentativeSaleRepository {
   @override
   Future<List<RepresentativeCustomer>> fetchCustomers({String search = ''}) async {
     final response = await client.dio.get(
-      '/customers/customers/',
+      '/customers/',
       queryParameters: {
         if (search.trim().isNotEmpty) 'search': search.trim(),
         'page_size': 100,
