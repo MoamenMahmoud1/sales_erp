@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../data/local_sale_repository.dart';
+import '../data/hybrid_invoice_repository.dart';
+import '../../../core/repositories/app_services.dart';
 
 class InvoicesPage extends StatefulWidget {
   const InvoicesPage({super.key});
@@ -10,12 +11,13 @@ class InvoicesPage extends StatefulWidget {
 }
 
 class _InvoicesPageState extends State<InvoicesPage> {
-  final _repository = LocalSaleRepository();
+  late final HybridInvoiceRepository _repository;
   late Future<List<Map<String, Object?>>> _invoices;
 
   @override
   void initState() {
     super.initState();
+    _repository = AppServices.instance.invoiceRepository;
     _invoices = _repository.getInvoices();
   }
 
