@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../auth/domain/entities/auth_user.dart';
 import '../../payment/data/local_payment_repository.dart';
 import '../../payment/domain/payment.dart';
 import '../../payment/domain/payment_status.dart';
@@ -11,10 +12,12 @@ import '../domain/payment_method.dart';
 
 class CustomerDetailsPage extends StatefulWidget {
   final Customer customer;
+  final AuthUser user;
 
   const CustomerDetailsPage({
     super.key,
     required this.customer,
+    required this.user,
   });
 
   @override
