@@ -18,7 +18,18 @@ class ApiCustomerRepository implements CustomerRepository {
 
   @override
   Future<List<Customer>> getCustomers() async {
-    return _items(await client.dio.get('/customers/'));
+    var response = await client.dio.get(
+      '/customers/',
+      queryParameters: {'page_size': 100},
+    );
+    final customers = <Customer>[..._items(response)];
+
+    while (response.data is Map && response.data['next'] is String && (response.data['next'] as String).isNotEmpty) {
+      response = await client.dio.get(response.data['next'] as String);
+      customers.addAll(_items(response));
+    }
+
+    return customers;
   }
 
   @override
