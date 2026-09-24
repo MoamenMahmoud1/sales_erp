@@ -58,15 +58,12 @@ class AppDatabase {
 
     final database = File(path);
     if (!await database.exists()) {
-      // The app may have been terminated after moving the legacy plaintext DB
-      // but before creating the encrypted replacement. Restore it so the
-      // migration can be retried without data loss.
+      // Restore a pending migration before retrying.
       await backup.rename(path);
       return;
     }
 
-    // Both files exist. Keep the plaintext recovery copy until the encrypted
-    // DB has been opened successfully; _open() removes it only after success.
+    // Keep the backup until the encrypted database opens successfully.
   }
 
   static Future<void> _cleanupPlaintextBackup(String path) async {
