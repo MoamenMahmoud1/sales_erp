@@ -61,20 +61,20 @@ class _CustomerDetailsPageState
     }
 
     try {
+      final canViewInvoices = widget.user.hasPermission('invoices.view_invoice');
+      final canViewPayments = widget.user.hasPermission('payments.view_paymenttransaction');
+
       final results = await Future.wait([
-        _saleRepository.getCustomerInvoices(
-          widget.customer.id,
-        ),
-        _paymentRepository.getPaymentsForCustomer(
-          widget.customer.id,
-        ),
+        canViewInvoices
+            ? _saleRepository.getCustomerInvoices(widget.customer.id)
+            : Future.value(<Map<String, Object?>>[]),
+        canViewPayments
+            ? _paymentRepository.getPaymentsForCustomer(widget.customer.id)
+            : Future.value(<Payment>[]),
       ]);
 
-      final invoices =
-          results[0] as List<Map<String, Object?>>;
-
-      final payments =
-          results[1] as List<Payment>;
+      final invoices = results[0] as List<Map<String, Object?>>;
+      final payments = results[1] as List<Payment>;
 
       _calculateInvoiceTotals(invoices);
       _calculatePaymentTotals(payments);
@@ -665,26 +665,32 @@ class _CustomerDetailsPageState
           }
         },
 
-        trailing: PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'edit') {
-              _editInvoice(invoiceId);
-            } else if (value == 'delete') {
-              _deleteInvoice(invoiceId);
-            }
-          },
-
-          itemBuilder: (_) => const [
-            PopupMenuItem(
-              value: 'edit',
-              child: Text('Edit'),
-            ),
-            PopupMenuItem(
-              value: 'delete',
-              child: Text('Delete'),
-            ),
-          ],
-        ),
+        trailing: (
+          widget.user.hasPermission('invoices.change_invoice') ||
+          widget.user.hasPermission('invoices.delete_invoice')
+        )
+            ? PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'edit') {
+                    _editInvoice(invoiceId);
+                  } else if (value == 'delete') {
+                    _deleteInvoice(invoiceId);
+                  }
+                },
+                itemBuilder: (_) => [
+                  if (widget.user.hasPermission('invoices.change_invoice'))
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit'),
+                    ),
+                  if (widget.user.hasPermission('invoices.delete_invoice'))
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete'),
+                    ),
+                ],
+              )
+            : null,
       ),
     );
   }
@@ -765,31 +771,34 @@ class _CustomerDetailsPageState
 
             const SizedBox(height: 20),
 
-            _buildFinancialSummary(),
+            if (widget.user.hasPermission('invoices.view_invoice')) ...[
+              _buildFinancialSummary(),
+              const SizedBox(height: 16),
+            ],
 
-            const SizedBox(height: 16),
+            if (widget.user.hasPermission('payments.view_paymenttransaction')) ...[
+              _buildPaymentsSection(),
+              const SizedBox(height: 20),
+            ],
 
-            _buildPaymentsSection(),
-
-            const SizedBox(height: 20),
-
-            _buildInvoicesSection(),
+            if (widget.user.hasPermission('invoices.view_invoice'))
+              _buildInvoicesSection(),
 
             const SizedBox(height: 100),
           ],
         ),
       ),
 
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.all(16),
-        child: FilledButton.icon(
-          onPressed: _createInvoice,
-          icon: const Icon(Icons.add),
-          label: const Text(
-            'New Invoice',
-          ),
-        ),
-      ),
+      bottomNavigationBar: widget.user.hasPermission('invoices.add_invoice')
+          ? SafeArea(
+              minimum: const EdgeInsets.all(16),
+              child: FilledButton.icon(
+                onPressed: _createInvoice,
+                icon: const Icon(Icons.add),
+                label: const Text('New Invoice'),
+              ),
+            )
+          : null,
     );
   }
 }
