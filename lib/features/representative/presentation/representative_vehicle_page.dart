@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/repositories/app_services.dart';
+import '../../auth/domain/entities/auth_user.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_tokens.dart';
 import '../../../core/ui/app_card.dart';
@@ -15,11 +16,13 @@ import 'widgets/stock_transfer_requests_card.dart';
 import 'widgets/vehicle_stock_card.dart';
 
 class RepresentativeVehiclePage extends StatefulWidget {
+  final AuthUser user;
   final RepresentativeVehicleController? controller;
   final bool canSell;
 
   const RepresentativeVehiclePage({
     super.key,
+    required this.user,
     this.controller,
     this.canSell = false,
   });
@@ -247,7 +250,8 @@ class _RepresentativeVehiclePageState extends State<RepresentativeVehiclePage> {
             const SizedBox(height: AppSpacing.sm),
             StockTransferRequestsCard(requests: _controller.transferRequests),
             const SizedBox(height: AppSpacing.md),
-            Wrap(
+            if (widget.user.hasPermission('inventory.transfer_stock'))
+              Wrap(
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.sm,
               children: [
