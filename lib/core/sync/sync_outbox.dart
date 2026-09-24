@@ -332,9 +332,6 @@ class ReliableCommandClient {
       throw StateError('A signed-in user is required for a reliable command.');
     }
 
-    // Persist the intent before the socket opens. If the app dies after the
-    // server receives the command but before the response is processed, the
-    // exact same idempotency key can be replayed later without duplication.
     await outbox.enqueue(
       method: 'POST',
       path: path,
