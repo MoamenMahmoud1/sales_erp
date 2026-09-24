@@ -8,6 +8,7 @@ import '../../app/config/api_config.dart';
 
 class ApiClient {
   static const _cachedUserKey = 'cached_auth_user_v1';
+  static const _sessionValidatedAtKey = 'session_validated_at_v1';
   final FlutterSecureStorage _storage;
   final PersistCookieJar _cookieJar;
   String? _accessToken;
@@ -75,6 +76,18 @@ class ApiClient {
     return _storage.read(key: _cachedUserKey);
   }
 
+  Future<void> saveSessionValidatedAt(DateTime value) {
+    return _storage.write(
+      key: _sessionValidatedAtKey,
+      value: value.toUtc().toIso8601String(),
+    );
+  }
+
+  Future<DateTime?> get sessionValidatedAt async {
+    final value = await _storage.read(key: _sessionValidatedAtKey);
+    return value == null ? null : DateTime.tryParse(value);
+  }
+
   Future<int?> get currentUserId async {
     final value = await _storage.read(key: 'current_user_id');
     return int.tryParse(value ?? '');
@@ -90,6 +103,7 @@ class ApiClient {
     clearAccessToken();
     await _storage.delete(key: 'current_user_id');
     await _storage.delete(key: _cachedUserKey);
+    await _storage.delete(key: _sessionValidatedAtKey);
     await _cookieJar.deleteAll();
   }
 }
