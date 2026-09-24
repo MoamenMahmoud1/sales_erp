@@ -56,7 +56,7 @@ void main() {
         .map((destination) => destination.id)
         .toSet();
 
-    expect(visibleIds, contains(AppNavigationId.home));
+    expect(visibleIds, isNot(contains(AppNavigationId.home)));
     expect(visibleIds, contains(AppNavigationId.sales));
     expect(visibleIds, contains(AppNavigationId.more));
     expect(visibleIds, isNot(contains(AppNavigationId.products)));
@@ -68,7 +68,7 @@ void main() {
         .map((destination) => destination.id)
         .toSet();
 
-    expect(visibleIds, contains(AppNavigationId.home));
+    expect(visibleIds, isNot(contains(AppNavigationId.home)));
     expect(visibleIds, contains(AppNavigationId.products));
     expect(visibleIds, contains(AppNavigationId.more));
     expect(visibleIds, isNot(contains(AppNavigationId.sales)));
