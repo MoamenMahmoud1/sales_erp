@@ -38,6 +38,7 @@ class AppNavigationConfig {
   static const destinations = [
     AppNavigationDestination(
       id: AppNavigationId.home,
+      permissionPrefixes: ['accounting.view_financial_reports'],
       icon: Icons.space_dashboard_outlined,
       selectedIcon: Icons.space_dashboard_rounded,
       label: 'Home',
