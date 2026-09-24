@@ -1,8 +1,8 @@
 # Sales ERP
 
-A production-oriented **Flutter mobile client** for the Sales ERP platform, built for **sales representatives and warehouse staff**.
+A Flutter mobile client for the Sales ERP platform, built for sales representatives and warehouse staff.
 
-The app is the mobile counterpart to the [`erp-api`](https://github.com/MoamenMahmoud1/erp-api) backend and shares the same business workflows used by the ERP web application.
+The app is the mobile counterpart to the `erp-api` backend and shares the same business workflows as the web client.
 
 ## Features
 
@@ -18,7 +18,7 @@ The app is the mobile counterpart to the [`erp-api`](https://github.com/MoamenMa
 
 ## Architecture
 
-The app follows a feature-oriented **Clean Architecture** structure:
+The app uses a feature-based structure:
 
 ```text
 lib/
@@ -36,7 +36,7 @@ lib/
 
 Networking is handled with **Dio**, with secure session/storage support, local persistence, and background task support where needed.
 
-Write operations that can safely be retried are persisted to the local outbox before the network request. The backend receives the same idempotency key on replay. HTTP 409 business conflicts remain durable in the outbox and are published through the synchronization event bus instead of being retried forever.
+Retryable write operations are stored in the local outbox before the network request. Replays use the same idempotency key, while HTTP 409 conflicts remain in the outbox for user handling.
 
 ## API configuration
 
@@ -47,7 +47,7 @@ flutter run --dart-define=API_BASE_URL=https://api.example.com/api/v1
 flutter build apk --release --dart-define=API_BASE_URL=https://api.example.com/api/v1
 ```
 
-Debug builds fall back to `http://127.0.0.1:8000/api/v1` for local development. Release builds require an explicit `API_BASE_URL`.
+Debug builds use the local development API. Release builds require an explicit `API_BASE_URL`.
 
 ## Tech Stack
 
