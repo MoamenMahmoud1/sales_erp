@@ -10,6 +10,7 @@ class ApiClient {
   static const _cachedUserKey = 'cached_auth_user_v1';
   final FlutterSecureStorage _storage;
   final PersistCookieJar _cookieJar;
+  String? _accessToken;
   late final Dio dio;
 
   ApiClient._(this._storage, this._cookieJar) {
@@ -21,7 +22,7 @@ class ApiClient {
     dio.interceptors.add(CookieManager(_cookieJar));
     dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
-        final access = await _storage.read(key: 'access_token');
+        final access = _accessToken;
         if (access != null && access.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $access';
         }
@@ -34,6 +35,10 @@ class ApiClient {
     FlutterSecureStorage? storage,
   }) async {
     final secureStorage = storage ?? const FlutterSecureStorage();
+
+    // Remove the legacy persisted access token from older app versions.
+    await secureStorage.delete(key: 'access_token');
+
     final cookieJar = PersistCookieJar(
       ignoreExpires: false,
       storage: SecureCookieStorage(secureStorage),
@@ -46,8 +51,16 @@ class ApiClient {
     return response.data['csrf_token'] as String;
   }
 
-  Future<void> saveAccessToken(String token) {
-    return _storage.write(key: 'access_token', value: token);
+  void setAccessToken(String token) {
+    final value = token.trim();
+    if (value.isEmpty) {
+      throw ArgumentError('Access token must not be empty.');
+    }
+    _accessToken = value;
+  }
+
+  void clearAccessToken() {
+    _accessToken = null;
   }
 
   Future<void> saveCurrentUserId(int userId) {
@@ -67,13 +80,14 @@ class ApiClient {
     return int.tryParse(value ?? '');
   }
 
-  Future<bool> hasAccessToken() async {
-    final token = await _storage.read(key: 'access_token');
-    return token != null && token.isNotEmpty;
+  Future<bool> hasActiveSessionCookie() async {
+    final refreshUri = Uri.parse(ApiConfig.baseUrl + '/auth/refresh/');
+    final cookies = await _cookieJar.loadForRequest(refreshUri);
+    return cookies.any((cookie) => cookie.name == 'refresh_token');
   }
 
   Future<void> clearSession() async {
-    await _storage.delete(key: 'access_token');
+    clearAccessToken();
     await _storage.delete(key: 'current_user_id');
     await _storage.delete(key: _cachedUserKey);
     await _cookieJar.deleteAll();
