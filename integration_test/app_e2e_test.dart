@@ -34,8 +34,9 @@ void main() {
 
     final loginResponse = await dio.post(
       '/auth/login/',
-      data: const {
+      data: {
         'identifier': 'e2e_admin',
+        'password': password,
       },
       options: Options(
         headers: {
@@ -45,13 +46,6 @@ void main() {
       ),
       queryParameters: const {},
     );
-    // The password is supplied separately to avoid keeping it in a shared
-    // literal and to keep the E2E account isolated to CI.
-    // Re-issue with the actual secret if the server rejected the placeholder.
-    if (loginResponse.data is Map && loginResponse.data['access'] == null) {
-      throw StateError('Login did not return an access token.');
-    }
-
     final accessToken = loginResponse.data['access'] as String;
     expect(accessToken, isNotEmpty);
 
