@@ -107,6 +107,7 @@ class _AppShellState extends State<AppShell> {
       _NavigationEntry(
         destination: homeDestination,
         page: DashboardPage(
+          user: widget.user,
           onNavigateTo: _goToLegacyNavigationIndex,
           canNavigateTo: _canNavigateToLegacyNavigationIndex,
           controller: _dashboardController,
@@ -119,17 +120,18 @@ class _AppShellState extends State<AppShell> {
       _NavigationEntry(
         destination: vehicleDestination,
         page: RepresentativeVehiclePage(
+          user: widget.user,
           canSell: widget.user.hasPermission('invoices.add_invoice') &&
               widget.user.hasPermission('invoices.confirm_invoice'),
         ),
       ),
       _NavigationEntry(
         destination: productsDestination,
-        page: const ProductsPage(),
+        page: ProductsPage(user: widget.user),
       ),
       _NavigationEntry(
         destination: customersDestination,
-        page: const CustomersPage(),
+        page: CustomersPage(user: widget.user),
       ),
       _NavigationEntry(
         destination: moreDestination,
