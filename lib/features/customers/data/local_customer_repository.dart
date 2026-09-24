@@ -94,6 +94,35 @@ class LocalCustomerRepository implements CustomerRepository {
     );
   }
 
+  Future<void> cacheCustomers(Iterable<Customer> customers) async {
+    final database = await AppDatabase.database;
+    await database.transaction((transaction) async {
+      for (final customer in customers) {
+        final row = customer.toMap();
+        final values = {
+          'name': row['name'],
+          'phone': row['phone'],
+          'address': row['address'],
+          'payment_type': row['payment_type'],
+        };
+        final updated = await transaction.update(
+          'customers',
+          values,
+          where: 'id = ?',
+          whereArgs: [customer.id],
+        );
+        if (updated == 0) {
+          await transaction.insert(
+            'customers',
+            {'id': customer.id, ...values},
+          );
+        }
+      }
+    });
+  }
+
+  Future<void> cacheCustomer(Customer customer) => cacheCustomers([customer]);
+
   @override
   Future<List<Customer>> searchCustomers(
     String query,
