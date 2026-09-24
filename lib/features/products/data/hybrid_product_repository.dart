@@ -26,7 +26,9 @@ class HybridProductRepository implements ProductRepository {
   @override
   Future<List<Product>> getProducts() async {
     try {
-      return await _remote.getProducts();
+      final products = await _remote.getProducts();
+      await local.cacheProducts(products);
+      return products;
     } catch (error) {
       if (_isOffline(error)) return local.getProducts();
       rethrow;
@@ -41,25 +43,23 @@ class HybridProductRepository implements ProductRepository {
     double? sellingPrice,
     String category = 'General',
   }) async {
-    final localId = await local.addProduct(
+    final remoteId = await _remote.addProduct(
       name: name,
       price: price,
       purchasePrice: purchasePrice,
       sellingPrice: sellingPrice,
       category: category,
     );
-    try {
-      await _remote.addProduct(
-        name: name,
-        price: price,
-        purchasePrice: purchasePrice,
-        sellingPrice: sellingPrice,
-        category: category,
-      );
-    } catch (_) {
-      // محفوظ محليًا.
-    }
-    return localId;
+    await local.cacheProduct(
+      Product(
+        id: remoteId,
+        name: name.trim(),
+        category: category.trim().isEmpty ? 'General' : category.trim(),
+        price: sellingPrice ?? price,
+        purchasePrice: purchasePrice ?? sellingPrice ?? price,
+      ),
+    );
+    return remoteId;
   }
 
   @override
@@ -71,7 +71,7 @@ class HybridProductRepository implements ProductRepository {
     double? sellingPrice,
     String category = 'General',
   }) async {
-    await local.updateProduct(
+    await _remote.updateProduct(
       id: id,
       name: name,
       price: price,
@@ -79,27 +79,20 @@ class HybridProductRepository implements ProductRepository {
       sellingPrice: sellingPrice,
       category: category,
     );
-    try {
-      await _remote.updateProduct(
+    await local.cacheProduct(
+      Product(
         id: id,
-        name: name,
-        price: price,
-        purchasePrice: purchasePrice,
-        sellingPrice: sellingPrice,
-        category: category,
-      );
-    } catch (_) {
-      // محفوظ محليًا.
-    }
+        name: name.trim(),
+        category: category.trim().isEmpty ? 'General' : category.trim(),
+        price: sellingPrice ?? price,
+        purchasePrice: purchasePrice ?? sellingPrice ?? price,
+      ),
+    );
   }
 
   @override
   Future<void> deleteProduct(int id) async {
+    await _remote.deleteProduct(id);
     await local.deleteProduct(id);
-    try {
-      await _remote.deleteProduct(id);
-    } catch (_) {
-      // محفوظ محليًا.
-    }
   }
 }
