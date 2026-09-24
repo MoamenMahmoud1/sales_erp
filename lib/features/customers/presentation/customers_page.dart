@@ -123,6 +123,7 @@ class _CustomersPageState
       MaterialPageRoute(
         builder: (_) => CustomerFormPage(
           customer: customer,
+          repository: _dataSource,
         ),
       ),
     );
