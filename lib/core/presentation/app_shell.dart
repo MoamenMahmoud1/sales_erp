@@ -109,7 +109,6 @@ class _AppShellState extends State<AppShell> {
         page: DashboardPage(
           user: widget.user,
           onNavigateTo: _goToLegacyNavigationIndex,
-          canNavigateTo: _canNavigateToLegacyNavigationIndex,
           controller: _dashboardController,
         ),
       ),
