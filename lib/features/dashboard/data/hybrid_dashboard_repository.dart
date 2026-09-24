@@ -36,20 +36,26 @@ class HybridDashboardRepository implements DashboardRepository {
             'to': previousWeekEnd,
           },
         ),
-        client.dio.get(
+      ]);
+
+      final allTime = _map(responses[0].data);
+      final week = _map(responses[1].data);
+      final previousWeek = _map(responses[2].data);
+
+      List<Map<String, dynamic>> invoices = const [];
+      try {
+        final response = await client.dio.get(
           '/invoices/',
           queryParameters: {
             'status': 'confirmed',
             'ordering': '-created_at',
             'page_size': 100,
           },
-        ),
-      ]);
-
-      final allTime = _map(responses[0].data);
-      final week = _map(responses[1].data);
-      final previousWeek = _map(responses[2].data);
-      final invoices = _invoiceRows(responses[3].data);
+        );
+        invoices = _invoiceRows(response.data);
+      } on DioException {
+        // Recent invoices are optional; dashboard analytics remain authoritative.
+      }
 
       final weeklyRevenue = _weeklyRevenue(
         week['sales'] as Map<String, dynamic>? ?? const {},
