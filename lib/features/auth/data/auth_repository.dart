@@ -3,11 +3,15 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/storage/app_database.dart';
 import '../domain/entities/auth_user.dart';
 import '../domain/repositories/authentication_repository.dart';
 
 class AuthRepository implements AuthenticationRepository {
+  static const offlineSessionLifetime = Duration(hours: 24);
+
   final ApiClient client;
+  Future<void>? _refreshOperation;
 
   const AuthRepository(this.client);
 
@@ -54,19 +58,35 @@ class AuthRepository implements AuthenticationRepository {
     final response = await client.dio.get('/auth/me/');
     final data = Map<String, dynamic>.from(response.data as Map);
     final user = AuthUser.fromJson(data);
+    await AppDatabase.prepareForUser(user.id);
     await client.saveCurrentUserId(user.id);
     await cacheUser(user);
+    await client.saveSessionValidatedAt(DateTime.now().toUtc());
     return user;
   }
 
   @override
-  Future<void> refresh() async {
+  Future<void> refresh() {
+    final inFlight = _refreshOperation;
+    if (inFlight != null) return inFlight;
+
+    final operation = _refreshAccess();
+    _refreshOperation = operation;
+    return operation.whenComplete(() {
+      if (identical(_refreshOperation, operation)) {
+        _refreshOperation = null;
+      }
+    });
+  }
+
+  Future<void> _refreshAccess() async {
     final csrf = await client.csrfToken();
     final response = await client.dio.post(
       '/auth/refresh/',
       options: Options(headers: {'X-CSRFToken': csrf}),
     );
     client.setAccessToken(response.data['access'] as String);
+    await client.saveSessionValidatedAt(DateTime.now().toUtc());
   }
 
   @override
@@ -86,9 +106,19 @@ class AuthRepository implements AuthenticationRepository {
   Future<AuthUser?> getCachedUser() async {
     final raw = await client.getCachedUserJson();
     if (raw == null || raw.isEmpty) return null;
+
+    final validatedAt = await client.sessionValidatedAt;
+    if (validatedAt == null ||
+        DateTime.now().toUtc().difference(validatedAt.toUtc()) >
+            offlineSessionLifetime) {
+      return null;
+    }
+
     try {
       final decoded = jsonDecode(raw);
-      return AuthUser.fromJson(Map<String, dynamic>.from(decoded as Map));
+      final user = AuthUser.fromJson(Map<String, dynamic>.from(decoded as Map));
+      await AppDatabase.prepareForUser(user.id);
+      return user;
     } catch (_) {
       await client.clearSession();
       return null;
