@@ -289,19 +289,20 @@ class _CustomersPageState
               );
             }
           },
-          itemBuilder: (_) => [
-            if (widget.user.hasPermission('customers.change_customer'))
-              const PopupMenuItem(
-                value: 'edit',
-                child: Text('Edit'),
-              ),
-            if (widget.user.hasPermission('customers.delete_customer'))
-              const PopupMenuItem(
-                value: 'delete',
-                child: Text('Delete'),
-              ),
-          ],
-        ),
+                itemBuilder: (_) => [
+                  if (widget.user.hasPermission('customers.change_customer'))
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit'),
+                    ),
+                  if (widget.user.hasPermission('customers.delete_customer'))
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete'),
+                    ),
+                ],
+              )
+            : null,
         onTap: () =>
             _openCustomer(customer),
       ),
