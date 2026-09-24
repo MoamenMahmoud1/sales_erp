@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../auth/domain/entities/auth_user.dart';
 import '../data/local_customer_repository.dart';
 import '../domain/customer.dart';
 import '../domain/customer_repository.dart';
@@ -7,10 +8,12 @@ import 'customer_details_page.dart';
 import 'customer_form_page.dart';
 
 class CustomersPage extends StatefulWidget {
+  final AuthUser user;
   final CustomerRepository? repository;
 
   const CustomersPage({
     super.key,
+    required this.user,
     this.repository,
   });
 
@@ -282,15 +285,17 @@ class _CustomersPageState
               );
             }
           },
-          itemBuilder: (_) => const [
-            PopupMenuItem(
-              value: 'edit',
-              child: Text('Edit'),
-            ),
-            PopupMenuItem(
-              value: 'delete',
-              child: Text('Delete'),
-            ),
+          itemBuilder: (_) => [
+            if (widget.user.hasPermission('customers.change_customer'))
+              const PopupMenuItem(
+                value: 'edit',
+                child: Text('Edit'),
+              ),
+            if (widget.user.hasPermission('customers.delete_customer'))
+              const PopupMenuItem(
+                value: 'delete',
+                child: Text('Delete'),
+              ),
           ],
         ),
         onTap: () =>
@@ -447,15 +452,14 @@ class _CustomersPageState
           ),
         ],
       ),
-      floatingActionButton:
-          FloatingActionButton.extended(
-        onPressed:
-            _openCustomerForm,
+      floatingActionButton: widget.user.hasPermission('customers.add_customer')
+          ? FloatingActionButton.extended(
+        onPressed: _openCustomerForm,
         icon:
             const Icon(Icons.person_add),
-        label:
-            const Text('Customer'),
-      ),
+        label: const Text('Customer'),
+      )
+          : null,
     );
   }
 }
