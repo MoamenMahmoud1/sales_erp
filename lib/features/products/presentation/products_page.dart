@@ -166,7 +166,11 @@ class _ProductsPageState extends State<ProductsPage> {
           padding: const EdgeInsets.only(top: 4),
           child: Text(subtitle),
         ),
-        trailing: PopupMenuButton<String>(
+        trailing: (
+          widget.user.hasPermission('products.change_product') ||
+          widget.user.hasPermission('products.delete_product')
+        )
+            ? PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'edit') {
               _openProductForm(product: product);
