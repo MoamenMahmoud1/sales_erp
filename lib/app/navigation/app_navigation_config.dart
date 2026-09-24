@@ -69,7 +69,7 @@ class AppNavigationConfig {
       icon: Icons.people_outline_rounded,
       selectedIcon: Icons.people_rounded,
       label: 'Customers',
-      permissionPrefixes: ['customers.'],
+      permissionPrefixes: ['customers.view_customer'],
     ),
     AppNavigationDestination(
       id: AppNavigationId.more,
