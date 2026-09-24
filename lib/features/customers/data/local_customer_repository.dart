@@ -99,11 +99,23 @@ class LocalCustomerRepository implements CustomerRepository {
     await database.transaction((transaction) async {
       for (final customer in customers) {
         final row = customer.toMap();
+        final existing = await transaction.query(
+          'customers',
+          columns: ['payment_type'],
+          where: 'id = ?',
+          whereArgs: [customer.id],
+          limit: 1,
+        );
         final values = {
           'name': row['name'],
           'phone': row['phone'],
           'address': row['address'],
-          'payment_type': row['payment_type'],
+          // The current API does not expose payment_type, so preserve the
+          // existing local value instead of resetting it during API refresh.
+          'payment_type':
+              existing.isNotEmpty
+                  ? existing.first['payment_type']
+                  : row['payment_type'],
         };
         final updated = await transaction.update(
           'customers',
