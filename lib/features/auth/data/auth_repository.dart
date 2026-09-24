@@ -13,7 +13,7 @@ class AuthRepository implements AuthenticationRepository {
 
   @override
   Future<bool> hasActiveSession() {
-    return client.hasAccessToken();
+    return client.hasActiveSessionCookie();
   }
 
   @override
@@ -27,7 +27,7 @@ class AuthRepository implements AuthenticationRepository {
       data: {'identifier': identifier, 'password': password},
       options: Options(headers: {'X-CSRFToken': csrf}),
     );
-    await client.saveAccessToken(response.data['access'] as String);
+    client.setAccessToken(response.data['access'] as String);
     return fetchCurrentUser();
   }
 
@@ -66,7 +66,7 @@ class AuthRepository implements AuthenticationRepository {
       '/auth/refresh/',
       options: Options(headers: {'X-CSRFToken': csrf}),
     );
-    await client.saveAccessToken(response.data['access'] as String);
+    client.setAccessToken(response.data['access'] as String);
   }
 
   @override
