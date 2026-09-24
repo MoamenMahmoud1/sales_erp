@@ -148,13 +148,15 @@ class SettingsPage extends StatelessWidget {
                   subtitle: 'Require biometrics to unlock',
                   onTap: onLock,
                 ),
-                const Divider(height: 24),
-                _ActionRow(
-                  icon: Icons.restart_alt_rounded,
-                  title: 'Reset device data',
-                  subtitle: resetSubtitle,
-                  onTap: onReset,
-                ),
+                if (onReset != null) ...[
+                  const Divider(height: 24),
+                  _ActionRow(
+                    icon: Icons.restart_alt_rounded,
+                    title: 'Reset device data',
+                    subtitle: resetSubtitle,
+                    onTap: onReset,
+                  ),
+                ],
               ],
             ),
           ),
