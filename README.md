@@ -18,7 +18,7 @@ The app is the mobile counterpart to the `erp-api` backend and shares the same b
 
 ## Architecture
 
-The app uses a feature-based structure:
+The app uses a feature-based architecture:
 
 ```text
 lib/
@@ -40,11 +40,18 @@ Retryable write operations are stored in the local outbox before the network req
 
 ## API configuration
 
-The production API URL is provided at build time with Dart defines rather than a tracked environment asset:
+The production API URL is configured at build time. `.env` is a local configuration convenience only; Flutter does not load dotenv files automatically. Use the included helper script to read `.env` and pass `API_BASE_URL` as a Dart compile-time define:
 
 ```bash
 flutter run --dart-define=API_BASE_URL=https://api.example.com/api/v1
-flutter build apk --release --dart-define=API_BASE_URL=https://api.example.com/api/v1
+flutter build apk --release --flavor full --dart-define=API_BASE_URL=https://api.example.com/api/v1
+
+Or use the local `.env` helper:
+
+```bash
+cp .env.example .env
+bash tool/build_release_from_env.sh
+```
 ```
 
 Debug builds use the local development API. Release builds require an explicit `API_BASE_URL`.
