@@ -13,7 +13,7 @@ class AuthRepository implements AuthenticationRepository {
   final ApiClient client;
   Future<void>? _refreshOperation;
 
-  const AuthRepository(this.client);
+  AuthRepository(this.client);
 
   @override
   Future<bool> hasActiveSession() {
