@@ -9,7 +9,7 @@ class HybridDashboardRepository implements DashboardRepository {
   final ApiClient client;
   final LocalDashboardRepository local;
 
-  const HybridDashboardRepository(
+  HybridDashboardRepository(
     this.client, {
     this.local = const LocalDashboardRepository(),
   });
@@ -207,10 +207,6 @@ class HybridDashboardRepository implements DashboardRepository {
   int _int(dynamic value) => _number(value).toInt();
 
   String _date(DateTime value) {
-    return value.year.toString().padLeft(4, '0') +
-        '-' +
-        value.month.toString().padLeft(2, '0') +
-        '-' +
-        value.day.toString().padLeft(2, '0');
+    return `${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}`;
   }
 }
