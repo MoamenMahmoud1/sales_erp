@@ -32,6 +32,7 @@ class LocalPaymentRepository implements PaymentRepository {
     }
 
     final database = await _database;
+    amount = _money(amount);
 
     final now = DateTime.now().toUtc().toIso8601String();
     final status =
@@ -55,7 +56,7 @@ class LocalPaymentRepository implements PaymentRepository {
         throw StateError('Invoice does not belong to this customer.');
       }
 
-      final total = (invoice.first['total'] as num).toDouble();
+      final total = _money((invoice.first['total'] as num).toDouble());
       final totals = await transaction.rawQuery('''
         SELECT
           COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) AS paid,
@@ -67,7 +68,7 @@ class LocalPaymentRepository implements PaymentRepository {
       final paid = (totals.first['paid'] as num?)?.toDouble() ?? 0;
       final pending = (totals.first['pending'] as num?)?.toDouble() ?? 0;
       final alreadyAllocated = paid + pending;
-      if (amount > total - alreadyAllocated) {
+      if (_money(amount + alreadyAllocated) > total) {
         throw StateError('Payment exceeds the remaining invoice balance.');
       }
 
@@ -151,7 +152,7 @@ class LocalPaymentRepository implements PaymentRepository {
 
       final payment = pendingRows.single;
       final invoiceId = (payment['invoice_id'] as num).toInt();
-      final amount = (payment['amount'] as num).toDouble();
+      final amount = _money((payment['amount'] as num).toDouble());
       final invoice = await transaction.query(
         'invoices',
         columns: ['total'],
@@ -163,14 +164,14 @@ class LocalPaymentRepository implements PaymentRepository {
         throw StateError('Invoice not found.');
       }
 
-      final total = (invoice.first['total'] as num).toDouble();
+      final total = _money((invoice.first['total'] as num).toDouble());
       final paidRows = await transaction.rawQuery('''
         SELECT COALESCE(SUM(amount), 0) AS paid
         FROM payments
         WHERE invoice_id = ? AND status = 'paid'
       ''', [invoiceId]);
       final paid = (paidRows.first['paid'] as num?)?.toDouble() ?? 0;
-      if (paid + amount > total) {
+      if (_money(paid + amount) > total) {
         throw StateError(
           'Transfer cannot be confirmed because it exceeds the invoice balance.',
         );
@@ -368,6 +369,8 @@ class LocalPaymentRepository implements PaymentRepository {
 
     return (result.first['total'] as num).toDouble();
   }
+
+  double _money(double value) => (value * 100).round() / 100;
 
   String? _normalizeReference(String? reference) {
     final value = reference?.trim();
