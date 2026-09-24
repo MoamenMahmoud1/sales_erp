@@ -10,9 +10,9 @@ import 'local_customer_repository.dart';
 ///
 /// - القراءة: بنجرب الـ API الأول؛ لو السيرفر ملوش دعوة
 ///   (networking error) بنقع على القاعدة المحلية.
-/// - الكتابة: بتتسجل محليًا أولًا وبعدين بنحاول نبعت للـ API.
-///   لو السيرفر مش متاح وقت الكتابة تبقى البيانات محفوظة محليًا
-///   وممكن بعدها تتزامن.
+/// - الكتابة: الـAPI هو المصدر النهائي. بعد النجاح نحدّث الـlocal cache.
+///   عمليات الكتابة الـoffline لا تُخترع محليًا هنا؛ الـcommands القابلة
+///   لإعادة المحاولة تستخدم الـdurable outbox في طبقتها الخاصة.
 class HybridCustomerRepository implements CustomerRepository {
   final ApiClient client;
   final LocalCustomerRepository local;
@@ -32,7 +32,9 @@ class HybridCustomerRepository implements CustomerRepository {
   @override
   Future<List<Customer>> getCustomers() async {
     try {
-      return await _remote.getCustomers();
+      final customers = await _remote.getCustomers();
+      await local.cacheCustomers(customers);
+      return customers;
     } catch (error) {
       if (_isOffline(error)) return local.getCustomers();
       rethrow;
@@ -42,7 +44,9 @@ class HybridCustomerRepository implements CustomerRepository {
   @override
   Future<Customer?> getCustomerById(int customerId) async {
     try {
-      return await _remote.getCustomerById(customerId);
+      final customer = await _remote.getCustomerById(customerId);
+      if (customer != null) await local.cacheCustomer(customer);
+      return customer;
     } catch (error) {
       if (_isOffline(error)) return local.getCustomerById(customerId);
       rethrow;
@@ -51,41 +55,31 @@ class HybridCustomerRepository implements CustomerRepository {
 
   @override
   Future<int> createCustomer(Customer customer) async {
-    final localId = await local.createCustomer(customer);
-    try {
-      await _remote.createCustomer(customer);
-    } catch (_) {
-      // سيرفر مش متاح → محفوظة محليًا على الأقل.
-    }
-    return localId;
+    final remoteId = await _remote.createCustomer(customer);
+    await local.cacheCustomer(customer.copyWith(id: remoteId));
+    return remoteId;
   }
 
   @override
   Future<int> updateCustomer(Customer customer) async {
-    final updated = await local.updateCustomer(customer);
-    try {
-      await _remote.updateCustomer(customer);
-    } catch (_) {
-      // مغفورة محليًا بنجاح.
-    }
-    return updated;
+    await _remote.updateCustomer(customer);
+    await local.cacheCustomer(customer);
+    return customer.id;
   }
 
   @override
   Future<int> deleteCustomer(int customerId) async {
-    final deleted = await local.deleteCustomer(customerId);
-    try {
-      await _remote.deleteCustomer(customerId);
-    } catch (_) {
-      // اتشالت محليًا؛ هتتتابع للـ API بعدين.
-    }
-    return deleted;
+    await _remote.deleteCustomer(customerId);
+    await local.deleteCustomer(customerId);
+    return customerId;
   }
 
   @override
   Future<List<Customer>> searchCustomers(String query) async {
     try {
-      return await _remote.searchCustomers(query);
+      final customers = await _remote.searchCustomers(query);
+      await local.cacheCustomers(customers);
+      return customers;
     } catch (error) {
       if (_isOffline(error)) return local.searchCustomers(query);
       rethrow;
