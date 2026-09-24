@@ -14,6 +14,7 @@ import '../../features/notifications/domain/repositories/push_notification_repos
 import '../../features/products/data/hybrid_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
 import '../../features/representative/data/dio_representative_sale_repository.dart';
+import '../../features/sales/data/hybrid_invoice_repository.dart';
 import '../../features/representative/data/dio_representative_vehicle_repository.dart';
 import '../../features/representative/domain/repositories/representative_sale_repository.dart';
 import '../../features/representative/domain/repositories/representative_vehicle_repository.dart';
@@ -33,6 +34,7 @@ class AppServices {
   late final ApiClient apiClient;
   late final AuthenticationRepository authRepository;
   late final RepresentativeVehicleRepository representativeVehicleRepository;
+  late final HybridInvoiceRepository invoiceRepository;
   late final RepresentativeSaleRepository representativeSaleRepository;
   late final NotificationRepository notificationRepository;
   late final ApprovalRepository approvalRepository;
@@ -52,6 +54,7 @@ class AppServices {
     dashboardRepository = HybridDashboardRepository(apiClient);
     authRepository = AuthRepository(apiClient);
     representativeVehicleRepository = DioRepresentativeVehicleRepository(apiClient);
+    invoiceRepository = HybridInvoiceRepository(apiClient);
     representativeSaleRepository = DioRepresentativeSaleRepository(apiClient);
     notificationRepository = DioNotificationRepository(apiClient);
     approvalRepository = DioApprovalRepository(apiClient);
