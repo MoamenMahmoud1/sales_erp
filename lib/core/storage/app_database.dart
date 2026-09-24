@@ -17,6 +17,7 @@ class AppDatabase {
   static const databaseName = 'sales_erp.db';
   static const version = 18;
   static const _keyName = 'sales_erp_sqlcipher_key_v1';
+  static const _ownerUserIdKey = 'local_business_data_owner_v1';
 
   static cipher.Database? _database;
   static Future<cipher.Database>? _opening;
@@ -233,6 +234,35 @@ class AppDatabase {
 
   static Future<void> cleanupExpiredInvoiceChanges() async {
     await _cleanupExpiredInvoiceChanges(await database);
+  }
+
+  static Future<void> prepareForUser(int userId) async {
+    if (userId <= 0) {
+      throw ArgumentError('A valid user is required to prepare local data.');
+    }
+
+    final currentOwner = await _secureStorage.read(key: _ownerUserIdKey);
+    if (currentOwner == userId.toString()) return;
+
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final table in const [
+        'invoice_revision_items',
+        'invoice_revisions',
+        'invoice_changes',
+        'invoice_coupons',
+        'invoice_items',
+        'payments',
+        'invoices',
+        'customer_coupons',
+        'customers',
+        'products',
+        'coupons',
+      ]) {
+        await txn.delete(table);
+      }
+    });
+    await _secureStorage.write(key: _ownerUserIdKey, value: userId.toString());
   }
 
   static Future<void> resetDatabase() async {
