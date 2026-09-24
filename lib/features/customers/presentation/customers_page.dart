@@ -273,8 +273,11 @@ class _CustomersPageState
             ),
           ],
         ),
-        trailing:
-            PopupMenuButton<String>(
+        trailing: (
+          widget.user.hasPermission('customers.change_customer') ||
+          widget.user.hasPermission('customers.delete_customer')
+        )
+            ? PopupMenuButton<String>(
           onSelected: (value) {
             if (value == 'edit') {
               _openCustomerForm(
