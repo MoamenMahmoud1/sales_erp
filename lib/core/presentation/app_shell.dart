@@ -127,11 +127,17 @@ class _AppShellState extends State<AppShell> {
       ),
       _NavigationEntry(
         destination: productsDestination,
-        page: ProductsPage(user: widget.user),
+        page: ProductsPage(
+          user: widget.user,
+          repository: AppServices.instance.productRepository,
+        ),
       ),
       _NavigationEntry(
         destination: customersDestination,
-        page: CustomersPage(user: widget.user),
+        page: CustomersPage(
+          user: widget.user,
+          repository: AppServices.instance.customerRepository,
+        ),
       ),
       _NavigationEntry(
         destination: moreDestination,
