@@ -17,7 +17,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: "3.44.0"
           cache: true
 
       - name: Flutter version
@@ -49,7 +49,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          keytool -genkeypair -v             -storetype JKS             -keystore "$RUNNER_TEMP/ci-release.jks"             -storepass "$CI_KEYSTORE_PASSWORD"             -keypass "$CI_KEYSTORE_PASSWORD"             -alias ci-release             -keyalg RSA             -keysize 2048             -validity 1             -dname "CN=CI Release,O=Sales ERP,C=EG"
+          if [[ -z "${CI_KEYSTORE_PASSWORD:-}" ]]; then
+            CI_KEYSTORE_PASSWORD="$(openssl rand -hex 24)"
+            echo "CI_KEYSTORE_PASSWORD=$CI_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          fi
+          keytool -genkeypair -v \
+            -storetype JKS \
+            -keystore "$RUNNER_TEMP/ci-release.jks" \
+            -storepass "$CI_KEYSTORE_PASSWORD" \
+            -keypass "$CI_KEYSTORE_PASSWORD" \
+            -alias ci-release \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 1 \
+            -dname "CN=CI Release,O=Sales ERP,C=EG"
           {
             echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/ci-release.jks"
             echo "ANDROID_KEYSTORE_PASSWORD=$CI_KEYSTORE_PASSWORD"
@@ -57,7 +70,6 @@ jobs:
             echo "ANDROID_KEY_PASSWORD=$CI_KEYSTORE_PASSWORD"
           } >> "$GITHUB_ENV"
         env:
-          CI_KEYSTORE_PASSWORD: ci-only-release-password
 
       - name: Build release APK
         run: flutter build apk --release --flavor full --dart-define=API_BASE_URL=https://example.invalid/api/v1
