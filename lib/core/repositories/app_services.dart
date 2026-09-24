@@ -3,7 +3,7 @@ import '../../features/approvals/data/dio_approval_repository.dart';
 import '../../features/approvals/domain/repositories/approval_repository.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/domain/repositories/authentication_repository.dart';
-import '../../features/customers/data/local_customer_repository.dart';
+import '../../features/customers/data/hybrid_customer_repository.dart';
 import '../../features/customers/domain/customer_repository.dart';
 import '../../features/dashboard/data/local_dashboard_repository.dart';
 import '../../features/dashboard/domain/dashboard_repository.dart';
@@ -11,7 +11,7 @@ import '../../features/notifications/data/dio_notification_repository.dart';
 import '../../features/notifications/data/firebase_push_notification_repository.dart';
 import '../../features/notifications/domain/repositories/notification_repository.dart';
 import '../../features/notifications/domain/repositories/push_notification_repository.dart';
-import '../../features/products/data/local_product_repository.dart';
+import '../../features/products/data/hybrid_product_repository.dart';
 import '../../features/products/domain/product_repository.dart';
 import '../../features/representative/data/dio_representative_sale_repository.dart';
 import '../../features/representative/data/dio_representative_vehicle_repository.dart';
@@ -26,8 +26,8 @@ class AppServices {
 
   final DataModeController dataMode = DataModeController();
 
-  final CustomerRepository customerRepository = LocalCustomerRepository();
-  final ProductRepository productRepository = LocalProductRepository();
+  late final CustomerRepository customerRepository;
+  late final ProductRepository productRepository;
   final DashboardRepository dashboardRepository = LocalDashboardRepository();
 
   late final ApiClient apiClient;
@@ -47,6 +47,8 @@ class AppServices {
 
     await dataMode.load();
     apiClient = await ApiClient.create();
+    customerRepository = HybridCustomerRepository(apiClient);
+    productRepository = HybridProductRepository(apiClient);
     authRepository = AuthRepository(apiClient);
     representativeVehicleRepository = DioRepresentativeVehicleRepository(apiClient);
     representativeSaleRepository = DioRepresentativeSaleRepository(apiClient);
