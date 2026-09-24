@@ -140,6 +140,7 @@ class _CustomersPageState
       MaterialPageRoute(
         builder: (_) => CustomerDetailsPage(
           customer: customer,
+          user: widget.user,
         ),
       ),
     );
